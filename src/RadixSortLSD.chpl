@@ -180,15 +180,15 @@ module RadixSortLSD
             return ranks;
         }
 	
-	if (nGPUs > 0) {
-		return(cubRadixSortLSD_ranks(a));	
-	} else {
-        	var kr: [aD] (t,int) = [(key,rank) in zip(a,aD)] (key,rank);
-        	var (nBits, negs) = getBitWidth(a);
-        	radixSortLSDCore(kr, nBits, negs, new KeysRanksComparator());
-        	var ranks: [aD] int = [(_, rank) in kr] rank;
-        	return ranks;
-	}
+        if (nGPUs > 0) {
+            return cubRadixSortLSD_ranks(a);	
+        } else {
+            var kr: [aD] (t,int) = [(key,rank) in zip(a,aD)] (key,rank);
+            var (nBits, negs) = getBitWidth(a);
+            radixSortLSDCore(kr, nBits, negs, new KeysRanksComparator());
+            var ranks: [aD] int = [(_, rank) in kr] rank;
+            return ranks;
+        }
     }
 
     /* Radix Sort Least Significant Digit

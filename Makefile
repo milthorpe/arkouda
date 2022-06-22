@@ -286,7 +286,7 @@ CUDA_OBJECTS=$(CUDA_SOURCES:.cu=.cu.o)
 	nvcc -c $< -o $@
 
 ifndef CHPL_GPU_HOME
-$(error Chapel_GPU_HOME not defined)
+$(error CHPL_GPU_HOME not defined)
 endif
 
 
