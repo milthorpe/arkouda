@@ -1,6 +1,4 @@
-module CUBRadixSort {	
-    use AryUtil;
-    use BlockDist;
+module CUBRadixSort {
     use GPUIterator;
     use GPUAPI;
     use CTypes;
@@ -46,7 +44,7 @@ module CUBRadixSort {
                 devRanksIn.toDevice();
                 cubSortPairs(devA.dPtr(), devAOut.dPtr(), devRanksIn.dPtr(), devRanksOut.dPtr(), N: c_size_t);
                 DeviceSynchronize();
-                devRanksOut.fromDevice(); // don't care about aOut
+                devRanksOut.fromDevice(); // copy back indices; don't care about aOut
             }
         }
         // get local domain's indices
@@ -62,5 +60,3 @@ module CUBRadixSort {
         return ranksOut;
     }
 }
-
-
