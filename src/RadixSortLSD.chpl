@@ -21,6 +21,8 @@ module RadixSortLSD
     use Reflection;
     use Logging;
     use ServerConfig;
+    use GPUIterator;
+    use CUBRadixSort;
 
     private config const logLevel = ServerConfig.logLevel;
     const rsLogger = new Logger(logLevel);
@@ -177,12 +179,16 @@ module RadixSortLSD
             var ranks: [aD] int = [i in aD] i;
             return ranks;
         }
-
-        var kr: [aD] (t,int) = [(key,rank) in zip(a,aD)] (key,rank);
-        var (nBits, negs) = getBitWidth(a);
-        radixSortLSDCore(kr, nBits, negs, new KeysRanksComparator());
-        var ranks: [aD] int = [(_, rank) in kr] rank;
-        return ranks;
+	
+	if (nGPUs > 0) {
+		return(cubRadixSortLSD_ranks(a));	
+	} else {
+        	var kr: [aD] (t,int) = [(key,rank) in zip(a,aD)] (key,rank);
+        	var (nBits, negs) = getBitWidth(a);
+        	radixSortLSDCore(kr, nBits, negs, new KeysRanksComparator());
+        	var ranks: [aD] int = [(_, rank) in kr] rank;
+        	return ranks;
+	}
     }
 
     /* Radix Sort Least Significant Digit
