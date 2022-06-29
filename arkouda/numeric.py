@@ -522,7 +522,7 @@ def where(
             dt = dtA
         # Cannot safely cast
         else:
-            raise TypeError(f"Cannot cast between scalars {A} and {B} to supported dtype")
+            raise TypeError(f"Cannot cast between scalars {str(A)} and {str(B)} to supported dtype")
         repMsg = generic_msg(
             cmd="efunc3ss", args="{} {} {} {} {} {}".format("where", condition.name, dt, A, dt, B)
         )
@@ -581,7 +581,7 @@ def histogram(pda: pdarray, bins: int_scalars = 10) -> Tuple[np.ndarray, pdarray
     """
     if bins < 1:
         raise ValueError("bins must be 1 or greater")
-    b = np.linspace(pda.min(), pda.max(), bins + 1)[:-1]
+    b = np.linspace(pda.min(), pda.max(), bins + 1)[:-1]  # type: ignore
     repMsg = generic_msg(cmd="histogram", args="{} {}".format(pda.name, bins))
     return b, create_pdarray(type_cast(str, repMsg))
 
