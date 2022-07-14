@@ -2,6 +2,7 @@ module CUBRadixSort {
     use GPUIterator;
     use GPUAPI;
     use CTypes;
+    use KWayMerge;
 
     config param verbose = false;
 
@@ -11,18 +12,20 @@ module CUBRadixSort {
        radix sort a block distributed array
        returning a permutation vector as a block distributed array */
     proc cubRadixSortLSD_ranks(a:[?aD] ?t): [aD] int {
-	if (!disableMultiGPUs) {
-	  writeln("Multiple GPUs are currently not supported, found ", nGPUs, " GPUs!");
-	  exit(1);
-	}
-/*
         var nGPUs: int(32);
         GetDeviceCount(nGPUs);
+        /*
+        if (!disableMultiGPUs) {
+         writeln("Multiple GPUs are currently not supported, found ", nGPUs, " GPUs!");
+         exit(1);
+       }
+       */
+        /*
         for i in 0..<nGPUs {
             // TODO GA Tech API's chunk calculation is uneven
-            writeln("chunk ",i," is ",computeChunk(tD.dim(0), i, nGPUs));
+            writeln("chunk ",i," is ",computeChunk(aD.dim(0), i, nGPUs));
         }
-*/
+        */
         var ranksIn: [aD] int = [rank in aD] rank;
         var ranksOut: [aD] int;
         var aOut: [aD] t;
@@ -34,7 +37,7 @@ module CUBRadixSort {
                     var device, count: int(32);
                     GetDevice(device);
                     GetDeviceCount(count);
-                    writeln("In countDigitsCallback, launching the CUDA kernel with a range of ", lo, "..", hi, " (Size: ", N, "), GPU", device, " of ", count, " @", here);
+                    //writeln("In countDigitsCallback, launching the CUDA kernel with a range of ", lo, "..", hi, " (Size: ", N, "), GPU", device, " of ", count, " @", here);
                 }
                 var devA = new GPUArray(a.localSlice(lo .. hi));
                 var devAOut = new GPUArray(aOut.localSlice(lo .. hi));
@@ -44,7 +47,10 @@ module CUBRadixSort {
                 devRanksIn.toDevice();
                 cubSortPairs(devA.dPtr(), devAOut.dPtr(), devRanksIn.dPtr(), devRanksOut.dPtr(), N: c_size_t);
                 DeviceSynchronize();
-                devRanksOut.fromDevice(); // copy back indices; don't care about aOut
+                if !disableMultiGPUs || nGPUs > 1 {
+                    devAOut.fromDevice();
+		}
+                devRanksOut.fromDevice();
             }
         }
         // get local domain's indices
@@ -56,7 +62,17 @@ module CUBRadixSort {
             writeln("Should not reach this point!");
             exit(1);
         }
-        // TODO: work out how to get splits of ranks array and do a k-way merge in Chapel
-        return ranksOut;
+
+        if disableMultiGPUs || nGPUs == 1 {
+            // no need to merge
+            return ranksOut;
+        }
+
+        // merge sorted chunks
+        var kr: [aD] (t,int) = [(key,rank) in zip(aOut,ranksOut)] (key,rank);
+        var krOut: [aD] (t,int);
+        mergeSortedRanks(krOut, kr, nGPUs);
+        var ranks: [aD] int = [(_, rank) in krOut] rank;
+        return ranks;
     }
 }
