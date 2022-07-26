@@ -125,22 +125,22 @@ module KWayMerge {
     var winner = buildTree(0, 1);
 
     var i:int = 0;
-    while (comparator.key(winner(0)) != max(real)) {
-    //writeln("winner(", i, ") = ", winner); 
-    dst[i] = winner(0);
-    i = i+1;
+    while winner(0) != comparator.dummy {
+      //writeln("winner(", i, ") = ", winner); 
+      dst[i] = winner(0);
+      i = i+1;
 
-    cNextIdx[winner(1)] += 1;
-    var newVal: t;
-    if (cNextIdx[winner(1)] > cLastIdx[winner(1)]) {
-      newVal = comparator.dummy;
-    } else {
-      newVal = src[cNextIdx[winner(1)]];
-    }
-    const newContestant = (newVal, winner(1));
+      cNextIdx[winner(1)] += 1;
+      var newVal: t;
+      if (cNextIdx[winner(1)] > cLastIdx[winner(1)]) {
+        newVal = comparator.dummy;
+      } else {
+        newVal = src[cNextIdx[winner(1)]];
+      }
+      const newContestant = (newVal, winner(1));
 
-    replayGames((winner(1)+treeSize)/2, newContestant);
-    winner = tree[0];
+      replayGames((winner(1)+treeSize)/2, newContestant);
+      winner = tree[0];
     }
   }
 }
