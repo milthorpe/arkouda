@@ -11,16 +11,27 @@ module CUBRadixSort {
     extern proc cubSortPairs_float(keys_in: c_void_ptr, keys_out: c_void_ptr, values_in: c_void_ptr, values_out: c_void_ptr, N: c_size_t);
     extern proc cubSortPairs_double(keys_in: c_void_ptr, keys_out: c_void_ptr, values_in: c_void_ptr, values_out: c_void_ptr, N: c_size_t);
 
-    proc cubSortPairs(keys_in: ?t, keys_out: t, values_in: c_void_ptr, values_out: c_void_ptr, N: c_size_t) {
+    proc cubSortPairs(a:[?aD] ?t, aOut: [aD] t, ranksIn: [aD] int, ranksOut: [aD] int, N: int, lo: int, hi: int) {
+        var devA = new GPUArray(a.localSlice(lo .. hi));
+        var devAOut = new GPUArray(aOut.localSlice(lo .. hi));
+        var devRanksIn = new GPUArray(ranksIn.localSlice(lo .. hi));
+        var devRanksOut = new GPUArray(ranksOut.localSlice(lo .. hi));
+        devA.toDevice();
+        devRanksIn.toDevice();
         if t == int(32) {
-            cubSortPairs_int32(keys_in, keys_out, values_in, values_out, N);
+            cubSortPairs_int32(devA.dPtr(), devAOut.dPtr(), devRanksIn.dPtr(), devRanksOut.dPtr(), N: c_size_t);
         } else if t == int(64) {
-            cubSortPairs_int64(keys_in, keys_out, values_in, values_out, N);
+            cubSortPairs_int64(devA.dPtr(), devAOut.dPtr(), devRanksIn.dPtr(), devRanksOut.dPtr(), N: c_size_t);
         } else if t == real(32) {
-            cubSortPairs_float(keys_in, keys_out, values_in, values_out, N);
+            cubSortPairs_float(devA.dPtr(), devAOut.dPtr(), devRanksIn.dPtr(), devRanksOut.dPtr(), N: c_size_t);
         } else if t == real(64) {
-            cubSortPairs_double(keys_in, keys_out, values_in, values_out, N);
+            cubSortPairs_double(devA.dPtr(), devAOut.dPtr(), devRanksIn.dPtr(), devRanksOut.dPtr(), N: c_size_t);
         }
+        DeviceSynchronize();
+        if !disableMultiGPUs || nGPUs > 1 {
+            devAOut.fromDevice();
+        }
+        devRanksOut.fromDevice();
     }
 
     /* Radix Sort Least Significant Digit
@@ -55,18 +66,7 @@ module CUBRadixSort {
                     GetDeviceCount(count);
                     //writeln("In countDigitsCallback, launching the CUDA kernel with a range of ", lo, "..", hi, " (Size: ", N, "), GPU", device, " of ", count, " @", here);
                 }
-                var devA = new GPUArray(a.localSlice(lo .. hi));
-                var devAOut = new GPUArray(aOut.localSlice(lo .. hi));
-                var devRanksIn = new GPUArray(ranksIn.localSlice(lo .. hi));
-                var devRanksOut = new GPUArray(ranksOut.localSlice(lo .. hi));
-                devA.toDevice();
-                devRanksIn.toDevice();
-                cubSortPairs(devA.dPtr(), devAOut.dPtr(), devRanksIn.dPtr(), devRanksOut.dPtr(), N: c_size_t);
-                DeviceSynchronize();
-                if !disableMultiGPUs || nGPUs > 1 {
-                    devAOut.fromDevice();
-                }
-                devRanksOut.fromDevice();
+                cubSortPairs(a, aOut, ranksIn, ranksOut, N, lo, hi);
             }
         }
         // get local domain's indices
