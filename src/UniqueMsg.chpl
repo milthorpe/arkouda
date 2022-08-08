@@ -22,7 +22,7 @@ module UniqueMsg
 
     use MultiTypeSymbolTable;
     use MultiTypeSymEntry;
-    use SegmentedArray;
+    use SegmentedString;
     use ServerErrorStrings;
 
     use RadixSortLSD;
@@ -278,8 +278,6 @@ module UniqueMsg
       return hashes;
     }
 
-    proc registerMe() {
-      use CommandMap;
-      registerFunction("unique", uniqueMsg, getModuleName());
-    }
+    use CommandMap;
+    registerFunction("unique", uniqueMsg, getModuleName());
 }

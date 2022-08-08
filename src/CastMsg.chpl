@@ -2,7 +2,7 @@ module CastMsg {
   use MultiTypeSymbolTable;
   use MultiTypeSymEntry;
   use Reflection;
-  use SegmentedArray;
+  use SegmentedString;
   use ServerErrors;
   use Logging;
   use Message;
@@ -156,8 +156,6 @@ module CastMsg {
     }
   }
 
-  proc registerMe() {
-    use CommandMap;
-    registerFunction("cast", castMsg, getModuleName());
-  }
+  use CommandMap;
+  registerFunction("cast", castMsg, getModuleName());
 }

@@ -4,7 +4,7 @@ module SegmentedMsg {
   use ServerErrors;
   use Logging;
   use Message;
-  use SegmentedArray;
+  use SegmentedString;
   use ServerErrorStrings;
   use ServerConfig;
   use MultiTypeSymbolTable;
@@ -346,31 +346,18 @@ module SegmentedMsg {
       st.addEntry(rfullMatchBoolName, new shared SymEntry(fullMatchBools));
       st.addEntry(rfullMatchScanName, new shared SymEntry(fullMatchScan));
 
-      // Map JSON formatting is broken in Chpl version 1.24, create manually to maintain backwards compatibility
-      // var createdMap = new map(keyType=string,valType=string);
-      // createdMap.add("NumMatches", "created %s".format(st.attrib(rNumMatchesName)));
-      // createdMap.add("Starts", "created %s".format(st.attrib(rStartsName)));
-      // createdMap.add("Lens", "created %s".format(st.attrib(rLensName)));
-      // createdMap.add("Indices", "created %s".format(st.attrib(rIndicesName)));
-      // createdMap.add("SearchBool", "created %s".format(st.attrib(rSearchBoolName)));
-      // createdMap.add("SearchInd", "created %s".format(st.attrib(rSearchScanName)));
-      // createdMap.add("MatchBool", "created %s".format(st.attrib(rMatchBoolName)));
-      // createdMap.add("MatchInd", "created %s".format(st.attrib(rMatchScanName)));
-      // createdMap.add("FullMatchBool", "created %s".format(st.attrib(rfullMatchBoolName)));
-      // createdMap.add("FullMatchInd", "created %s".format(st.attrib(rfullMatchScanName)));
-      // repMsg = "%jt".format(createdMap);
-      repMsg = "{";
-      repMsg += "%jt: %jt,".format("NumMatches", "created %s".format(st.attrib(rNumMatchesName)));
-      repMsg += "%jt: %jt,".format("Starts", "created %s".format(st.attrib(rStartsName)));
-      repMsg += "%jt: %jt,".format("Lens", "created %s".format(st.attrib(rLensName)));
-      repMsg += "%jt: %jt,".format("Indices", "created %s".format(st.attrib(rIndicesName)));
-      repMsg += "%jt: %jt,".format("SearchBool","created %s".format(st.attrib(rSearchBoolName)));
-      repMsg += "%jt: %jt,".format("SearchInd", "created %s".format(st.attrib(rSearchScanName)));
-      repMsg += "%jt: %jt,".format("MatchBool", "created %s".format(st.attrib(rMatchBoolName)));
-      repMsg += "%jt: %jt,".format("MatchInd", "created %s".format(st.attrib(rMatchScanName)));
-      repMsg += "%jt: %jt,".format("FullMatchBool", "created %s".format(st.attrib(rfullMatchBoolName)));
-      repMsg += "%jt: %jt".format("FullMatchInd", "created %s".format(st.attrib(rfullMatchScanName)));
-      repMsg += "}";
+      var createdMap = new map(keyType=string,valType=string);
+      createdMap.add("NumMatches", "created %s".format(st.attrib(rNumMatchesName)));
+      createdMap.add("Starts", "created %s".format(st.attrib(rStartsName)));
+      createdMap.add("Lens", "created %s".format(st.attrib(rLensName)));
+      createdMap.add("Indices", "created %s".format(st.attrib(rIndicesName)));
+      createdMap.add("SearchBool", "created %s".format(st.attrib(rSearchBoolName)));
+      createdMap.add("SearchInd", "created %s".format(st.attrib(rSearchScanName)));
+      createdMap.add("MatchBool", "created %s".format(st.attrib(rMatchBoolName)));
+      createdMap.add("MatchInd", "created %s".format(st.attrib(rMatchScanName)));
+      createdMap.add("FullMatchBool", "created %s".format(st.attrib(rfullMatchBoolName)));
+      createdMap.add("FullMatchInd", "created %s".format(st.attrib(rfullMatchScanName)));
+      repMsg = "%jt".format(createdMap);
     }
     else {
       var errorMsg = "%s".format(objtype);
@@ -487,6 +474,33 @@ module SegmentedMsg {
     }
     smLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),repMsg);
     return new MsgTuple(repMsg, MsgType.NORMAL);
+  }
+
+  proc segmentedStripMsg(cmd: string, payload: string, st: borrowed SymTab): MsgTuple throws {
+    var pn = Reflection.getRoutineName();
+    var repMsg: string;
+
+    var msgArgs = parseMessageArgs(payload, 3);
+    var objtype = msgArgs.getValueOf("objType");
+    var name = msgArgs.getValueOf("name");
+
+    // check to make sure symbols defined
+    st.checkTable(name);
+
+    select (objtype) {
+      when ("str") {
+        var strings = getSegString(name, st);
+        var (off, val) = strings.strip(msgArgs.getValueOf("chars"));
+        var retString = getSegString(off, val, st);
+        repMsg = "created " + st.attrib(retString.name) + "+created bytes.size %t".format(retString.nBytes);
+        return new MsgTuple(repMsg, MsgType.NORMAL);
+      }
+      otherwise {
+          var errorMsg = notImplementedError(pn, "%s".format(objtype));
+          smLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
+          return new MsgTuple(errorMsg, MsgType.ERROR);
+      }
+    }
   }
 
   proc createPeelSymEntries(lo, lv, ro, rv, st: borrowed SymTab) throws {
@@ -1007,24 +1021,23 @@ module SegmentedMsg {
       return new MsgTuple(repMsg, MsgType.NORMAL);
   }
   
-  proc registerMe() {
-    use CommandMap;
-    registerFunction("segmentLengths", segmentLengthsMsg, getModuleName());
-    registerFunction("caseChange", caseChangeMsg, getModuleName());
-    registerFunction("checkChars", checkCharsMsg, getModuleName());
-    registerFunction("segmentedHash", segmentedHashMsg, getModuleName());
-    registerFunction("segmentedSearch", segmentedSearchMsg, getModuleName());
-    registerFunction("segmentedFindLoc", segmentedFindLocMsg, getModuleName());
-    registerFunction("segmentedFindAll", segmentedFindAllMsg, getModuleName());
-    registerFunction("segmentedPeel", segmentedPeelMsg, getModuleName());
-    registerFunction("segmentedSub", segmentedSubMsg, getModuleName());
-    registerFunction("segmentedIndex", segmentedIndexMsg, getModuleName());
-    registerFunction("segmentedBinopvv", segBinopvvMsg, getModuleName());
-    registerFunction("segmentedBinopvs", segBinopvsMsg, getModuleName());
-    registerFunction("segmentedGroup", segGroupMsg, getModuleName());
-    registerFunction("segmentedIn1d", segIn1dMsg, getModuleName());
-    registerFunction("randomStrings", randomStringsMsg, getModuleName());
-    registerFunction("segStr-assemble", assembleStringsMsg, getModuleName());
-    registerBinaryFunction("segStr-tondarray", segStrTondarrayMsg, getModuleName());
-  }
+  use CommandMap;
+  registerFunction("segmentLengths", segmentLengthsMsg, getModuleName());
+  registerFunction("caseChange", caseChangeMsg, getModuleName());
+  registerFunction("checkChars", checkCharsMsg, getModuleName());
+  registerFunction("segmentedHash", segmentedHashMsg, getModuleName());
+  registerFunction("segmentedSearch", segmentedSearchMsg, getModuleName());
+  registerFunction("segmentedFindLoc", segmentedFindLocMsg, getModuleName());
+  registerFunction("segmentedFindAll", segmentedFindAllMsg, getModuleName());
+  registerFunction("segmentedPeel", segmentedPeelMsg, getModuleName());
+  registerFunction("segmentedSub", segmentedSubMsg, getModuleName());
+  registerFunction("segmentedStrip", segmentedStripMsg, getModuleName());
+  registerFunction("segmentedIndex", segmentedIndexMsg, getModuleName());
+  registerFunction("segmentedBinopvv", segBinopvvMsg, getModuleName());
+  registerFunction("segmentedBinopvs", segBinopvsMsg, getModuleName());
+  registerFunction("segmentedGroup", segGroupMsg, getModuleName());
+  registerFunction("segmentedIn1d", segIn1dMsg, getModuleName());
+  registerFunction("randomStrings", randomStringsMsg, getModuleName());
+  registerFunction("segStr-assemble", assembleStringsMsg, getModuleName());
+  registerBinaryFunction("segStr-tondarray", segStrTondarrayMsg, getModuleName());
 }

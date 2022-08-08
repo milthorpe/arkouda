@@ -11,7 +11,7 @@ module ConcatenateMsg
     
     use MultiTypeSymbolTable;
     use MultiTypeSymEntry;
-    use SegmentedArray;
+    use SegmentedString;
     use ServerErrorStrings;
     use CommAggregation;
     use PrivateDist;
@@ -352,8 +352,6 @@ module ConcatenateMsg
         }
     }
 
-    proc registerMe() {
-      use CommandMap;
-      registerFunction("concatenate", concatenateMsg, getModuleName());
-    }
+    use CommandMap;
+    registerFunction("concatenate", concatenateMsg, getModuleName());
 }

@@ -15,7 +15,7 @@ module KExtremeMsg
 
     use MultiTypeSymbolTable;
     use MultiTypeSymEntry;
-    use SegmentedArray;
+    use SegmentedString;
     use ServerErrorStrings;
 
     use KReduce;
@@ -152,9 +152,7 @@ module KExtremeMsg
         }
     }
 
-    proc registerMe() {
-      use CommandMap;
-      registerFunction("mink", minkMsg, getModuleName());
-      registerFunction("maxk", maxkMsg, getModuleName());
-    }
+    use CommandMap;
+    registerFunction("mink", minkMsg, getModuleName());
+    registerFunction("maxk", maxkMsg, getModuleName());
 }

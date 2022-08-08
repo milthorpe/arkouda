@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 from enum import Enum
 
@@ -9,6 +11,7 @@ from arkouda.numeric import cast as akcast
 from arkouda.numeric import cumprod, where
 from arkouda.pdarrayclass import create_pdarray, parse_single_value, pdarray
 from arkouda.pdarraycreation import arange, array, ones, zeros
+from arkouda.pdarrayIO import read_hdf5_multi_dim, write_hdf5_multi_dim
 from arkouda.pdarraysetops import concatenate
 
 OrderType = Enum("OrderType", ["ROW_MAJOR", "COLUMN_MAJOR"])
@@ -157,7 +160,7 @@ class ArrayView:
             key = key if self.order is OrderType.COLUMN_MAJOR else key[::-1]
             for i in range(len(key)):
                 x = key[i]
-                if np.isscalar(x) and (resolve_scalar_dtype(x) == "int64" or "uint64"):
+                if np.isscalar(x) and (resolve_scalar_dtype(x) in ["int64", "uint64"]):
                     orig_key = x
                     if x < 0:
                         # Interpret negative key as offset from end of array
@@ -293,7 +296,8 @@ class ArrayView:
 
         See Also
         --------
-        array
+        array()
+        to_list()
 
         Examples
         --------
@@ -308,3 +312,93 @@ class ArrayView:
             return self.base.to_ndarray().reshape(self.shape.to_ndarray())
         else:
             return self.base.to_ndarray().reshape(self.shape.to_ndarray(), order="F")
+
+    def to_list(self) -> list:
+        """
+        Convert the ArrayView to a list, transferring array data from the
+        Arkouda server to client-side Python. Note: if the ArrayView size exceeds
+        client.maxTransferBytes, a RuntimeError is raised.
+
+        Returns
+        -------
+        list
+            A list with the same data as the ArrayView
+
+        Raises
+        ------
+        RuntimeError
+            Raised if there is a server-side error thrown, if the ArrayView size
+            exceeds the built-in client.maxTransferBytes size limit, or if the bytes
+            received does not match expected number of bytes
+
+        Notes
+        -----
+        The number of bytes in the array cannot exceed ``client.maxTransferBytes``,
+        otherwise a ``RuntimeError`` will be raised. This is to protect the user
+        from overflowing the memory of the system on which the Python client
+        is running, under the assumption that the server is running on a
+        distributed system with much more memory than the client. The user
+        may override this limit by setting client.maxTransferBytes to a larger
+        value, but proceed with caution.
+
+        See Also
+        --------
+        to_ndarray()
+
+        Examples
+        --------
+        >>> a = ak.arange(6).reshape(2,3)
+        >>> a.to_list()
+        [[0, 1, 2], [3, 4, 5]]
+        >>> type(a.to_list())
+        list
+        """
+        return self.to_ndarray().tolist()
+
+    def save(self, filepath: str, dset: str, mode: str = "truncate", storage: str = "Flat"):
+        """
+        Save the current ArrayView object to hdf5 file
+
+        Parameters
+        ----------
+        filepath: str
+            Path to the file to write the dataset to
+        dset: str
+            Name of the dataset to write
+        mode: str (truncate | append)
+            Default: truncate
+            Mode to write the dataset in. Truncate will overwrite any existing files.
+            Append will add the dataset to an existing file.
+        storage: str (Flat | Multi)
+            Default: Flat
+            Method to use when storing the dataset.
+            Flat - flatten the multi-dimensional object into a 1-D array of values
+            Multi - Store the object in the multidimensional presentation.
+
+        See Also
+        --------
+        ak.ArrayView.load
+        """
+        write_hdf5_multi_dim(self, filepath, dset, mode=mode, storage=storage)
+
+    @staticmethod
+    def load(filepath: str, dset: str) -> ArrayView:
+        """
+        Read a multi-dimensional dataset from an HDF5 file into an ArrayView object
+
+        Parameters
+        ----------
+        file_path: str
+            path to the file to read from
+        dset: str
+            name of the dataset to read
+
+        Returns
+        -------
+        ArrayView object representing the data read from file
+
+        See Also
+        --------
+        ak.ArrayView.save
+        """
+        return read_hdf5_multi_dim(filepath, dset)

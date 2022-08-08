@@ -24,7 +24,7 @@ module ArgSortMsg
     use ServerErrorStrings;
 
     use RadixSortLSD;
-    use SegmentedArray;
+    use SegmentedString;
     use Reflection;
     use ServerErrors;
     use Logging;
@@ -396,9 +396,7 @@ module ArgSortMsg
         return new MsgTuple(repMsg, MsgType.NORMAL);
     }
 
-    proc registerMe() {
-      use CommandMap;
-      registerFunction("argsort", argsortMsg, getModuleName());
-      registerFunction("coargsort", coargsortMsg, getModuleName());
-    }
+    use CommandMap;
+    registerFunction("argsort", argsortMsg, getModuleName());
+    registerFunction("coargsort", coargsortMsg, getModuleName());
 }

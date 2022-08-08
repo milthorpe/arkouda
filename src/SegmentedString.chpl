@@ -1,4 +1,4 @@
-module SegmentedArray {
+module SegmentedString {
   use AryUtil;
   use CTypes;
   use MultiTypeSymbolTable;
@@ -22,7 +22,7 @@ module SegmentedArray {
   const saLogger = new Logger(logLevel);
 
   private config param useHash = true;
-  param SegmentedArrayUseHash = useHash;
+  param SegmentedStringUseHash = useHash;
 
   private config param regexMaxCaptures = ServerConfig.regexMaxCaptures;
   
@@ -269,10 +269,11 @@ module SegmentedArray {
         srcIdx = 1;
         var diffs: [D] int;
         diffs[D.low] = left[D.low]; // first offset is not affected by scan
-        if (D.size > 1) {
-          // This expression breaks when D.size == 1, resulting in strange behavior
-          // However, this logic is only necessary when D.size > 1 anyway
-          diffs[D.interior(D.size-1)] = left[D.interior(D.size-1)] - (right[D.interior(-(D.size-1))] - 1);
+
+        forall idx in D {
+          if idx!=0 {
+            diffs[idx] = left[idx] - (right[idx-1]-1);
+          }
         }
         // Set srcIdx to diffs at segment boundaries
         forall (go, d) in zip(gatheredOffsets, diffs) with (var agg = newDstAggregator(int)) {
@@ -529,7 +530,7 @@ module SegmentedArray {
                                                                                var numMatchAgg = newDstAggregator(int)) {
         var matchessize = 0;
         for m in myRegex.matches(interpretAsString(origVals, off..#len, borrow=true), regexMaxCaptures) {
-          var match = m[0]; // v1.24.x -> reMatch, v1.25.x -> regexMatch
+          var match = m[0];
           var group = m[groupNum];
           if group.byteOffset != -1 {
             lenAgg.copy(sparseLens[off + group.byteOffset:int], group.numBytes);
@@ -677,7 +678,7 @@ module SegmentedArray {
         var replacementCounter = 0;
         var replLen = 0;
         for m in myRegex.matches(interpretAsString(origVals, off..#len, borrow=true)) {
-          var match = m[0];  // v1.24.x -> reMatch, v1.25.x -> regexMatch
+          var match = m[0];
           for k in (off + match.byteOffset:int)..#match.numBytes {
             nonMatchAgg.copy(nonMatch[k], false);
           }
@@ -715,6 +716,54 @@ module SegmentedArray {
         }
       }
       return (subbedOffsets, subbedVals, numReplacements);
+    }
+
+    /*
+      Strip out all of the leading and trailing characters of each element of a segstring that are
+      called out in the "chars" argument.
+
+      :arg chars: the set of characters to be removed
+      :type chars: string
+
+      :returns: Strings – substrings with stripped characters from the original string and the offsets into those substrings
+    */
+    
+    proc strip(chars: string) throws {
+      ref origOffsets = this.offsets.a;
+      ref origVals = this.values.a;
+      const lengths = this.getLengths();
+
+      saLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
+                                             "chars: %s - origOffsets: %t - origVals: %t"
+                                             .format(chars, origOffsets, origVals:bytes));
+
+      var replacedLens: [this.offsets.aD] int;
+
+      forall (off, len, rlen) in zip(origOffsets, lengths, replacedLens) {
+        if chars.isEmpty() {
+          rlen = interpretAsBytes(origVals, off..#len).strip().size + 1;
+        } else {
+          rlen = interpretAsBytes(origVals, off..#len).strip(chars:bytes).size + 1;
+        }
+      }
+      var retVals: [makeDistDom(+ reduce replacedLens)] uint(8);
+      var retOffs = (+ scan replacedLens) - replacedLens;
+
+      forall (off, len, roff) in zip(origOffsets, lengths, retOffs) with (var valAgg = newDstAggregator(uint(8))) {
+        var i = 0;
+        if chars.isEmpty() {
+          for b in interpretAsBytes(origVals, off..#len).strip() {
+            valAgg.copy(retVals[roff+i], b:uint(8));
+            i += 1;
+          }
+        } else {
+          for b in interpretAsBytes(origVals, off..#len).strip(chars:bytes) {
+            valAgg.copy(retVals[roff+i], b:uint(8));
+            i += 1;
+          }
+        }
+      }
+      return (retOffs, retVals);
     }
 
     /*
@@ -790,7 +839,7 @@ module SegmentedArray {
         else {
           // The string can be peeled; figure out where to split
           var match_index: int = if left then (times - 1) else (matches.size - times);
-          var match = matches[match_index][0]; // v1.24.x -> reMatch, v1.25.x -> regexMatch
+          var match = matches[match_index][0];
           var j: int = o + match.byteOffset: int;
           // j is now the start of the correct delimiter
           // tweak leftEnd and rightStart based on includeDelimiter

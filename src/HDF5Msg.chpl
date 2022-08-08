@@ -21,7 +21,7 @@ module HDF5Msg {
     use ServerConfig;
     use ServerErrors;
     use ServerErrorStrings;
-    use SegmentedArray;
+    use SegmentedString;
     use Sort;
 
     require "c_helpers/help_h5ls.h", "c_helpers/help_h5ls.c";
@@ -36,8 +36,8 @@ module HDF5Msg {
     const ARKOUDA_HDF5_FILE_VERSION_KEY = "file_version";
     const ARKOUDA_HDF5_FILE_VERSION_VAL = 1.0:real(32);
     type ARKOUDA_HDF5_FILE_VERSION_TYPE = real(32);
-    config const SEGARRAY_OFFSET_NAME = "segments";
-    config const SEGARRAY_VALUE_NAME = "values";
+    config const SEGSTRING_OFFSET_NAME = "segments";
+    config const SEGSTRING_VALUE_NAME = "values";
     config const NULL_STRINGS_VALUE = 0:uint(8);
     config const TRUNCATE: int = 0;
     config const APPEND: int = 1;
@@ -103,22 +103,7 @@ module HDF5Msg {
             repMsg = simulate_h5ls(file_id);
             var items = new list(repMsg.split(",")); // convert to json
 
-            // TODO: There is a bug with json formatting of lists in Chapel 1.24.x fixed in 1.25
-            //       See: https://github.com/chapel-lang/chapel/issues/18156
-            //       Below works in 1.25, but until we are fully off of 1.24 we should format json manually for lists
-            // repMsg = "%jt".format(items); // Chapel >= 1.25.0
-            repMsg = "[";  // Manual json building Chapel <= 1.24.1
-            var first = true;
-            for i in items {
-                i = i.replace(Q, ESCAPED_QUOTES, -1);
-                if first {
-                    first = false;
-                } else {
-                    repMsg += ",";
-                }
-                repMsg += Q + i + Q;
-            }
-            repMsg += "]";
+            repMsg = "%jt".format(items);
         } catch e : Error {
             var errorMsg = "Failed to process HDF5 file %t".format(e.message());
             h5Logger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
@@ -294,7 +279,7 @@ module HDF5Msg {
         var dataclass: C_HDF5.H5T_class_t;
         var bytesize: int;
         var isSigned: bool;
-        var isSegArray: bool;
+        var isSegString: bool;
 
         try {
             defer { // Close the file on exit
@@ -302,30 +287,30 @@ module HDF5Msg {
             }
             if isStringsDataset(file_id, dsetName) {
                 if ( !skipSegStringOffsets ) {
-                    var offsetDset = dsetName + "/" + SEGARRAY_OFFSET_NAME;
+                    var offsetDset = dsetName + "/" + SEGSTRING_OFFSET_NAME;
                     var (offsetClass, offsetByteSize, offsetSign) = 
                                             try get_dataset_info(file_id, offsetDset);
                     if (offsetClass != C_HDF5.H5T_INTEGER) {
                         throw getErrorWithContext(
                         msg="dataset %s has incorrect one or more sub-datasets" +
-                        " %s %s".format(dsetName,SEGARRAY_OFFSET_NAME,SEGARRAY_VALUE_NAME), 
+                        " %s %s".format(dsetName,SEGSTRING_OFFSET_NAME,SEGSTRING_VALUE_NAME), 
                         lineNumber=getLineNumber(),
                         routineName=getRoutineName(),
                         moduleName=getModuleName(),
-                        errorClass='SegArrayError');                    
+                        errorClass='SegStringError');                    
                     }
                 }
-                var valueDset = dsetName + "/" + SEGARRAY_VALUE_NAME;
+                var valueDset = dsetName + "/" + SEGSTRING_VALUE_NAME;
                 try (dataclass, bytesize, isSigned) = 
                                            try get_dataset_info(file_id, valueDset);
-                isSegArray = true;
+                isSegString = true;
             } else if isBooleanDataset(file_id, dsetName) {
                 var booleanDset = dsetName + "/" + "booleans";
                 (dataclass, bytesize, isSigned) = get_dataset_info(file_id, booleanDset);
-                isSegArray = false;            
+                isSegString = false;            
             } else {
                 (dataclass, bytesize, isSigned) = get_dataset_info(file_id, dsetName);
-                isSegArray = false;
+                isSegString = false;
             }
         } catch e : Error {
             //:TODO: recommend revisiting this catch block 
@@ -336,7 +321,7 @@ module HDF5Msg {
                 moduleName=getModuleName(),
                 errorClass='Error');
         }
-        return (isSegArray, dataclass, bytesize, isSigned);
+        return (isSegString, dataclass, bytesize, isSigned);
     }
 
 
@@ -1836,8 +1821,11 @@ module HDF5Msg {
         try {
             dsetlist = jsonToPdArray(jsondsets, ndsets);
         } catch {
+            // limit length of dataset names to 2000 chars
+            var n: int = 1000;
+            var dsets: string = if jsondsets.size > 2*n then jsondsets[0..#n]+'...'+jsondsets[jsondsets.size-n..#n] else jsondsets;
             var errorMsg = "Could not decode json dataset names via tempfile (%i files: %s)".format(
-                                               ndsets, jsondsets);
+                                                ndsets, dsets);
             h5Logger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
             return new MsgTuple(errorMsg, MsgType.ERROR);
         }
@@ -1845,7 +1833,10 @@ module HDF5Msg {
         try {
             filelist = jsonToPdArray(jsonfiles, nfiles);
         } catch {
-            var errorMsg = "Could not decode json filenames via tempfile (%i files: %s)".format(nfiles, jsonfiles);
+            // limit length of file names to 2000 chars
+            var n: int = 1000;
+            var files: string = if jsonfiles.size > 2*n then jsonfiles[0..#n]+'...'+jsonfiles[jsonfiles.size-n..#n] else jsonfiles;
+            var errorMsg = "Could not decode json filenames via tempfile (%i files: %s)".format(nfiles, files);
             h5Logger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
             return new MsgTuple(errorMsg, MsgType.ERROR);
         }
@@ -1874,7 +1865,7 @@ module HDF5Msg {
         } else {
             filenames = filelist;
         }
-        var segArrayFlags: [filedom] bool;
+        var segStringFlags: [filedom] bool;
         var dclasses: [filedom] C_HDF5.hid_t;
         var bytesizes: [filedom] int;
         var signFlags: [filedom] bool;
@@ -1890,7 +1881,7 @@ module HDF5Msg {
             for (i, fname) in zip(filedom, filenames) {
                 var hadError = false;
                 try {
-                    (segArrayFlags[i], dclasses[i], bytesizes[i], signFlags[i]) = get_dtype(fname, dsetName, calcStringOffsets);
+                    (segStringFlags[i], dclasses[i], bytesizes[i], signFlags[i]) = get_dtype(fname, dsetName, calcStringOffsets);
                 } catch e: FileNotFoundError {
                     fileErrorMsg = "File %s not found".format(fname);
                     h5Logger.error(getModuleName(),getRoutineName(),getLineNumber(),fileErrorMsg);
@@ -1911,8 +1902,8 @@ module HDF5Msg {
                     h5Logger.error(getModuleName(),getRoutineName(),getLineNumber(),fileErrorMsg);
                     hadError = true;
                     if !allowErrors { return new MsgTuple(fileErrorMsg, MsgType.ERROR); }
-                } catch e: SegArrayError {
-                    fileErrorMsg = "SegmentedArray error: %s".format(e.message());
+                } catch e: SegStringError {
+                    fileErrorMsg = "SegmentedString error: %s".format(e.message());
                     h5Logger.error(getModuleName(),getRoutineName(),getLineNumber(),fileErrorMsg);
                     hadError = true;
                     if !allowErrors { return new MsgTuple(fileErrorMsg, MsgType.ERROR); }
@@ -1931,12 +1922,12 @@ module HDF5Msg {
                     fileErrorCount += 1;
                 }
             }
-            const isSegArray = segArrayFlags[filedom.first];
+            const isSegString = segStringFlags[filedom.first];
             const dataclass = dclasses[filedom.first];
             const bytesize = bytesizes[filedom.first];
             const isSigned = signFlags[filedom.first];
-            for (name, sa, dc, bs, sf) in zip(filenames, segArrayFlags, dclasses, bytesizes, signFlags) {
-              if ((sa != isSegArray) || (dc != dataclass)) {
+            for (name, sa, dc, bs, sf) in zip(filenames, segStringFlags, dclasses, bytesizes, signFlags) {
+              if ((sa != isSegString) || (dc != dataclass)) {
                   var errorMsg = "Inconsistent dtype in dataset %s of file %s".format(dsetName, name);
                   h5Logger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
                   return new MsgTuple(errorMsg, MsgType.ERROR);
@@ -1955,11 +1946,11 @@ module HDF5Msg {
             var len: int;
             var nSeg: int;
             try {
-                if isSegArray {
+                if isSegString {
                     if (!calcStringOffsets) {
-                        (segSubdoms, nSeg, skips) = get_subdoms(filenames, dsetName + "/" + SEGARRAY_OFFSET_NAME);
+                        (segSubdoms, nSeg, skips) = get_subdoms(filenames, dsetName + "/" + SEGSTRING_OFFSET_NAME);
                     }
-                    (subdoms, len, skips) = get_subdoms(filenames, dsetName + "/" + SEGARRAY_VALUE_NAME);
+                    (subdoms, len, skips) = get_subdoms(filenames, dsetName + "/" + SEGSTRING_VALUE_NAME);
                 } else {
                     (subdoms, len, skips) = get_subdoms(filenames, dsetName);
                 }
@@ -1976,18 +1967,18 @@ module HDF5Msg {
             h5Logger.debug(getModuleName(),getRoutineName(),getLineNumber(),
                                            "Got subdomains and total length for dataset %s".format(dsetName));
 
-            select (isSegArray, dataclass) {
+            select (isSegString, dataclass) {
                 when (true, C_HDF5.H5T_INTEGER) {
                     if (bytesize != 1) || isSigned {
                         var errorMsg = "Error: detected unhandled datatype: segmented? %t, class %i, size %i, signed? %t".format(
-                                                isSegArray, dataclass, bytesize, isSigned);
+                                                isSegString, dataclass, bytesize, isSigned);
                         h5Logger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
                         return new MsgTuple(errorMsg, MsgType.ERROR);
                     }
 
                     // Load the strings bytes/values first
                     var entryVal = new shared SymEntry(len, uint(8));
-                    read_files_into_distributed_array(entryVal.a, subdoms, filenames, dsetName + "/" + SEGARRAY_VALUE_NAME, skips);
+                    read_files_into_distributed_array(entryVal.a, subdoms, filenames, dsetName + "/" + SEGSTRING_VALUE_NAME, skips);
 
                     proc _buildEntryCalcOffsets(): shared SymEntry throws {
                         var offsetsArray = segmentedCalcOffsets(entryVal.a, entryVal.aD);
@@ -1996,7 +1987,7 @@ module HDF5Msg {
 
                     proc _buildEntryLoadOffsets() throws {
                         var offsetsEntry = new shared SymEntry(nSeg, int);
-                        read_files_into_distributed_array(offsetsEntry.a, segSubdoms, filenames, dsetName + "/" + SEGARRAY_OFFSET_NAME, skips);
+                        read_files_into_distributed_array(offsetsEntry.a, segSubdoms, filenames, dsetName + "/" + SEGSTRING_OFFSET_NAME, skips);
                         fixupSegBoundaries(offsetsEntry.a, segSubdoms, subdoms);
                         return offsetsEntry;
                     }
@@ -2068,7 +2059,7 @@ module HDF5Msg {
                 }
                 otherwise {
                     var errorMsg = "detected unhandled datatype: segmented? %t, class %i, size %i, " +
-                                   "signed? %t".format(isSegArray, dataclass, bytesize, isSigned);
+                                   "signed? %t".format(isSegString, dataclass, bytesize, isSigned);
                     h5Logger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
                     return new MsgTuple(errorMsg, MsgType.ERROR);
                 }
@@ -2169,11 +2160,8 @@ module HDF5Msg {
         }
     }
 
-    proc registerMe() {
-        use CommandMap;
-        registerFunction("lshdf", lshdfMsg, getModuleName());
-        registerFunction("readAllHdf", readAllHdfMsg, getModuleName());
-        registerFunction("tohdf", tohdfMsg, getModuleName());
-    }
-
+    use CommandMap;
+    registerFunction("lshdf", lshdfMsg, getModuleName());
+    registerFunction("readAllHdf", readAllHdfMsg, getModuleName());
+    registerFunction("tohdf", tohdfMsg, getModuleName());
 }

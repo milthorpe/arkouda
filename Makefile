@@ -160,12 +160,12 @@ $(ARROW_O): $(ARROW_CPP) $(ARROW_H)
 	make compile-arrow-cpp
 
 CHPL_MINOR := $(shell $(CHPL) --version | sed -n "s/chpl version 1\.\([0-9]*\).*/\1/p")
-CHPL_VERSION_OK := $(shell test $(CHPL_MINOR) -ge 24 && echo yes)
-CHPL_VERSION_WARN := $(shell test $(CHPL_MINOR) -le 25 && echo yes)
+CHPL_VERSION_OK := $(shell test $(CHPL_MINOR) -ge 25 && echo yes)
+CHPL_VERSION_WARN := $(shell test $(CHPL_MINOR) -le 26 && echo yes)
 .PHONY: check-chpl
 check-chpl:
 ifneq ($(CHPL_VERSION_OK),yes)
-	$(error Chapel 1.24.0 or newer is required)
+	$(error Chapel 1.25.0 or newer is required)
 endif
 ifeq ($(CHPL_VERSION_WARN),yes)
 	$(warning Chapel 1.27.0 or newer is recommended)
@@ -262,9 +262,17 @@ endif
 ARKOUDA_SOURCES = $(shell find $(ARKOUDA_SOURCE_DIR)/ -type f -name '*.chpl')
 ARKOUDA_MAIN_SOURCE := $(ARKOUDA_SOURCE_DIR)/$(ARKOUDA_MAIN_MODULE).chpl
 
-ifeq ($(shell expr $(CHPL_MINOR) \< 25),1)
-	ARKOUDA_COMPAT_MODULES += -M $(ARKOUDA_SOURCE_DIR)/compat/lt-125
+CUDA_SOURCES = $(shell find $(ARKOUDA_SOURCE_DIR)/ -type f -name '*.cu')
+CUDA_OBJECTS=$(CUDA_SOURCES:.cu=.cu.o)
+
+%.cu.o:	%.cu
+	nvcc -c $< -o $@
+
+ifndef CHPL_GPU_HOME
+$(error CHPL_GPU_HOME not defined)
 endif
+
+GPU_FLAGS=-M $(CHPL_GPU_HOME)/modules $(CHPL_GPU_HOME)/include/GPUAPI.h $(ARKOUDA_SOURCE_DIR)/cubSort.h $(ARKOUDA_SOURCE_DIR)/cubHistogram.h -I$(ZMQ_DIR)/include -I$(HDF5_DIR)/include -I$(ARROW_DIR)/include -L$(CHPL_GPU_HOME)/lib -L$(CHPL_GPU_HOME)/lib64 -lGPUAPICUDA_static -L$(CUDA_ROOT_DIR)/lib -lcudart
 
 ifeq ($(shell expr $(CHPL_MINOR) \= 25),1)
 	ARKOUDA_COMPAT_MODULES += -M $(ARKOUDA_SOURCE_DIR)/compat/e-125
@@ -278,32 +286,25 @@ ifeq ($(shell expr $(CHPL_MINOR) \>= 26),1)
 	ARKOUDA_COMPAT_MODULES += -M $(ARKOUDA_SOURCE_DIR)/compat/ge-126
 endif
 
-
-CUDA_SOURCES = $(shell find $(ARKOUDA_SOURCE_DIR)/ -type f -name '*.cu')
-CUDA_OBJECTS=$(CUDA_SOURCES:.cu=.cu.o)
-
-%.cu.o:	%.cu
-	nvcc -c $< -o $@
-
-ifndef CHPL_GPU_HOME
-$(error CHPL_GPU_HOME not defined)
+ifeq ($(shell expr $(CHPL_MINOR) \< 27),1)
+	ARKOUDA_COMPAT_MODULES += -M $(ARKOUDA_SOURCE_DIR)/compat/lt-127
 endif
 
-
-GPU_FLAGS=-M $(CHPL_GPU_HOME)/modules $(CHPL_GPU_HOME)/include/GPUAPI.h $(ARKOUDA_SOURCE_DIR)/cubSort.h $(ARKOUDA_SOURCE_DIR)/cubHistogram.h -I$(ZMQ_DIR)/include -I$(HDF5_DIR)/include -I$(ARROW_DIR)/include -L$(CHPL_GPU_HOME)/lib -L$(CHPL_GPU_HOME)/lib64 -lGPUAPICUDA_static -L$(CUDA_ROOT_DIR)/lib -lcudart
+ifeq ($(shell expr $(CHPL_MINOR) \>= 27),1)
+	ARKOUDA_COMPAT_MODULES += -M $(ARKOUDA_SOURCE_DIR)/compat/ge-127
+endif
 
 MODULE_GENERATION_SCRIPT=$(ARKOUDA_SOURCE_DIR)/serverModuleGen.py
 # This is the main compilation statement section
 $(ARKOUDA_MAIN_MODULE): check-deps $(ARROW_O) $(ARKOUDA_SOURCES) $(CUDA_OBJECTS) $(ARKOUDA_MAKEFILES)
-	$(eval MOD_GEN_OUT=$(shell python3 $(MODULE_GENERATION_SCRIPT) $(ARKOUDA_CONFIG_FILE)))
-	@echo $(MOD_GEN_OUT);
+	$(eval MOD_GEN_OUT=$(shell python3 $(MODULE_GENERATION_SCRIPT) $(ARKOUDA_CONFIG_FILE) $(ARKOUDA_SOURCE_DIR)))
 
-	$(CHPL) $(CHPL_DEBUG_FLAGS) $(PRINT_PASSES_FLAGS) $(REGEX_MAX_CAPTURES_FLAG) $(OPTIONAL_SERVER_FLAGS) $(CHPL_FLAGS_WITH_VERSION) $(ARKOUDA_MAIN_SOURCE) $(CUDA_OBJECTS) $(ARKOUDA_COMPAT_MODULES) $(ARKOUDA_SERVER_USER_MODULES) $(GPU_FLAGS) -o $@
+	$(CHPL) $(CHPL_DEBUG_FLAGS) $(PRINT_PASSES_FLAGS) $(REGEX_MAX_CAPTURES_FLAG) $(OPTIONAL_SERVER_FLAGS) $(CHPL_FLAGS_WITH_VERSION) $(ARKOUDA_MAIN_SOURCE) $(ARKOUDA_COMPAT_MODULES) $(ARKOUDA_SERVER_USER_MODULES) $(MOD_GEN_OUT) $(GPU_FLAGS) -o $@
 
 CLEAN_TARGETS += arkouda-clean
 .PHONY: arkouda-clean
 arkouda-clean:
-	$(RM) $(ARKOUDA_MAIN_MODULE) $(ARKOUDA_MAIN_MODULE)_real $(ARKOUDA_SOURCE_DIR)/ServerRegistration.chpl $(ARROW_O)
+	$(RM) $(ARKOUDA_MAIN_MODULE) $(ARKOUDA_MAIN_MODULE)_real $(ARROW_O)
 
 .PHONY: tags
 tags:
@@ -443,7 +444,8 @@ $(eval $(call create_help_target,test-help,TEST_HELP_TEXT))
 test: test-python
 
 .PHONY: test-chapel
-test-chapel: $(TEST_TARGETS)
+test-chapel:
+	start_test $(TEST_SOURCE_DIR)
 
 .PHONY: test-all
 test-all: test-python test-chapel
@@ -456,7 +458,6 @@ $(TEST_BINARY_DIR):
 
 .PHONY: $(TEST_TARGETS) # Force tests to always rebuild.
 $(TEST_TARGETS): $(TEST_BINARY_DIR)/$(TEST_BINARY_SIGIL)%: $(TEST_SOURCE_DIR)/%.chpl | $(TEST_BINARY_DIR)
-	python3 $(MODULE_GENERATION_SCRIPT) $(ARKOUDA_CONFIG_FILE)
 	$(CHPL) $(TEST_CHPL_FLAGS) -M $(ARKOUDA_SOURCE_DIR) $(ARKOUDA_COMPAT_MODULES) $< -o $@
 
 print-%:

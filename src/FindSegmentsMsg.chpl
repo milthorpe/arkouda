@@ -12,7 +12,7 @@ module FindSegmentsMsg
     use MultiTypeSymbolTable;
     use MultiTypeSymEntry;
     use ServerErrorStrings;
-    use SegmentedArray;
+    use SegmentedString;
 
     use PrivateDist;
     use CommAggregation;
@@ -216,8 +216,6 @@ module FindSegmentsMsg
         return new MsgTuple(repMsg, MsgType.NORMAL);
     }
 
-    proc registerMe() {
-      use CommandMap;
-      registerFunction("findSegments", findSegmentsMsg, getModuleName());
-    }
+    use CommandMap;
+    registerFunction("findSegments", findSegmentsMsg, getModuleName());
 }
