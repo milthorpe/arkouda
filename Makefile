@@ -290,7 +290,7 @@ $(error CHPL_GPU_HOME not defined)
 endif
 
 
-GPU_FLAGS=-M $(CHPL_GPU_HOME)/modules $(CHPL_GPU_HOME)/include/GPUAPI.h $(ARKOUDA_SOURCE_DIR)/cubSort.h -I$(ZMQ_DIR)/include -I$(HDF5_DIR)/include -I$(ARROW_DIR)/include -L$(CHPL_GPU_HOME)/lib -L$(CHPL_GPU_HOME)/lib64 -lGPUAPICUDA_static -L$(CUDA_ROOT_DIR)/lib -lcudart -sdisableMultiGPUs=true
+GPU_FLAGS=-M $(CHPL_GPU_HOME)/modules $(CHPL_GPU_HOME)/include/GPUAPI.h $(ARKOUDA_SOURCE_DIR)/cubSort.h $(ARKOUDA_SOURCE_DIR)/cubHistogram.h -I$(ZMQ_DIR)/include -I$(HDF5_DIR)/include -I$(ARROW_DIR)/include -L$(CHPL_GPU_HOME)/lib -L$(CHPL_GPU_HOME)/lib64 -lGPUAPICUDA_static -L$(CUDA_ROOT_DIR)/lib -lcudart
 
 MODULE_GENERATION_SCRIPT=$(ARKOUDA_SOURCE_DIR)/serverModuleGen.py
 # This is the main compilation statement section
