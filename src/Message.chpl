@@ -7,7 +7,7 @@ module Message {
 
     enum MsgType {NORMAL,WARNING,ERROR}
     enum MsgFormat {STRING,BINARY}
-    enum ObjectType {PDARRAY, SEGSTRING, LIST, VALUE}
+    enum ObjectType {PDARRAY, SEGSTRING, LIST, DICT, VALUE}
 
     /*
      * Encapsulates the message string and message type.
@@ -142,7 +142,7 @@ module Message {
         */
         proc getBoolValue(): bool throws {
             try {
-                return this.val:bool;
+                return this.val.toLower():bool;
             }
             catch {
                 throw new owned ErrorWithContext("Parameter cannot be cast as bool. Attempting to cast %s as type bool failed".format(this.val),
@@ -182,7 +182,7 @@ module Message {
         :size: int: number of values in the list
         Note - not yet able to handle list of pdarray or SegString names
         */
-        proc getList(size: int) {
+        proc getList(size: int) throws {
             if this.objType != ObjectType.LIST {
                 throw new owned ErrorWithContext("Parameter with key, %s, is not a list.".format(this.key),
                                     getLineNumber(),
@@ -191,6 +191,17 @@ module Message {
                                     "TypeError");
             }
             return jsonToPdArray(this.val, size);
+        }
+
+        proc getJSON(size: int) throws {
+            if this.objType != ObjectType.DICT {
+                throw new owned ErrorWithContext("Parameter with key, %s, is not a JSON obj.".format(this.key),
+                                    getLineNumber(),
+                                    getRoutineName(),
+                                    getModuleName(),
+                                    "TypeError");
+            }
+            return parseMessageArgs(this.val, size);
         }
     }
 

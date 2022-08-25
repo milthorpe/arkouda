@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import builtins
-import json
-from typing import List, Sequence, Union, cast
+from typing import List, Sequence, cast
 
 import numpy as np  # type: ignore
 from typeguard import typechecked
@@ -52,6 +51,8 @@ __all__ = [
     "ctz",
     "rotl",
     "rotr",
+    "cov",
+    "corr",
     "attach_pdarray",
     "unregister_pdarray_by_name",
     "RegistrationError",
@@ -157,9 +158,7 @@ class pdarray:
             "**",
         ]
     )
-    OpEqOps = frozenset(
-        ["+=", "-=", "*=", "/=", "//=", "&=", "|=", "^=", "<<=", ">>=", "**="]
-    )
+    OpEqOps = frozenset(["+=", "-=", "*=", "/=", "//=", "&=", "|=", "^=", "<<=", ">>=", "**="])
     objtype = "pdarray"
 
     __array_priority__ = 1000
@@ -206,9 +205,7 @@ class pdarray:
     def __repr__(self):
         from arkouda.client import pdarrayIterThresh
 
-        return generic_msg(
-            cmd="repr", args="{} {}".format(self.name, pdarrayIterThresh)
-        )
+        return generic_msg(cmd="repr", args="{} {}".format(self.name, pdarrayIterThresh))
 
     def format_other(self, other: object) -> str:
         """
@@ -293,9 +290,7 @@ class pdarray:
         if dt not in DTypes:
             raise TypeError(f"Unhandled scalar type: {other} ({type(other)})")
         cmd = "binopvs"
-        args = "{} {} {} {}".format(
-            op, self.name, dt, NUMBER_FORMAT_STRINGS[dt].format(other)
-        )
+        args = "{} {} {} {}".format(op, self.name, dt, NUMBER_FORMAT_STRINGS[dt].format(other))
         repMsg = generic_msg(cmd=cmd, args=args)
         return create_pdarray(repMsg)
 
@@ -340,9 +335,7 @@ class pdarray:
         if dt not in DTypes:
             raise TypeError(f"Unhandled scalar type: {other} ({type(other)})")
         cmd = "binopsv"
-        args = "{} {} {} {}".format(
-            op, dt, NUMBER_FORMAT_STRINGS[dt].format(other), self.name
-        )
+        args = "{} {} {} {}".format(op, dt, NUMBER_FORMAT_STRINGS[dt].format(other), self.name)
         repMsg = generic_msg(cmd=cmd, args=args)
         return create_pdarray(repMsg)
 
@@ -442,17 +435,13 @@ class pdarray:
         return self._binop(other, ">=")
 
     def __eq__(self, other):
-        if (self.dtype == bool) and (
-            isinstance(other, pdarray) and (other.dtype == bool)
-        ):
+        if (self.dtype == bool) and (isinstance(other, pdarray) and (other.dtype == bool)):
             return ~(self ^ other)
         else:
             return self._binop(other, "==")
 
     def __ne__(self, other):
-        if (self.dtype == bool) and (
-            isinstance(other, pdarray) and (other.dtype == bool)
-        ):
+        if (self.dtype == bool) and (isinstance(other, pdarray) and (other.dtype == bool)):
             return self ^ other
         else:
             return self._binop(other, "!=")
@@ -488,9 +477,7 @@ class pdarray:
             raise TypeError(f"Unhandled scalar type: {other} ({type(other)})")
 
         cmd = "opeqvs"
-        args = "{} {} {} {}".format(
-            op, self.name, self.dtype.name, self.format_other(other)
-        )
+        args = "{} {} {} {}".format(op, self.name, self.dtype.name, self.format_other(other))
         generic_msg(cmd=cmd, args=args)
         return self
 
@@ -555,9 +542,7 @@ class pdarray:
                 # value = fields[2]
                 return parse_single_value(" ".join(fields[1:]))
             else:
-                raise IndexError(
-                    f"[int] {orig_key} is out of bounds with size {self.size}"
-                )
+                raise IndexError(f"[int] {orig_key} is out of bounds with size {self.size}")
         if isinstance(key, slice):
             (start, stop, stride) = key.indices(self.size)
             logger.debug("start: {} stop: {} stride: {}".format(start, stop, stride))
@@ -571,9 +556,7 @@ class pdarray:
                 raise TypeError(f"unsupported pdarray index type {key.dtype}")
             if kind == "bool" and self.size != key.size:
                 raise ValueError(f"size mismatch {self.size} {key.size}")
-            repMsg = generic_msg(
-                cmd="[pdarray]", args="{} {}".format(self.name, key.name)
-            )
+            repMsg = generic_msg(cmd="[pdarray]", args="{} {}".format(self.name, key.name))
             return create_pdarray(repMsg)
         else:
             raise TypeError(f"Unhandled key type: {key} ({type(key)})")
@@ -587,14 +570,10 @@ class pdarray:
             if key >= 0 and key < self.size:
                 generic_msg(
                     cmd="[int]=val",
-                    args="{} {} {} {}".format(
-                        self.name, key, self.dtype.name, self.format_other(value)
-                    ),
+                    args="{} {} {} {}".format(self.name, key, self.dtype.name, self.format_other(value)),
                 )
             else:
-                raise IndexError(
-                    f"index {orig_key} is out of bounds with size {self.size}"
-                )
+                raise IndexError(f"index {orig_key} is out of bounds with size {self.size}")
         elif isinstance(key, pdarray):
             if isinstance(value, pdarray):
                 generic_msg(
@@ -614,9 +593,7 @@ class pdarray:
             if isinstance(value, pdarray):
                 generic_msg(
                     cmd="[slice]=pdarray",
-                    args="{} {} {} {} {}".format(
-                        self.name, start, stop, stride, value.name
-                    ),
+                    args="{} {} {} {} {}".format(self.name, start, stop, stride, value.name),
                 )
             else:
                 generic_msg(
@@ -649,9 +626,7 @@ class pdarray:
         """
         generic_msg(
             cmd="set",
-            args="{} {} {}".format(
-                self.name, self.dtype.name, self.format_other(value)
-            ),
+            args="{} {} {}".format(self.name, self.dtype.name, self.format_other(value)),
         )
 
     def any(self) -> np.bool_:
@@ -843,6 +818,52 @@ class pdarray:
             Raised if there's a server-side error thrown
         """
         return std(self, ddof=ddof)
+
+    def cov(self, y: pdarray) -> np.float64:
+        """
+        Compute the covariance between self and y.
+
+        Parameters
+        ----------
+        y : pdarray
+            Other pdarray used to calculate covariance
+
+        Returns
+        -------
+        np.float64
+            The scalar covariance of the two arrays
+
+        Raises
+        ------
+        TypeError
+            Raised if y is not a pdarray instance
+        RuntimeError
+            Raised if there's a server-side error thrown
+        """
+        return cov(self, y)
+
+    def corr(self, y: pdarray) -> np.float64:
+        """
+        Compute the correlation between self and y using pearson correlation coefficient.
+
+        Parameters
+        ----------
+        y : pdarray
+            Other pdarray used to calculate correlation
+
+        Returns
+        -------
+        np.float64
+            The scalar correlation of the two arrays
+
+        Raises
+        ------
+        TypeError
+            Raised if y is not a pdarray instance
+        RuntimeError
+            Raised if there's a server-side error thrown
+        """
+        return corr(self, y)
 
     def mink(self, k: int_scalars) -> pdarray:
         """
@@ -1294,29 +1315,19 @@ class pdarray:
         else:
             raise ValueError("Supported file formats are 'HDF5' and 'Parquet'")
 
-        """
-        If offsets are provided, add to the json_array as the offsets will be used to
-        retrieve the array elements from the hdf5 files.
-        """
-        try:
-            json_array = json.dumps([prefix_path])
-        except Exception as e:
-            raise ValueError(e)
-        strings_placeholder = False
-
         return cast(
             str,
             generic_msg(
                 cmd=cmd,
-                args="{} {} {} {} {} {} {}".format(
-                    self.name,
-                    dataset,
-                    m,
-                    json_array,
-                    self.dtype,
-                    strings_placeholder,
-                    compressed,
-                ),
+                args={
+                    "values": self,
+                    "dset": dataset,
+                    "mode": m,
+                    "prefix": prefix_path,
+                    "dtype": self.dtype,
+                    "save_offsets": False,  # only used by strings
+                    "compressed": compressed,
+                },
             ),
         )
 
@@ -1398,9 +1409,7 @@ class pdarray:
         )
 
     @typechecked
-    def save_hdf(
-        self, prefix_path: str, dataset: str = "array", mode: str = "truncate"
-    ) -> str:
+    def save_hdf(self, prefix_path: str, dataset: str = "array", mode: str = "truncate") -> str:
         """
         Save the pdarray to HDF5. The result is a collection of HDF5 files,
         one file per locale of the arkouda server, where each filename starts
@@ -1520,9 +1529,7 @@ class pdarray:
         >>> b.unregister()
         """
         try:
-            rep_msg = generic_msg(
-                cmd="register", args=f"{self.name} {user_defined_name}"
-            )
+            rep_msg = generic_msg(cmd="register", args=f"{self.name} {user_defined_name}")
             if isinstance(rep_msg, bytes):
                 rep_msg = str(rep_msg, "UTF-8")
             if rep_msg != "success":
@@ -1531,9 +1538,7 @@ class pdarray:
             RuntimeError,
             RegistrationError,
         ):  # Registering two objects with the same name is not allowed
-            raise RegistrationError(
-                f"Server was unable to register {user_defined_name}"
-            )
+            raise RegistrationError(f"Server was unable to register {user_defined_name}")
 
         self.name = user_defined_name
         return self
@@ -1635,9 +1640,7 @@ class pdarray:
             # Integral pdarrays are their own grouping keys
             return [self]
         else:
-            raise TypeError(
-                "Grouping is only supported on numeric data (integral types) and bools."
-            )
+            raise TypeError("Grouping is only supported on numeric data (integral types) and bools.")
 
 
 # end pdarray class def
@@ -1681,8 +1684,8 @@ def create_pdarray(repMsg: str) -> pdarray:
         ndim = int(fields[4])
 
         # remove comma from 1 tuple with trailing comma
-        if fields[5][len(fields[5])-2] == ',':
-            fields[5] = fields[5].replace(',', '')
+        if fields[5][len(fields[5]) - 2] == ",":
+            fields[5] = fields[5].replace(",", "")
         shape = [int(el) for el in fields[5][1:-1].split(",")]
         itemsize = int(fields[6])
     except Exception as e:
@@ -1838,7 +1841,6 @@ def prod(pda: pdarray) -> np.float64:
         Raised if there's a server-side error thrown
     """
     repMsg = generic_msg(cmd="reduction", args="{} {}".format("prod", pda.name))
-
     return parse_single_value(cast(str, repMsg))
 
 
@@ -1967,9 +1969,7 @@ def mean(pda: pdarray) -> np.float64:
     RuntimeError
         Raised if there's a server-side error thrown
     """
-    return np.float64(cast(Union[int, np.int64, np.float64], pda.sum())) / cast(
-        Union[int, np.int64], pda.size
-    )
+    return parse_single_value(generic_msg(cmd="mean", args={"x": pda}))
 
 
 @typechecked
@@ -2016,8 +2016,7 @@ def var(pda: pdarray, ddof: int_scalars = 0) -> np.float64:
     """
     if ddof >= pda.size:
         raise ValueError("var: ddof must be less than number of values")
-    m = mean(pda)
-    return ((pda - m) ** 2).sum() / (pda.size - ddof)
+    return parse_single_value(generic_msg(cmd="var", args={"x": pda, "ddof": ddof}))
 
 
 @typechecked
@@ -2068,8 +2067,79 @@ def std(pda: pdarray, ddof: int_scalars = 0) -> np.float64:
     """
     if ddof < 0:
         raise ValueError("ddof must be an integer 0 or greater")
+    return parse_single_value(generic_msg(cmd="std", args={"x": pda, "ddof": ddof}))
 
-    return np.sqrt(var(pda, ddof=ddof))
+
+@typechecked
+def cov(x: pdarray, y: pdarray) -> np.float64:
+    """
+    Return the covariance of x and y
+
+    Parameters
+    ----------
+    x : pdarray
+        One of the pdarrays used to calculate covariance
+    y : pdarray
+        One of the pdarrays used to calculate covariance
+
+    Returns
+    -------
+    np.float64
+        The scalar covariance of the two pdarrays
+
+    Raises
+    ------
+    TypeError
+        Raised if x or y is not a pdarray instance
+    RuntimeError
+        Raised if there's a server-side error thrown
+
+    See Also
+    --------
+    mean, var
+
+    Notes
+    -----
+    The covariance is calculated by
+    ``cov = ((x - x.mean()) * (y - y.mean())).sum() / (x.size - 1)``.
+    """
+    return parse_single_value(generic_msg(cmd="cov", args={"x": x, "y": y}))
+
+
+@typechecked
+def corr(x: pdarray, y: pdarray) -> np.float64:
+    """
+    Return the correlation between x and y
+
+    Parameters
+    ----------
+    x : pdarray
+        One of the pdarrays used to calculate correlation
+    y : pdarray
+        One of the pdarrays used to calculate correlation
+
+    Returns
+    -------
+    np.float64
+        The scalar correlation of the two pdarrays
+
+    Raises
+    ------
+    TypeError
+        Raised if x or y is not a pdarray instance
+    RuntimeError
+        Raised if there's a server-side error thrown
+
+    See Also
+    --------
+    std, cov
+
+    Notes
+    -----
+    The correlation is calculated by
+    cov(x, y) / (x.std(ddof=1) * y.std(ddof=1))
+    """
+    return parse_single_value(generic_msg(cmd="corr", args={"x": x, "y": y}))
 
 
 @typechecked
@@ -2317,9 +2387,15 @@ def popcount(pda: pdarray) -> pdarray:
     >>> ak.popcount(A)
     array([0, 1, 1, 2, 1, 2, 2, 3, 1, 2])
     """
-    if pda.dtype != akint64 and pda.dtype != akuint64:
+    if pda.dtype not in [akint64, akuint64]:
         raise TypeError("BitOps only supported on int64 and uint64 arrays")
-    repMsg = generic_msg(cmd="efunc", args="{} {}".format("popcount", pda.name))
+    repMsg = generic_msg(
+        cmd="efunc",
+        args={
+            "func": "popcount",
+            "array": pda,
+        },
+    )
     return create_pdarray(repMsg)
 
 
@@ -2348,9 +2424,15 @@ def parity(pda: pdarray) -> pdarray:
     >>> ak.parity(A)
     array([0, 1, 1, 0, 1, 0, 0, 1, 1, 0])
     """
-    if pda.dtype != akint64 and pda.dtype != akuint64:
+    if pda.dtype not in [akint64, akuint64]:
         raise TypeError("BitOps only supported on int64 and uint64 arrays")
-    repMsg = generic_msg(cmd="efunc", args="{} {}".format("parity", pda.name))
+    repMsg = generic_msg(
+        cmd="efunc",
+        args={
+            "func": "parity",
+            "array": pda,
+        },
+    )
     return create_pdarray(repMsg)
 
 
@@ -2379,9 +2461,15 @@ def clz(pda: pdarray) -> pdarray:
     >>> ak.clz(A)
     array([64, 63, 62, 62, 61, 61, 61, 61, 60, 60])
     """
-    if pda.dtype != akint64 and pda.dtype != akuint64:
+    if pda.dtype not in [akint64, akuint64]:
         raise TypeError("BitOps only supported on int64 and uint64 arrays")
-    repMsg = generic_msg(cmd="efunc", args="{} {}".format("clz", pda.name))
+    repMsg = generic_msg(
+        cmd="efunc",
+        args={
+            "func": "clz",
+            "array": pda,
+        },
+    )
     return create_pdarray(repMsg)
 
 
@@ -2414,9 +2502,15 @@ def ctz(pda: pdarray) -> pdarray:
     >>> ak.ctz(A)
     array([0, 0, 1, 0, 2, 0, 1, 0, 3, 0])
     """
-    if pda.dtype != akint64 and pda.dtype != akuint64:
+    if pda.dtype not in [akint64, akuint64]:
         raise TypeError("BitOps only supported on int64 and uint64 arrays")
-    repMsg = generic_msg(cmd="efunc", args="{} {}".format("ctz", pda.name))
+    repMsg = generic_msg(
+        cmd="efunc",
+        args={
+            "func": "ctz",
+            "array": pda,
+        },
+    )
     return create_pdarray(repMsg)
 
 
@@ -2447,18 +2541,12 @@ def rotl(x, rot) -> pdarray:
     >>> ak.rotl(A, A)
     array([0, 2, 8, 24, 64, 160, 384, 896, 2048, 4608])
     """
-    if isinstance(x, pdarray) and (x.dtype == akint64 or x.dtype == akuint64):
-        if (
-            isinstance(rot, pdarray) and (rot.dtype == akint64 or rot.dtype == akuint64)
-        ) or isSupportedInt(rot):
+    if isinstance(x, pdarray) and x.dtype in [akint64, akuint64]:
+        if (isinstance(rot, pdarray) and rot.dtype in [akint64, akuint64]) or isSupportedInt(rot):
             return x._binop(rot, "<<<")
         else:
             raise TypeError("Rotations only supported on integers")
-    elif (
-        isSupportedInt(x)
-        and isinstance(rot, pdarray)
-        and (rot.dtype == akint64 or rot.dtype == akuint64)
-    ):
+    elif isSupportedInt(x) and isinstance(rot, pdarray) and rot.dtype in [akint64, akuint64]:
         return rot._r_binop(x, "<<<")
     else:
         raise TypeError("Rotations only supported on integers")
@@ -2491,18 +2579,12 @@ def rotr(x, rot) -> pdarray:
     >>> ak.rotr(1024 * A, A)
     array([0, 512, 512, 384, 256, 160, 96, 56, 32, 18])
     """
-    if isinstance(x, pdarray) and (x.dtype == akint64 or x.dtype == akuint64):
-        if (
-            isinstance(rot, pdarray) and (rot.dtype == akint64 or rot.dtype == akuint64)
-        ) or isSupportedInt(rot):
+    if isinstance(x, pdarray) and x.dtype in [akint64, akuint64]:
+        if (isinstance(rot, pdarray) and rot.dtype in [akint64, akuint64]) or isSupportedInt(rot):
             return x._binop(rot, ">>>")
         else:
             raise TypeError("Rotations only supported on integers")
-    elif (
-        isSupportedInt(x)
-        and isinstance(rot, pdarray)
-        and (rot.dtype == akint64 or rot.dtype == akuint64)
-    ):
+    elif isSupportedInt(x) and isinstance(rot, pdarray) and rot.dtype in [akint64, akuint64]:
         return rot._r_binop(x, ">>>")
     else:
         raise TypeError("Rotations only supported on integers")

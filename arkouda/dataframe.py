@@ -577,7 +577,11 @@ class DataFrame(UserDict):
             str,
             generic_msg(
                 cmd="dataframe_idx",
-                args="{} {} {}".format(len(msg_list), idx.name, json.dumps(msg_list)),
+                args={
+                    "size": len(msg_list),
+                    "idx_name": idx.name,
+                    "columns": msg_list,
+                },
             ),
         )
         msgList = json.loads(repMsg)
@@ -680,7 +684,7 @@ class DataFrame(UserDict):
         inplace: bool = False,
     ) -> Union[None, DataFrame]:
         """
-        Drop column/s or row/s from the dataframe, in-place.
+        Drop column/s or row/s from the dataframe.
 
         Parameters
         ----------
@@ -1801,6 +1805,45 @@ class DataFrame(UserDict):
             raise ValueError("Cannot compute isin with duplicate axis.")
 
         return DataFrame(df_def, index=self.index)
+
+    def corr(self) -> DataFrame:
+        """
+        Return new DataFrame with pairwise correlation of columns
+
+        Returns
+        -------
+        DataFrame
+            Arkouda DataFrame containing correlation matrix of all columns
+
+        Raises
+        ------
+        RuntimeError
+            Raised if there's a server-side error thrown
+
+        See Also
+        --------
+        pdarray.corr
+
+        Notes
+        -----
+        Generates the correlation matrix using Pearson R for all columns
+
+        Attempts to convert to numeric values where possible for inclusion in the matrix.
+        """
+
+        def numeric_help(d):
+            if isinstance(d, Strings):
+                d = Categorical(d)
+            return d if isinstance(d, pdarray) else d.codes
+
+        args = {
+            "size": len(self.columns),
+            "columns": self.columns,
+            "data_names": [numeric_help(self[c]) for c in self.columns],
+        }
+
+        ret_dict = json.loads(generic_msg(cmd="corrMatrix", args=args))
+        return DataFrame({c: create_pdarray(ret_dict[c]) for c in self.columns})
 
 
 def sorted(df, column=False):

@@ -22,12 +22,12 @@ module FileIO {
     proc appendFile(filePath : string, line : string) throws {
         var writer : channel;
         if exists(filePath) {
-            var aFile = try! open(filePath, iomode.rw);
-            writer = try! aFile.writer(start=aFile.size);
+            var aFile = open(filePath, iomode.rw);
+            writer = aFile.writer(start=aFile.size);
 
         } else {
-              var aFile = try! open(filePath, iomode.cwr);
-              writer = try! aFile.writer();
+              var aFile = open(filePath, iomode.cwr);
+              writer = aFile.writer();
         }
 
         writer.writeln(line);
@@ -35,9 +35,31 @@ module FileIO {
         writer.close();
     }
 
+    proc writeToFile(filePath : string, line : string) throws {
+        var writer : channel;
+        var aFile = open(filePath, iomode.cwr);
+        writer = aFile.writer();
+
+        writer.writeln(line);
+        writer.flush();
+        writer.close();
+    }
+    
+    proc writeLinesToFile(filePath : string, lines : string) throws {
+        var writer : channel;
+        var aFile = open(filePath, iomode.cwr);
+        writer = aFile.writer();
+
+        for line in lines {
+            writer.writeln(line);
+        }
+        writer.flush();
+        writer.close();
+    }
+
     proc getLineFromFile(filePath : string, lineIndex : int=-1) : string throws {
-        var aFile = try! open(filePath, iomode.rw);
-        var lines = try! aFile.lines();
+        var aFile = open(filePath, iomode.rw);
+        var lines = aFile.lines();
         var line : string;
         var returnLine : string;
         var i = 1;
@@ -52,6 +74,24 @@ module FileIO {
         }
 
         return returnLine.strip();
+    }
+    
+    proc getLineFromFile(path: string, match: string) throws {
+        var aFile = open(path, iomode.r);
+        var reader: channel = aFile.reader();
+        var returnLine: string;
+
+        for line in reader.lines() {
+            if line.find(match) >= 0 {
+                returnLine = line;
+                break;
+            }
+        }
+
+        reader.flush();
+        reader.close();
+
+        return returnLine;
     }
 
     proc delimitedFileToMap(filePath : string, delimiter : string=',') : map {
@@ -267,19 +307,14 @@ module FileIO {
     }
 
     proc lsAnyMsg(cmd: string, payload: string, st: borrowed SymTab): MsgTuple throws {
-      var (jsonfile) = payload.splitMsgToTuple(1);
+      var msgArgs = parseMessageArgs(payload, 1);
       
       // Retrieve filename from payload
-      var filename: string;
-      try {
-        filename = jsonToPdArray(jsonfile, 1)[0];
-        if filename.isEmpty() {
-          throw new IllegalArgumentError("filename was empty");  // will be caught by catch block
-        }
-      } catch {
-        var errorMsg = "Could not decode json filenames via tempfile (%i files: %s)".format(
-                                                                                            1, jsonfile);
-        return new MsgTuple(errorMsg, MsgType.ERROR);                                    
+      var filename: string = msgArgs.getValueOf("filename");
+      if filename.isEmpty() {
+        var errorMsg = "Empty Filename Provided.";
+        fioLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
+        return new MsgTuple(errorMsg, MsgType.ERROR);
       }
 
       // If the filename represents a glob pattern, retrieve the locale 0 filename
@@ -316,21 +351,16 @@ module FileIO {
     }
 
     proc readAnyMsg(cmd: string, payload: string, st: borrowed SymTab): MsgTuple throws {
-      var (strictFlag, ndsetsStr, nfilesStr, allowErrorsFlag, calcStringOffsetsFlag, arraysStr) = payload.splitMsgToTuple(6);
-      var (jsondsets, jsonfiles) = arraysStr.splitMsgToTuple(" | ",2);
-
-      if (!checkCast(nfilesStr, int)) {
-        var errMsg = "Number of files:`%s` could not be cast to an integer".format(nfilesStr);
-        return new MsgTuple(errMsg, MsgType.ERROR);
-      }
-      var nfiles = nfilesStr:int; // Error checked above
+      var msgArgs = parseMessageArgs(payload, 7);
+      var nfiles = msgArgs.get("filename_size").getIntValue();
       var filelist: [0..#nfiles] string;
       
       try {
-        filelist = jsonToPdArray(jsonfiles, nfiles);
+        filelist = msgArgs.get("filenames").getList(nfiles);
       } catch {
         // limit length of file names to 2000 chars
         var n: int = 1000;
+        var jsonfiles = msgArgs.getValueOf("filenames");
         var files: string = if jsonfiles.size > 2*n then jsonfiles[0..#n]+'...'+jsonfiles[jsonfiles.size-n..#n] else jsonfiles;
         var errorMsg = "Could not decode json filenames via tempfile (%i files: %s)".format(nfiles, files);
         return new MsgTuple(errorMsg, MsgType.ERROR);

@@ -1,52 +1,79 @@
 import re
 
+import numpy as np
+
 from base_test import ArkoudaTest
 from context import arkouda as ak
 
 
 class RegexTest(ArkoudaTest):
     def test_empty_string_patterns(self):
-        # For issue #959:
-        # verify ValueError is raised when methods which use Regex.matches
-        # have a pattern which matches the empty string
-        # TODO remove/change test once changes from chapel issue #18639 are in arkouda
-        s = ak.array(["one"])
-        for pattern in ["", "|", "^", "$"]:
+        # verify methods which use Regex.matches work with pattern matches the empty string
+        s = ["0 String 0", "^", " "]
+        s2 = ak.array(s)
+        for pattern in ["", "|", "^"]:
+            self.test_match_objects(pattern, s)
+            self.sub_help(pattern, s, "repl", 100)
+            self.assertTrue(s2.contains(pattern, regex=True).all())
+            self.assertListEqual(
+                s2.startswith(pattern, regex=True).to_list(),
+                [re.search("^" + pattern, si) is not None for si in s],
+            )
+            if pattern != "":
+                self.assertListEqual(
+                    s2.endswith(pattern, regex=True).to_list(),
+                    [re.search(pattern + "$", si) is not None for si in s],
+                )
+            self.assertListEqual(
+                s2.findall(pattern).to_list(),
+                np.concatenate([re.findall(pattern, si) for si in s]).tolist(),
+            )
+            # peel is broken on one char strings with patterns that match empty string
+            # str split and non-regex flatten don't work with empty separator, so
+            # it makes sense for the regex versions to return a value error
             with self.assertRaises(ValueError):
-                s.search(pattern)
+                s2.peel(pattern, regex=True)
             with self.assertRaises(ValueError):
-                s.match(pattern)
+                s2.split(pattern)
             with self.assertRaises(ValueError):
-                s.fullmatch(pattern)
-            with self.assertRaises(ValueError):
-                s.split(pattern)
-            with self.assertRaises(ValueError):
-                s.sub(pattern, "repl")
-            with self.assertRaises(ValueError):
-                s.findall(pattern)
-            with self.assertRaises(ValueError):
-                s.find_locations(pattern)
-            with self.assertRaises(ValueError):
-                s.contains(pattern, regex=True)
-            with self.assertRaises(ValueError):
-                s.startswith(pattern, regex=True)
-            with self.assertRaises(ValueError):
-                s.endswith(pattern, regex=True)
-            with self.assertRaises(ValueError):
-                s.peel(pattern, regex=True)
-            with self.assertRaises(ValueError):
-                s.flatten(pattern, regex=True)
+                s2.flatten(pattern, regex=True)
 
-    def test_match_objects(self):
-        strings = ak.array(
-            ["", "____", "_1_2____", "3___4___", "5", "__6__", "___7", "__8___9____10____11"]
-        )
-        pattern = "_+"
+        # verify we value error with both
+        # empty string matching patterns and empty string; See Chapel issue #20441
+        # when pattern='$'; see Chapel issue #20431
+        for s, p in zip([ak.array([""]), ak.array(["0 String 0"])], ["", "$"]):
+            with self.assertRaises(ValueError):
+                s.search(p)
+            with self.assertRaises(ValueError):
+                s.match(p)
+            with self.assertRaises(ValueError):
+                s.fullmatch(p)
+            with self.assertRaises(ValueError):
+                s.sub(p, "repl")
+            with self.assertRaises(ValueError):
+                s.contains(p, regex=True)
+            with self.assertRaises(ValueError):
+                s.startswith(p, regex=True)
+            with self.assertRaises(ValueError):
+                s.endswith(p, regex=True)
+            with self.assertRaises(ValueError):
+                s.findall(p)
+            with self.assertRaises(ValueError):
+                s.peel(p, regex=True)
+            with self.assertRaises(ValueError):
+                s.split(p)
+            with self.assertRaises(ValueError):
+                s.flatten(p, regex=True)
 
+    def test_match_objects(
+        self,
+        pattern="_+",
+        s=["", "____", "_1_2____", "3___4___", "5", "__6__", "___7", "__8___9____10____11"],
+    ):
+        strings = ak.array(s)
         ak_search = strings.search(pattern)
         ak_match = strings.match(pattern)
         ak_fullmatch = strings.fullmatch(pattern)
-
         re_search = [re.search(pattern, strings[i]) for i in range(strings.size)]
         re_match = [re.match(pattern, strings[i]) for i in range(strings.size)]
         re_fullmatch = [re.fullmatch(pattern, strings[i]) for i in range(strings.size)]
@@ -102,7 +129,7 @@ class RegexTest(ArkoudaTest):
             [i for i in range(len(re_fullmatch)) if re_fullmatch[i] is not None],
         )
 
-        # Capture Groups
+    def test_caputure_groups(self):
         tug_of_war = ak.array(
             ["Isaac Newton, physicist", "<--calculus-->", "Gottfried Leibniz, mathematician"]
         )
@@ -135,22 +162,19 @@ class RegexTest(ArkoudaTest):
         ak.array(["1_2___", "____", "3", "__4___5____6___7", ""]).search("_+").find_matches()
 
     def test_sub(self):
-        strings = ak.array(
-            ["", "____", "_1_2____", "3___4___", "5", "__6__", "___7", "__8___9____10____11"]
-        )
-        pattern = "_+"
         # test short repl
-        repl = "-"
-        count = 3
-        re_sub = [re.sub(pattern, repl, strings[i], count) for i in range(strings.size)]
-        re_sub_counts = [re.subn(pattern, repl, strings[i], count)[1] for i in range(strings.size)]
-        ak_sub, ak_sub_counts = strings.subn(pattern, repl, count)
-        self.assertListEqual(re_sub, ak_sub.to_list())
-        self.assertListEqual(re_sub_counts, ak_sub_counts.to_list())
-
+        self.sub_help(repl="-")
         # test long repl
-        repl = "---------"
-        count = 3
+        self.sub_help(repl="---------")
+
+    def sub_help(
+        self,
+        pattern="_+",
+        s=["", "____", "_1_2____", "3___4___", "5", "__6__", "___7", "__8___9____10____11"],
+        repl="-",
+        count=3,
+    ):
+        strings = ak.array(s)
         re_sub = [re.sub(pattern, repl, strings[i], count) for i in range(strings.size)]
         re_sub_counts = [re.subn(pattern, repl, strings[i], count)[1] for i in range(strings.size)]
         ak_sub, ak_sub_counts = strings.subn(pattern, repl, count)
