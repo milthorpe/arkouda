@@ -27,11 +27,12 @@ module ReductionMsg
     // these functions take an array and produce a scalar
     // parse and respond to reduction message
     // scalar = reductionop(vector)
-    proc reductionMsg(cmd: string, payload: string, st: borrowed SymTab): MsgTuple throws {
+    proc reductionMsg(cmd: string, payload: string, argSize: int, st: borrowed SymTab): MsgTuple throws {
         param pn = Reflection.getRoutineName();
         var repMsg: string = ""; // response message
-        // split request into fields
-        var (reductionop, name) = payload.splitMsgToTuple(2);
+        var msgArgs = parseMessageArgs(payload, argSize);
+        const reductionop = msgArgs.getValueOf("op");
+        const name = msgArgs.getValueOf("array");
         rmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
                          "cmd: %s reductionop: %s name: %s".format(cmd,reductionop,name));
 
@@ -266,12 +267,13 @@ module ReductionMsg
         return new MsgTuple(repMsg, MsgType.NORMAL);          
     }
 
-    proc countReductionMsg(cmd: string, payload: string, st: borrowed SymTab): MsgTuple throws {
+    proc countReductionMsg(cmd: string, payload: string, argSize: int, st: borrowed SymTab): MsgTuple throws {
         param pn = Reflection.getRoutineName();
       // reqMsg: segmentedReduction values segments operator
       // 'segments_name' describes the segment offsets
-      var (segments_name, sizeStr) = payload.splitMsgToTuple(2);
-      var size = try! sizeStr:int;
+      var msgArgs = parseMessageArgs(payload, argSize);
+      const segments_name = msgArgs.getValueOf("segments");
+      const size = msgArgs.get("size").getIntValue();
       var rname = st.nextName();
       rmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
                        "cmd: %s segments_name: %s size: %s".format(cmd,segments_name, size));
@@ -306,14 +308,17 @@ module ReductionMsg
       return counts;
     }
     
-    proc segmentedReductionMsg(cmd: string, payload: string, st: borrowed SymTab): MsgTuple throws {
+    proc segmentedReductionMsg(cmd: string, payload: string, argSize: int, st: borrowed SymTab): MsgTuple throws {
         param pn = Reflection.getRoutineName();
         // reqMsg: segmentedReduction values segments operator
         // 'values_name' is the segmented array of values to be reduced
         // 'segments_name' is the sement offsets
         // 'op' is the reduction operator
-        var (values_name, segments_name, op, skip_nan) = payload.splitMsgToTuple(4);
-        var skipNan = stringtobool(skip_nan);
+        var msgArgs = parseMessageArgs(payload, argSize);
+        const skipNan = msgArgs.get("skip_nan").getBoolValue();
+        const values_name = msgArgs.getValueOf("values");
+        const segments_name = msgArgs.getValueOf("segments");
+        const op = msgArgs.getValueOf("op");
       
         var rname = st.nextName();
         rmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
@@ -341,6 +346,10 @@ module ReductionMsg
                     }
                     when "mean" {
                         var res = segMean(values.a, segments.a);
+                        st.addEntry(rname, new shared SymEntry(res));
+                    }
+                    when "median" {
+                        var res = segMedian(values.a, segments.a);
                         st.addEntry(rname, new shared SymEntry(res));
                     }
                     when "min" {
@@ -397,6 +406,10 @@ module ReductionMsg
                         var res = segMean(values.a, segments.a);
                         st.addEntry(rname, new shared SymEntry(res));
                     }
+                    when "median" {
+                        var res = segMedian(values.a, segments.a);
+                        st.addEntry(rname, new shared SymEntry(res));
+                    }
                     when "min" {
                         var res = segMin(values.a, segments.a);
                         st.addEntry(rname, new shared SymEntry(res));
@@ -451,6 +464,10 @@ module ReductionMsg
                         var res = segMean(values.a, segments.a, skipNan);
                         st.addEntry(rname, new shared SymEntry(res));
                     }
+                    when "median" {
+                        var res = segMedian(values.a, segments.a, skipNan);
+                        st.addEntry(rname, new shared SymEntry(res));
+                    }
                     when "min" {
                         var res = segMin(values.a, segments.a, skipNan);
                         st.addEntry(rname, new shared SymEntry(res));
@@ -473,27 +490,31 @@ module ReductionMsg
                         return new MsgTuple(errorMsg, MsgType.ERROR);
                     }
                }
-           }
-           when (DType.Bool) {
-               var values = toSymEntry(gVal, bool);
-               select op {
-                   when "sum" {
-                      var res = segSum(values.a, segments.a);
-                      st.addEntry(rname, new shared SymEntry(res));
-                   }
-                   when "any" {
-                      var res = segAny(values.a, segments.a);
-                      st.addEntry(rname, new shared SymEntry(res));
-                   }
-                   when "all" {
-                      var res = segAll(values.a, segments.a);
-                      st.addEntry(rname, new shared SymEntry(res));
-                   }
-                   when "mean" {
-                      var res = segMean(values.a, segments.a);
-                      st.addEntry(rname, new shared SymEntry(res));
-                   }
-                   when "argmin" {
+            }
+            when (DType.Bool) {
+                var values = toSymEntry(gVal, bool);
+                select op {
+                    when "sum" {
+                        var res = segSum(values.a, segments.a);
+                        st.addEntry(rname, new shared SymEntry(res));
+                    }
+                    when "any" {
+                        var res = segAny(values.a, segments.a);
+                        st.addEntry(rname, new shared SymEntry(res));
+                    }
+                    when "all" {
+                        var res = segAll(values.a, segments.a);
+                        st.addEntry(rname, new shared SymEntry(res));
+                    }
+                    when "mean" {
+                        var res = segMean(values.a, segments.a);
+                        st.addEntry(rname, new shared SymEntry(res));
+                    }
+                    when "median" {
+                        var res = segMedian(values.a, segments.a);
+                        st.addEntry(rname, new shared SymEntry(res));
+                    }
+                    when "argmin" {
                         var (vals, locs) = segArgmin(values.a, segments.a);
                         st.addEntry(rname, new shared SymEntry(locs));
                     }
@@ -501,18 +522,18 @@ module ReductionMsg
                         var (vals, locs) = segArgmax(values.a, segments.a);
                         st.addEntry(rname, new shared SymEntry(locs));
                     }
-                   otherwise {
-                       var errorMsg = notImplementedError(pn,op,gVal.dtype);
-                       rmLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
-                       return new MsgTuple(errorMsg, MsgType.ERROR);                 
-                   }
-               }
-           }
-           otherwise {
-               var errorMsg = unrecognizedTypeError(pn, dtype2str(gVal.dtype));
-               rmLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
-               return new MsgTuple(errorMsg, MsgType.ERROR);
-           }
+                    otherwise {
+                        var errorMsg = notImplementedError(pn,op,gVal.dtype);
+                        rmLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
+                        return new MsgTuple(errorMsg, MsgType.ERROR);
+                    }
+                }
+            }
+          otherwise {
+              var errorMsg = unrecognizedTypeError(pn, dtype2str(gVal.dtype));
+              rmLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
+              return new MsgTuple(errorMsg, MsgType.ERROR);
+          }
        }
        var repMsg = "created " + st.attrib(rname);
        rmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),repMsg);
@@ -531,7 +552,7 @@ module ReductionMsg
       if (D.size == 0) { return res; }
       // Set reset flag at segment boundaries
       var flagvalues: [vD] (bool, t); // = [v in values] (false, v);
-      if isFloatType(t) && skipNan {
+      if isRealType(t) && skipNan {
         forall (fv, val) in zip(flagvalues, values) {
           fv = if isnan(val) then (false, 0.0) else (false, val);
         }
@@ -640,7 +661,7 @@ module ReductionMsg
       // Take absolute value, replacing zeros with ones
       // Ones will become zeros in log-domain and not affect + scan
       var magnitudes: [values.domain] real;
-      if (isFloatType(t) && skipNan) {
+      if (isRealType(t) && skipNan) {
         forall (m, v, z) in zip(magnitudes, values, isZero) {
           if isnan(v) {
             m = 1.0;
@@ -674,7 +695,7 @@ module ReductionMsg
       if (D.size == 0) { return res; }
       var sums;
       var counts;
-      if (isFloatType(t) && skipNan) {
+      if (isRealType(t) && skipNan) {
         // count cumulative nans over all values
         var cumnans = isnan(values):int;
         // check there's enough room to create a copy for scan and throw if creating a copy would go over memory limit
@@ -712,12 +733,81 @@ module ReductionMsg
       return res;
     }
 
+    proc segMedian(values:[?vD] ?intype, segments:[?D] int, skipNan=false): [D] real throws {
+      type t = if intype == bool then int else intype;
+      var res: [D] real;
+      if (D.size == 0) { return res; }
+
+      var counts = segCount(segments, values.size);
+      var noNanVals = values: t;
+      // First deal with any NANs
+      if isRealType(t) && skipNan {
+        // count cumulative nans over all values
+        var cumnans = isnan(values):int;
+        // check there's enough room to create a copy for scan and throw if creating a copy would go over memory limit
+        overMemLimit(numBytes(int) * values.size);
+        cumnans = + scan cumnans;
+
+        // find cumulative nans at segment boundaries
+        var segnans: [D] int;
+        forall (si, sn) in zip(D, segnans) with (var agg = newSrcAggregator(int)) {
+          if si == D.high {
+            agg.copy(sn, cumnans[cumnans.domain.high]);
+          } else {
+            agg.copy(sn, cumnans[segments[si+1]-1]);
+          }
+        }
+
+        // take diffs of adjacent segments to find nan count in each segment
+        var nancounts: [D] int;
+        nancounts[D.low] = segnans[D.low];
+        nancounts[D.low+1..] = segnans[D.low+1..] - segnans[..D.high-1];
+
+        // calculate counts with nan values excluded and replace nan with max(real)
+        // this will force them at the very end of the sorted segment and since
+        // counts has been corrected, they won't affect the result
+        noNanVals = [elem in values] if isnan(elem) then max(real) else elem;
+        counts -= nancounts;
+      }
+
+      // then sort values within their segment (from segNumUnique)
+      // keys will indicate which segment we are in
+      const keys = expandKeys(vD, segments);
+      const firstIV = radixSortLSD_ranks(noNanVals);
+      var intermediate: [vD] int;
+      forall (ii, idx) in zip(intermediate, firstIV) with (var agg = newSrcAggregator(int)) {
+          agg.copy(ii, keys[idx]);
+      }
+      const deltaIV = radixSortLSD_ranks(intermediate);
+      var IV: [vD] int;
+      forall (IVi, idx) in zip(IV, deltaIV) with (var agg = newSrcAggregator(int)) {
+          agg.copy(IVi, firstIV[idx]);
+      }
+      var sortedVals: [vD] t;
+      forall (sv, idx) in zip(sortedVals, IV) with (var valsAgg = newSrcAggregator(t)) {
+        valsAgg.copy(sv, noNanVals[idx]);
+      }
+
+      // Now that we have sorted segments, grab the middle element
+      forall (s, c, r) in zip(segments, counts, res) with (var resAgg = newSrcAggregator(real)) {
+        if c % 2 != 0 {
+          // odd case: grab middle of sorted values
+          resAgg.copy(r, sortedVals[s + (c + 1)/2 - 1]:real);
+        }
+        else {
+          // even case: average the 2 middles of the sorted values
+          resAgg.copy(r, (sortedVals[s + c/2 - 1]:real + sortedVals[s + c/2]:real) / 2.0 );
+        }
+      }
+      return res;
+    }
+
     proc segMin(values:[?vD] ?t, segments:[?D] int, skipNan=false): [D] t throws {
       var res: [D] t = max(t);
       if (D.size == 0) { return res; }
       var keys = expandKeys(vD, segments);
       var kv: [keys.domain] (int, t);
-      if (isFloatType(t) && skipNan) {
+      if (isRealType(t) && skipNan) {
         var arrCopy = [elem in values] if isnan(elem) then max(real) else elem;
         kv = [(k, v) in zip(keys, arrCopy)] (-k, v);
       } else {
@@ -745,7 +835,7 @@ module ReductionMsg
       if (D.size == 0) { return res; }
       var keys = expandKeys(vD, segments);
       var kv: [keys.domain] (int, t);
-      if (isFloatType(t) && skipNan) {
+      if (isRealType(t) && skipNan) {
         var arrCopy = [elem in values] if isnan(elem) then min(real) else elem;
         kv = [(k, v) in zip(keys, arrCopy)] (k, v);
       } else {
@@ -1137,12 +1227,6 @@ module ReductionMsg
       rmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
                                                    "time = %i".format(Time.getCurrentTime() - t1));
       return res;
-    }
-
-    proc stringtobool(str: string): bool throws {
-      if str == "True" then return true;
-      else if str == "False" then return false;
-      throw new owned ErrorWithMsg("message: skipNan must be of type bool");
     }
 
     use CommandMap;

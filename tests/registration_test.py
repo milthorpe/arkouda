@@ -403,17 +403,17 @@ class RegistrationTest(ArkoudaTest):
         # registered objects are not deleted from symbol table
         a.register("keep")
         self.assertEqual(
-            ak.client.generic_msg(cmd="delete", args=a.name), f"registered symbol, {a.name}, not deleted"
+            ak.client.generic_msg(cmd="delete", args={"name": a.name}), f"registered symbol, {a.name}, not deleted"
         )
         self.assertTrue(a.name in ak.list_symbol_table())
 
         # non-registered objects are deleted from symbol table
-        self.assertEqual(ak.client.generic_msg(cmd="delete", args=b.name), "deleted " + b.name)
+        self.assertEqual(ak.client.generic_msg(cmd="delete", args={"name": b.name}), "deleted " + b.name)
         self.assertTrue(b.name not in ak.list_symbol_table())
 
         # RuntimeError when calling delete on an object not in the symbol table
         with self.assertRaises(RuntimeError):
-            ak.client.generic_msg(cmd="delete", args="not_in_table")
+            ak.client.generic_msg(cmd="delete", args={"name": "not_in_table"})
 
     def test_categorical_registration_suite(self):
         """
@@ -634,6 +634,37 @@ class RegistrationTest(ArkoudaTest):
         self.assertFalse(groupB.is_registered())
         self.assertFalse(groupC.is_registered())
         self.assertFalse(groupL.is_registered())
+
+    def test_dataframe_register(self):
+        # Create DataFrame
+        username = ak.array(["Alice", "Bob", "Alice", "Carol", "Bob", "Alice"])
+        userid = ak.array([111, 222, 111, 333, 222, 111])
+        item = ak.array([0, 0, 1, 1, 2, 0])
+        day = ak.array([5, 5, 6, 5, 6, 6])
+        amount = ak.array([0.5, 0.6, 1.1, 1.2, 4.3, 0.6])
+        index = ak.Index.factory(ak.array(["One", "Two", "Three", "Four", "Five", "Six"]))
+        df = ak.DataFrame(
+            {"userName": username, "userID": userid, "item": item, "day": day, "amount": amount}, index
+        )
+
+        # Register DataFrame with name 'DataFrame_test'
+        df.register("DataFrame_test")
+        self.assertTrue(df.is_registered())
+
+        # Attach registered DataFrame 'DataFrame_test' into variable dfa and assert the original and
+        # attached versions of the DataFrame are equal
+        dfa = ak.DataFrame.attach("DataFrame_test")
+        self.assertTrue(df.to_pandas().equals(dfa.to_pandas()))
+
+        # Unregister a single component of the DataFrame to assert a warning is raised when not all
+        # expected components of the DataFrame are registered
+        ak.pdarrayclass.unregister_pdarray_by_name("df_index_DataFrame_test_key")
+        with self.assertWarns(UserWarning):
+            df.is_registered()
+
+        # Unregister the DataFrame and assert that it has been unregistered completely
+        df.unregister()
+        self.assertFalse(df.is_registered())
 
 
 def cleanup():

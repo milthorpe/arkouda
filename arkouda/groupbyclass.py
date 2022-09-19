@@ -18,6 +18,7 @@ from arkouda.logger import getArkoudaLogger
 from arkouda.pdarrayclass import (
     RegistrationError,
     create_pdarray,
+    is_sorted,
     pdarray,
     unregister_pdarray_by_name,
 )
@@ -141,6 +142,7 @@ class GroupByReductionType(enum.Enum):
     SUM = "sum"
     PROD = "prod"
     MEAN = "mean"
+    MEDIAN = "median"
     MIN = "min"
     MAX = "max"
     ARGMIN = "argmin"
@@ -337,9 +339,10 @@ class GroupBy:
         >>> counts
         array([1, 2, 4, 3])
         """
-        cmd = "countReduction"
-        args = "{} {}".format(cast(pdarray, self.segments).name, self.length)
-        repMsg = generic_msg(cmd=cmd, args=args)
+        repMsg = generic_msg(
+            cmd="countReduction",
+            args={"segments": cast(pdarray, self.segments), "size": self.length},
+        )
         self.logger.debug(repMsg)
         return self.unique_keys, create_pdarray(repMsg)
 
@@ -414,9 +417,15 @@ class GroupBy:
         else:
             permuted_values = cast(pdarray, values)[cast(pdarray, self.permutation)]
 
-        cmd = "segmentedReduction"
-        args = "{} {} {} {}".format(permuted_values.name, self.segments.name, operator, skipna)
-        repMsg = generic_msg(cmd=cmd, args=args)
+        repMsg = generic_msg(
+            cmd="segmentedReduction",
+            args={
+                "values": permuted_values,
+                "segments": self.segments,
+                "op": operator,
+                "skip_nan": skipna,
+            },
+        )
         self.logger.debug(repMsg)
         if operator.startswith("arg"):
             return (
@@ -566,6 +575,53 @@ class GroupBy:
         (array([2, 3, 4]), array([2.6666666666666665, 2.7999999999999998, 3]))
         """
         k, v = self.aggregate(values, "mean", skipna)
+        return k, cast(pdarray, v)
+
+    def median(self, values: pdarray, skipna: bool = True) -> Tuple[groupable, pdarray]:
+        """
+        Using the permutation stored in the GroupBy instance, group
+        another array of values and compute the median of each group's
+        values.
+
+        Parameters
+        ----------
+        values : pdarray
+            The values to group and find median
+
+        Returns
+        -------
+        unique_keys : (list of) pdarray or Strings
+            The unique keys, in grouped order
+        group_means : pdarray, float64
+            One median value per unique key in the GroupBy instance
+
+        Raises
+        ------
+        TypeError
+            Raised if the values array is not a pdarray object
+        ValueError
+            Raised if the key array size does not match the values size
+            or if the operator is not in the GroupBy.Reductions array
+
+        Notes
+        -----
+        The return dtype is always float64.
+
+        Examples
+        --------
+        >>> a = ak.randint(1,5,9)
+        >>> a
+        array([4 1 4 3 2 2 2 3 3])
+        >>> g = ak.GroupBy(a)
+        >>> g.keys
+        array([4 1 4 3 2 2 2 3 3])
+        >>> b = ak.linspace(-5,5,9)
+        >>> b
+        array([-5 -3.75 -2.5 -1.25 0 1.25 2.5 3.75 5])
+        >>> g.median(b)
+        (array([1 2 3 4]), array([-3.75 1.25 3.75 -3.75]))
+        """
+        k, v = self.aggregate(values, "median", skipna)
         return k, cast(pdarray, v)
 
     def min(self, values: pdarray, skipna: bool = True) -> Tuple[groupable, pdarray]:
@@ -834,9 +890,14 @@ class GroupBy:
         # Find unique pairs of (key, val)
         g = GroupBy(togroup)
         # Group unique pairs again by original key
-        g2 = GroupBy(g.unique_keys[0], assume_sorted=True)
+        g2 = GroupBy(g.unique_keys[0], assume_sorted=False)
         # Count number of unique values per key
-        _, nuniq = g2.count()
+        keyorder, nuniq = g2.count()
+        # The last GroupBy *should* result in sorted key indices, but in case it
+        # doesn't, we need to permute the answer to match the original key order
+        if not is_sorted(keyorder):
+            perm = argsort(keyorder)
+            nuniq = nuniq[perm]
         # Re-join unique counts with original keys (sorting guarantees same order)
         return self.unique_keys, nuniq
 
@@ -1482,7 +1543,7 @@ class GroupBy:
         for name in matches:
             # Parse the name for the dtype and use the proper create method to create the element
             if f"_{Strings.objtype}." in name or f"_{pdarray.objtype}." in name:
-                keys_resp = cast(str, generic_msg(cmd="attach", args=name))
+                keys_resp = cast(str, generic_msg(cmd="attach", args={"name": name}))
                 dtype = keys_resp.split()[2]
                 if ".unique_keys" in name:
                     if dtype == Strings.objtype:
@@ -1528,8 +1589,8 @@ class GroupBy:
                 f" is not registered"
             )
 
-        perm_resp = generic_msg(cmd="attach", args=f"{user_defined_name}.permutation")
-        segments_resp = generic_msg(cmd="attach", args=f"{user_defined_name}.segments")
+        perm_resp = generic_msg(cmd="attach", args={"name": f"{user_defined_name}.permutation"})
+        segments_resp = generic_msg(cmd="attach", args={"name": f"{user_defined_name}.segments"})
 
         parts = {
             "orig_keys": keys if len(keys) > 1 else keys[0],
@@ -1600,32 +1661,9 @@ class GroupBy:
 
     def most_common(self, values):
         """
-        Find the most common value for each segment of a GroupBy object. This method only supports
-        array-like GroupBy key types.
-
-        Parameters
-        ----------
-        values : array-like
-            Values in which to find most common based on the GroupBy's segment indexes.
-            values.size must equal GroupBy.keys[0].size
-
-        Returns
-        -------
-        most_common_values : array-like
-            The most common value for each segment of the GroupBy
+        (Deprecated) See `GroupBy.mode()`.
         """
-        # Give each key an integer index
-        keyidx = self.broadcast(arange(self.unique_keys[0].size), permute=True)
-        # Annex values and group by (key, val)
-        bykeyval = GroupBy([keyidx, values])
-        # Count number of records for each (key, val)
-        (ki, uval), count = bykeyval.count()
-        # Group out value
-        bykey = GroupBy(ki, assume_sorted=True)
-        # Find the index of the most frequent value for each key
-        _, topidx = bykey.argmax(count)
-        # Gather the most frequent values
-        return uval[topidx]
+        return self.mode(values)
 
 
 def broadcast(

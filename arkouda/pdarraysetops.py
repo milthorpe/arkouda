@@ -108,9 +108,13 @@ def _in1d_single(
     elif isinstance(pda1, Strings) and isinstance(pda2, Strings):
         repMsg = generic_msg(
             cmd="segmentedIn1d",
-            args="{} {} {} {} {}".format(
-                pda1.objtype, pda1.entry.name, pda2.objtype, pda2.entry.name, invert
-            ),
+            args={
+                "objType": pda1.objtype,
+                "obj": pda1.entry,
+                "otherType": pda2.objtype,
+                "other": pda2.entry,
+                "invert": invert,
+            },
         )
         return create_pdarray(cast(str, repMsg))
     else:
@@ -431,7 +435,10 @@ def union1d(
             and pda2.dtype == int
             or (pda1.dtype == akuint64 and pda2.dtype == akuint64)
         ):
-            repMsg = generic_msg(cmd="union1d", args="{} {}".format(pda1.name, pda2.name))
+            repMsg = generic_msg(cmd="union1d", args={
+                "arg1": pda1,
+                "arg2": pda2
+            })
             return cast(pdarray, create_pdarray(repMsg))
         return cast(
             pdarray, unique(cast(pdarray, concatenate((unique(pda1), unique(pda2)), ordered=False)))
@@ -518,7 +525,7 @@ def intersect1d(
             pda1.dtype == akuint64 and pda2.dtype == akuint64
         ):
             repMsg = generic_msg(
-                cmd="intersect1d", args="{} {} {}".format(pda1.name, pda2.name, assume_unique)
+                cmd="intersect1d", args={"arg1": pda1, "arg2": pda2, "assume_unique": assume_unique}
             )
             return create_pdarray(cast(str, repMsg))
         if not assume_unique:
@@ -631,7 +638,11 @@ def setdiff1d(
             pda1.dtype == akuint64 and pda2.dtype == akuint64
         ):
             repMsg = generic_msg(
-                cmd="setdiff1d", args="{} {} {}".format(pda1.name, pda2.name, assume_unique)
+                cmd="setdiff1d", args={
+                    "arg1": pda1,
+                    "arg2": pda2,
+                    "assume_unique": assume_unique
+                }
             )
             return create_pdarray(cast(str, repMsg))
         if not assume_unique:
@@ -736,8 +747,11 @@ def setxor1d(pda1: groupable, pda2: groupable, assume_unique: bool = False) -> U
             pda1.dtype == akuint64 and pda2.dtype == akuint64
         ):
             repMsg = generic_msg(
-                cmd="setxor1d", args="{} {} {}".format(pda1.name, pda2.name, assume_unique)
-            )
+                cmd="setxor1d", args={
+                    "arg1": pda1,
+                    "arg2": pda2,
+                    "assume_unique": assume_unique
+                })
             return create_pdarray(cast(str, repMsg))
         if not assume_unique:
             pda1 = cast(pdarray, unique(pda1))

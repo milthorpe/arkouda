@@ -143,7 +143,7 @@ module ServerDaemon {
     class DefaultServerDaemon : ArkoudaServerDaemon {
         var serverToken : string;
         var arkDirectory : string;
-        var serverMessage : string;
+        var connectUrl : string;
         var reqCount: int = 0;
         var repCount: int = 0;
         
@@ -155,8 +155,20 @@ module ServerDaemon {
             try! this.socket.bind("tcp://*:%t".format(ServerPort));
         }
         
+        proc getConnectUrl(token: string) throws {
+            if token.isEmpty() {
+                return "tcp://%s:%t".format(serverHostname, 
+                                            ServerPort);
+            } else {
+                return "tcp://%s:%i?token=%s".format(serverHostname,
+                                                     ServerPort,
+                                                     token);
+            }
+        }
+
         proc printServerSplashMessage(token: string, arkDirectory: string) throws {
             var verMessage = "arkouda server version = %s".format(arkoudaVersion);
+            var chplVerMessage = "built with chapel version%s".format(chplVersion);
             var dirMessage = ".arkouda directory %s".format(arkDirectory);
             var memLimMessage =  "memory limit = %i".format(getMemLimit());
             var memUsedMessage = "bytes of memory used = %i".format(getMemUsed());
@@ -183,21 +195,18 @@ module ServerDaemon {
                 }           
                 return buffer;
             }
-    
-            if token.isEmpty() {
-                serverMessage = "server listening on tcp://%s:%t".format(serverHostname, 
-                                                                 ServerPort);
-            } else {
-                serverMessage = "server listening on tcp://%s:%i?token=%s".format(serverHostname, 
-                                                                 ServerPort, token);
-            }
-        
+
+            serverMessage = "server listening on %s".format(this.connectUrl);
             serverMessage = adjustMsg(serverMessage);      
             serverMessage = "%s %s %s".format(buff,serverMessage,buff);
         
             var vBuff = generateBuffer(serverMessage,verMessage);
             verMessage = adjustMsg(verMessage);
             verMessage = "*%s %s %s*".format(vBuff,verMessage,vBuff);
+            
+            var cvBuff = generateBuffer(serverMessage,chplVerMessage);
+            chplVerMessage = adjustMsg(chplVerMessage);
+            chplVerMessage = "*%s %s %s*".format(cvBuff,chplVerMessage,cvBuff);
 
             var mlBuff = generateBuffer(serverMessage,memLimMessage);
             memLimMessage = adjustMsg(memLimMessage);
@@ -232,6 +241,7 @@ module ServerDaemon {
             writeln(blankLine);
             writeln('*%s*'.format(serverMessage));
             writeln(verMessage);
+            writeln(chplVerMessage);
 
             if (memTrack) {
                 writeln(memLimMessage);
@@ -249,12 +259,14 @@ module ServerDaemon {
         /*
         Creates the serverConnectionInfo file on arkouda_server startup
         */
-        proc createServerConnectionInfo() {
+        proc createServerConnectionInfo() throws {
             use IO;
             if !serverConnectionInfo.isEmpty() {
+                sdLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
+                               'writing serverConnectionInfo to %t'.format(serverConnectionInfo));
                 try! {
                     var w = open(serverConnectionInfo, iomode.cw).writer();
-                    w.writef("%s %t\n", serverHostname, ServerPort);
+                    w.writef("%s %t %s\n",serverHostname,ServerPort,this.connectUrl);
                 }
             }
         }
@@ -387,8 +399,9 @@ module ServerDaemon {
             sdLogger.debug(getModuleName(), getRoutineName(), getLineNumber(),
                                "initialized the .arkouda directory %s".format(this.arkDirectory));
     
+            this.connectUrl = this.getConnectUrl(this.serverToken);
             this.createServerConnectionInfo();
-            this.printServerSplashMessage(this.serverToken, this.arkDirectory);
+            this.printServerSplashMessage(this.serverToken,this.arkDirectory);
             this.registerServerCommands();
                     
             var t1 = new Time.Timer();
@@ -444,12 +457,10 @@ module ServerDaemon {
                             size = msg.size: int;
                     }
                     catch e {
-                        // while size is not being used, we will default it to -1 for now. Error message commented out 
-                        size = -1;
-                        // asLogger.error(getModuleName(),getRoutineName(),getLineNumber(),
-                        //        "Argument List size is not an integer. %s cannot be cast".format(msg.size));
-                        // sendRepMsg(serialize(msg=unknownError(e.message()),msgType=MsgType.ERROR,
-                        //                                  msgFormat=MsgFormat.STRING, user="Unknown"));
+                        sdLogger.error(getModuleName(),getRoutineName(),getLineNumber(),
+                               "Argument List size is not an integer. %s cannot be cast".format(msg.size));
+                        sendRepMsg(serialize(msg=unknownError(e.message()),msgType=MsgType.ERROR,
+                                                         msgFormat=MsgFormat.STRING, user="Unknown"));
                     }
 
                     /*
@@ -498,7 +509,7 @@ module ServerDaemon {
                  *  up in the client.print_server_commands() function, but we need to intercept & process them as appropriate
                  */
                 select cmd {
-                    when "array"   { repTuple = arrayMsg(cmd, args, payload, st); }
+                    when "array"   { repTuple = arrayMsg(cmd, args, size, payload, st); }
                     when "connect" {
                         if authenticate {
                             repTuple = new MsgTuple("connected to arkouda server tcp://*:%i as user %s with token %s".format(
@@ -520,11 +531,11 @@ module ServerDaemon {
                         if commandMap.contains(cmd) {
                             if moduleMap.contains(cmd) then
                                 usedModules.add(moduleMap[cmd]);
-                            repTuple = commandMap.getBorrowed(cmd)(cmd, args, st);
+                            repTuple = commandMap.getBorrowed(cmd)(cmd, args, size, st);
                         } else if commandMapBinary.contains(cmd) { // Binary response commands require different handling
                             if moduleMap.contains(cmd) then
                                 usedModules.add(moduleMap[cmd]);
-                            var binaryRepMsg = commandMapBinary.getBorrowed(cmd)(cmd, args, st);
+                            var binaryRepMsg = commandMapBinary.getBorrowed(cmd)(cmd, args, size, st);
                             sendRepMsg(binaryRepMsg);
                         } else {
                           repTuple = new MsgTuple("Unrecognized command: %s".format(cmd), MsgType.ERROR);
@@ -632,11 +643,12 @@ module ServerDaemon {
                 var cmd    = msg.cmd;
                 var format = msg.format;
                 var args   = msg.args;
+                var size   = msg.size;
 
                 var repTuple: MsgTuple;
 
                 select cmd {
-                    when "metrics" {repTuple = metricsMsg(cmd, args, st);}        
+                    when "metrics" {repTuple = metricsMsg(cmd, args, size, st);}        
                     when "connect" {
                         if authenticate {
                             repTuple = new MsgTuple("connected to arkouda metrics server tcp://*:%i as user " +
@@ -646,7 +658,7 @@ module ServerDaemon {
                                                                                     MsgType.NORMAL);
                         }
                     }
-                    when "getconfig" {repTuple = getconfigMsg(cmd, args, st);}
+                    when "getconfig" {repTuple = getconfigMsg(cmd, args, size, st);}
                 }           
 
                 this.socket.send(serialize(msg=repTuple.msg,msgType=repTuple.msgType,
@@ -695,13 +707,13 @@ module ServerDaemon {
     proc getServerDaemon(daemonType: ServerDaemonType) : shared ArkoudaServerDaemon throws {
         select daemonType {
             when ServerDaemonType.DEFAULT {
-                return new DefaultServerDaemon():ArkoudaServerDaemon;
+                return new shared DefaultServerDaemon();
             }
             when ServerDaemonType.INTEGRATION {
-                return new ExternalIntegrationServerDaemon():ArkoudaServerDaemon;
+                return new shared ExternalIntegrationServerDaemon();
             }
             when ServerDaemonType.METRICS {
-               return new MetricsServerDaemon():ArkoudaServerDaemon;
+               return new shared MetricsServerDaemon();
             }
             otherwise {
                 throw getErrorWithContext(

@@ -79,6 +79,21 @@ module ServerConfig
     }
 
     /*
+     * Returns the version of Chapel arkouda was built with
+     */
+    proc getChplVersion() throws {
+        use Version;
+        var ver = chplVersion:string;
+        var verArray = ver.split('version');
+        return verArray[1];
+    }
+
+    /*
+    Indicates the version of Chapel Arkouda was built with
+    */
+    const chplVersion = try! getChplVersion();
+
+    /*
     Indicates whether token authentication is being used for Akrouda server requests
     */
     config const authenticate : bool = false;
@@ -116,6 +131,7 @@ module ServerConfig
 
         class Config {
             const arkoudaVersion: string;
+            const chplVersion: string;
             const ZMQVersion: string;
             const HDF5Version: string;
             const serverHostname: string;
@@ -138,6 +154,7 @@ module ServerConfig
         
         const cfg = new owned Config(
             arkoudaVersion = (ServerConfig.arkoudaVersion:string),
+            chplVersion = chplVersion,
             ZMQVersion = try! "%i.%i.%i".format(Zmajor, Zminor, Zmicro),
             HDF5Version = try! "%i.%i.%i".format(H5major, H5minor, H5micro),
             serverHostname = serverHostname,
@@ -185,7 +202,7 @@ module ServerConfig
         var writeVal = 1, readVal = 0;
         var tmpf = openmem();
         tmpf.writer(kind=iobig).write(writeVal);
-        tmpf.reader(kind=ionative, start=0).read(readVal);
+        tmpf.reader(kind=ionative).read(readVal);
         return if writeVal == readVal then "big" else "little";
     }
 

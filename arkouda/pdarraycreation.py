@@ -226,9 +226,11 @@ def array(
                 f"allowed transfer size. Increase ak.maxTransferBytes to force."
             )
         encoded_np = np.array(encoded, dtype=np.uint8)
-        args = f"{encoded_np.dtype.name} {encoded_np.size} seg_string={True}"
         rep_msg = generic_msg(
-            cmd="array", args=args, payload=_array_memview(encoded_np), send_binary=True
+            cmd="array",
+            args={"dtype": encoded_np.dtype.name, "size": encoded_np.size, "seg_string": True},
+            payload=_array_memview(encoded_np),
+            send_binary=True,
         )
         parts = cast(str, rep_msg).split("+", maxsplit=3)
         return (
@@ -249,8 +251,12 @@ def array(
     # than our numpy array we need to swap to match since the server expects
     # native endian bytes
     aview = _array_memview(a)
-    args = f"{a.dtype.name} {size} seg_strings={False}"
-    rep_msg = generic_msg(cmd="array", args=args, payload=aview, send_binary=True)
+    rep_msg = generic_msg(
+        cmd="array",
+        args={"dtype": a.dtype.name, "size": size, "seg_string": False},
+        payload=aview,
+        send_binary=True,
+    )
     return create_pdarray(rep_msg) if dtype is None else akcast(create_pdarray(rep_msg), dtype)
 
 
@@ -307,7 +313,7 @@ def zeros(size: Union[int_scalars, str], dtype: Union[np.dtype, type, str] = flo
     # check dtype for error
     if cast(np.dtype, dtype).name not in NumericDTypes:
         raise TypeError(f"unsupported dtype {dtype}")
-    repMsg = generic_msg(cmd="create", args="{} {}".format(cast(np.dtype, dtype).name, str(size)))
+    repMsg = generic_msg(cmd="create", args={"dtype": cast(np.dtype, dtype).name, "size": size})
 
     return create_pdarray(repMsg)
 
@@ -356,7 +362,7 @@ def ones(size: Union[int_scalars, str], dtype: Union[np.dtype, type, str] = floa
     # check dtype for error
     if cast(np.dtype, dtype).name not in NumericDTypes:
         raise TypeError(f"unsupported dtype {dtype}")
-    repMsg = generic_msg(cmd="create", args="{} {}".format(cast(np.dtype, dtype).name, str(size)))
+    repMsg = generic_msg(cmd="create", args={"dtype": cast(np.dtype, dtype).name, "size": size})
     a = create_pdarray(repMsg)
     a.fill(1)
     return a
@@ -410,7 +416,7 @@ def full(
     # check dtype for error
     if cast(np.dtype, dtype).name not in NumericDTypes:
         raise TypeError(f"unsupported dtype {dtype}")
-    repMsg = generic_msg(cmd="create", args="{} {}".format(cast(np.dtype, dtype).name, str(size)))
+    repMsg = generic_msg(cmd="create", args={"dtype": cast(np.dtype, dtype).name, "size": size})
     a = create_pdarray(repMsg)
     a.fill(fill_value)
     return a
@@ -642,7 +648,7 @@ def arange(*args, **kwargs) -> pdarray:
     if isSupportedInt(start) and isSupportedInt(stop) and isSupportedInt(stride):
         if stride < 0:
             stop = stop + 2
-        repMsg = generic_msg(cmd="arange", args="{} {} {}".format(start, stop, stride))
+        repMsg = generic_msg(cmd="arange", args={"start": start, "stop": stop, "stride": stride})
         return create_pdarray(repMsg) if dtype == int64 else akcast(create_pdarray(repMsg), dtype)
     else:
         raise TypeError(
@@ -698,7 +704,7 @@ def linspace(start: numeric_scalars, stop: numeric_scalars, length: int_scalars)
         raise TypeError("both start and stop must be an int, np.int64, float, or np.float64")
     if not isSupportedNumber(length):
         raise TypeError("length must be an int or int64")
-    repMsg = generic_msg(cmd="linspace", args="{} {} {}".format(start, stop, length))
+    repMsg = generic_msg(cmd="linspace", args={"start": start, "stop": stop, "len": length})
     return create_pdarray(repMsg)
 
 
@@ -771,12 +777,16 @@ def randint(
     # check dtype for error
     if dtype.name not in DTypes:
         raise TypeError(f"unsupported dtype {dtype}")
-    lowstr = NUMBER_FORMAT_STRINGS[dtype.name].format(low)
-    highstr = NUMBER_FORMAT_STRINGS[dtype.name].format(high)
-    sizestr = NUMBER_FORMAT_STRINGS["int64"].format(size)
 
     repMsg = generic_msg(
-        cmd="randint", args="{} {} {} {} {}".format(sizestr, dtype.name, lowstr, highstr, seed)
+        cmd="randint",
+        args={
+            "size": NUMBER_FORMAT_STRINGS["int64"].format(size),
+            "dtype": dtype.name,
+            "low": NUMBER_FORMAT_STRINGS[dtype.name].format(low),
+            "high": NUMBER_FORMAT_STRINGS[dtype.name].format(high),
+            "seed": seed,
+        },
     )
     return create_pdarray(repMsg)
 
@@ -875,7 +885,7 @@ def standard_normal(size: int_scalars, seed: Union[None, int_scalars] = None) ->
         raise ValueError("The size parameter must be > 0")
     return create_pdarray(
         generic_msg(
-            cmd="randomNormal", args="{} {}".format(NUMBER_FORMAT_STRINGS["int64"].format(size), seed)
+            cmd="randomNormal", args={"size": NUMBER_FORMAT_STRINGS["int64"].format(size), "seed": seed}
         )
     )
 
@@ -933,14 +943,14 @@ def random_strings_uniform(
 
     repMsg = generic_msg(
         cmd="randomStrings",
-        args="{} {} {} {} {} {}".format(
-            NUMBER_FORMAT_STRINGS["int64"].format(size),
-            "uniform",
-            characters,
-            NUMBER_FORMAT_STRINGS["int64"].format(minlen),
-            NUMBER_FORMAT_STRINGS["int64"].format(maxlen),
-            seed,
-        ),
+        args={
+            "size": NUMBER_FORMAT_STRINGS["int64"].format(size),
+            "dist": "uniform",
+            "chars": characters,
+            "arg1": NUMBER_FORMAT_STRINGS["int64"].format(minlen),
+            "arg2": NUMBER_FORMAT_STRINGS["int64"].format(maxlen),
+            "seed": seed,
+        },
     )
     return Strings.from_return_msg(cast(str, repMsg))
 
@@ -1009,13 +1019,13 @@ def random_strings_lognormal(
 
     repMsg = generic_msg(
         cmd="randomStrings",
-        args="{} {} {} {} {} {}".format(
-            NUMBER_FORMAT_STRINGS["int64"].format(size),
-            "lognormal",
-            characters,
-            NUMBER_FORMAT_STRINGS["float64"].format(logmean),
-            NUMBER_FORMAT_STRINGS["float64"].format(logstd),
-            seed,
-        ),
+        args={
+            "size": NUMBER_FORMAT_STRINGS["int64"].format(size),
+            "dist": "lognormal",
+            "chars": characters,
+            "arg1": NUMBER_FORMAT_STRINGS["float64"].format(logmean),
+            "arg2": NUMBER_FORMAT_STRINGS["float64"].format(logstd),
+            "seed": seed,
+        },
     )
     return Strings.from_return_msg(cast(str, repMsg))

@@ -4,10 +4,12 @@ module Message {
     use Reflection;
     use ServerErrors;
     use NumPyDType;
+    use Map;
+    use List;
 
     enum MsgType {NORMAL,WARNING,ERROR}
     enum MsgFormat {STRING,BINARY}
-    enum ObjectType {PDARRAY, SEGSTRING, LIST, DICT, VALUE}
+    enum ObjectType {PDARRAY, SEGSTRING, LIST, DICT, VALUE, DATETIME, TIMEDELTA}
 
     /*
      * Encapsulates the message string and message type.
@@ -54,11 +56,40 @@ module Message {
 
         proc init() {}
 
-        proc init(key: string, val: string, objType: string, dtype: string) {
+        proc init(key: string, val: string, objType: ObjectType, dtype: string) {
             this.key = key;
             this.val = val;
             this.objType = objType;
             this.dtype = dtype;
+        }
+
+        proc asMap() throws {
+            var m = new map(string, string);
+            m.add("key", this.key);
+            m.add("val", this.val);
+            m.add("objType", this.objType:string);
+            m.add("dtype", this.dtype);
+            return m;
+        }
+
+        proc getJSON() throws {
+            return "%jt".format(this);
+        }
+
+        proc setKey(value: string) {
+            this.key = value;
+        }
+
+        proc setVal(value: string) {
+            this.val = value;
+        }
+
+        proc setObjType(value: ObjectType) {
+            this.ObjectType = value;
+        }
+
+        proc setDType(value: string) {
+            this.dtype = value;
         }
 
         /*
@@ -112,6 +143,19 @@ module Message {
             }
             catch {
                 throw new owned ErrorWithContext("Parameter cannot be cast as uint. Attempting to cast %s as type uint failed".format(this.val),
+                                    getLineNumber(),
+                                    getRoutineName(),
+                                    getModuleName(),
+                                    "TypeError");
+            }
+        }
+
+        proc getUInt8Value(): uint(8) throws {
+            try {
+                return this.val:uint(8);
+            }
+            catch {
+                throw new owned ErrorWithContext("Parameter cannot be cast as uint(8). Attempting to cast %s as type uint(8) failed".format(this.val),
                                     getLineNumber(),
                                     getRoutineName(),
                                     getModuleName(),
@@ -216,6 +260,23 @@ module Message {
         proc init(param_list: [?aD] ?t) {
             this.param_list = param_list;
             this.size = param_list.size;
+        }
+
+        proc getJSON(keys: list(string) = list(string)): string throws {
+            const noKeys: bool = keys.isEmpty();
+            var s: int = if noKeys then this.size else keys.size;
+            var json: [0..#s] string;
+            var idx: int = 0;
+            for p in this.param_list {
+                if (noKeys || keys.contains(p.key)) {
+                    json[idx] = p.getJSON();
+                    idx += 1;
+                }
+                if idx > s {
+                    break;
+                }
+            }
+            return "%jt".format(json);
         }
 
         /*
@@ -350,7 +411,7 @@ module Message {
         var w = f.writer();
         w.write(json);
         w.close();
-        var r = f.reader(start=0);
+        var r = f.reader();
         var array: [0..#size] string;
         r.readf("%jt", array);
         r.close();

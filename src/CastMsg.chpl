@@ -6,7 +6,6 @@ module CastMsg {
   use ServerErrors;
   use Logging;
   use Message;
-  use SysError;
   use ServerErrorStrings;
   use ServerConfig;
   use Cast;
@@ -14,9 +13,9 @@ module CastMsg {
   private config const logLevel = ServerConfig.logLevel;
   const castLogger = new Logger(logLevel);
 
-  proc castMsg(cmd: string, payload: string, st: borrowed SymTab): MsgTuple throws {
+  proc castMsg(cmd: string, payload: string, argSize: int, st: borrowed SymTab): MsgTuple throws {
     param pn = Reflection.getRoutineName();
-    var msgArgs = parseMessageArgs(payload, 4);
+    var msgArgs = parseMessageArgs(payload, argSize);
     var name = msgArgs.getValueOf("name");
     var objtype = msgArgs.getValueOf("objType");
     var targetDtype = msgArgs.getValueOf("targetDtype");

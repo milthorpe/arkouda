@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import builtins
-from typing import List, Sequence, cast
+from typing import List, Sequence, Union, cast
 
 import numpy as np  # type: ignore
 from typeguard import typechecked
@@ -53,6 +53,8 @@ __all__ = [
     "rotr",
     "cov",
     "corr",
+    "sqrt",
+    "power",
     "attach_pdarray",
     "unregister_pdarray_by_name",
     "RegistrationError",
@@ -182,7 +184,7 @@ class pdarray:
     def __del__(self):
         try:
             logger.debug(f"deleting pdarray with name {self.name}")
-            generic_msg(cmd="delete", args="{}".format(self.name))
+            generic_msg(cmd="delete", args={"name": self.name})
         except RuntimeError:
             pass
 
@@ -200,12 +202,12 @@ class pdarray:
     def __str__(self):
         from arkouda.client import pdarrayIterThresh
 
-        return generic_msg(cmd="str", args="{} {}".format(self.name, pdarrayIterThresh))
+        return generic_msg(cmd="str", args={"array": self, "printThresh": pdarrayIterThresh})
 
     def __repr__(self):
         from arkouda.client import pdarrayIterThresh
 
-        return generic_msg(cmd="repr", args="{} {}".format(self.name, pdarrayIterThresh))
+        return generic_msg(cmd="repr", args={"array": self, "printThresh": pdarrayIterThresh})
 
     def format_other(self, other: object) -> str:
         """
@@ -274,9 +276,7 @@ class pdarray:
         if isinstance(other, pdarray):
             if self.size != other.size:
                 raise ValueError(f"size mismatch {self.size} {other.size}")
-            cmd = "binopvv"
-            args = "{} {} {}".format(op, self.name, other.name)
-            repMsg = generic_msg(cmd=cmd, args=args)
+            repMsg = generic_msg(cmd="binopvv", args={"op": op, "a": self, "b": other})
             return create_pdarray(repMsg)
         # pdarray binop scalar
         if np.can_cast(other, self.dtype):
@@ -289,9 +289,10 @@ class pdarray:
             dt = resolve_scalar_dtype(other)
         if dt not in DTypes:
             raise TypeError(f"Unhandled scalar type: {other} ({type(other)})")
-        cmd = "binopvs"
-        args = "{} {} {} {}".format(op, self.name, dt, NUMBER_FORMAT_STRINGS[dt].format(other))
-        repMsg = generic_msg(cmd=cmd, args=args)
+        repMsg = generic_msg(
+            cmd="binopvs",
+            args={"op": op, "a": self, "dtype": dt, "value": NUMBER_FORMAT_STRINGS[dt].format(other)},
+        )
         return create_pdarray(repMsg)
 
     # reverse binary operators
@@ -334,9 +335,10 @@ class pdarray:
             dt = resolve_scalar_dtype(other)
         if dt not in DTypes:
             raise TypeError(f"Unhandled scalar type: {other} ({type(other)})")
-        cmd = "binopsv"
-        args = "{} {} {} {}".format(op, dt, NUMBER_FORMAT_STRINGS[dt].format(other), self.name)
-        repMsg = generic_msg(cmd=cmd, args=args)
+        repMsg = generic_msg(
+            cmd="binopsv",
+            args={"op": op, "dtype": dt, "value": NUMBER_FORMAT_STRINGS[dt].format(other), "a": self},
+        )
         return create_pdarray(repMsg)
 
     # overload + for pdarray, other can be {pdarray, int, float}
@@ -466,7 +468,7 @@ class pdarray:
         if isinstance(other, pdarray):
             if self.size != other.size:
                 raise ValueError(f"size mismatch {self.size} {other.size}")
-            generic_msg(cmd="opeqvv", args="{} {} {}".format(op, self.name, other.name))
+            generic_msg(cmd="opeqvv", args={"op": op, "a": self, "b": other})
             return self
         # pdarray binop scalar
         # opeq requires scalar to be cast as pdarray dtype
@@ -476,9 +478,10 @@ class pdarray:
             # Can't cast other as dtype of pdarray
             raise TypeError(f"Unhandled scalar type: {other} ({type(other)})")
 
-        cmd = "opeqvs"
-        args = "{} {} {} {}".format(op, self.name, self.dtype.name, self.format_other(other))
-        generic_msg(cmd=cmd, args=args)
+        generic_msg(
+            cmd="opeqvs",
+            args={"op": op, "a": self, "dtype": self.dtype.name, "value": self.format_other(other)},
+        )
         return self
 
     # overload += pdarray, other can be {pdarray, int, float}
@@ -537,7 +540,13 @@ class pdarray:
                 # Interpret negative key as offset from end of array
                 key += self.size
             if key >= 0 and key < self.size:
-                repMsg = generic_msg(cmd="[int]", args="{} {}".format(self.name, key))
+                repMsg = generic_msg(
+                    cmd="[int]",
+                    args={
+                        "array": self,
+                        "idx": key,
+                    },
+                )
                 fields = repMsg.split()
                 # value = fields[2]
                 return parse_single_value(" ".join(fields[1:]))
@@ -547,7 +556,13 @@ class pdarray:
             (start, stop, stride) = key.indices(self.size)
             logger.debug("start: {} stop: {} stride: {}".format(start, stop, stride))
             repMsg = generic_msg(
-                cmd="[slice]", args="{} {} {} {}".format(self.name, start, stop, stride)
+                cmd="[slice]",
+                args={
+                    "array": self,
+                    "start": start,
+                    "stop": stop,
+                    "stride": stride,
+                },
             )
             return create_pdarray(repMsg)
         if isinstance(key, pdarray):
@@ -556,7 +571,13 @@ class pdarray:
                 raise TypeError(f"unsupported pdarray index type {key.dtype}")
             if kind == "bool" and self.size != key.size:
                 raise ValueError(f"size mismatch {self.size} {key.size}")
-            repMsg = generic_msg(cmd="[pdarray]", args="{} {}".format(self.name, key.name))
+            repMsg = generic_msg(
+                cmd="[pdarray]",
+                args={
+                    "array": self,
+                    "idx": key,
+                },
+            )
             return create_pdarray(repMsg)
         else:
             raise TypeError(f"Unhandled key type: {key} ({type(key)})")
@@ -570,22 +591,27 @@ class pdarray:
             if key >= 0 and key < self.size:
                 generic_msg(
                     cmd="[int]=val",
-                    args="{} {} {} {}".format(self.name, key, self.dtype.name, self.format_other(value)),
+                    args={
+                        "array": self,
+                        "idx": key,
+                        "dtype": self.dtype,
+                        "value": self.format_other(value),
+                    },
                 )
             else:
                 raise IndexError(f"index {orig_key} is out of bounds with size {self.size}")
         elif isinstance(key, pdarray):
             if isinstance(value, pdarray):
-                generic_msg(
-                    cmd="[pdarray]=pdarray",
-                    args="{} {} {}".format(self.name, key.name, value.name),
-                )
+                generic_msg(cmd="[pdarray]=pdarray", args={"array": self, "idx": key, "value": value})
             else:
                 generic_msg(
                     cmd="[pdarray]=val",
-                    args="{} {} {} {}".format(
-                        self.name, key.name, self.dtype.name, self.format_other(value)
-                    ),
+                    args={
+                        "array": self,
+                        "idx": key,
+                        "dtype": self.dtype,
+                        "value": self.format_other(value),
+                    },
                 )
         elif isinstance(key, slice):
             (start, stop, stride) = key.indices(self.size)
@@ -593,19 +619,25 @@ class pdarray:
             if isinstance(value, pdarray):
                 generic_msg(
                     cmd="[slice]=pdarray",
-                    args="{} {} {} {} {}".format(self.name, start, stop, stride, value.name),
+                    args={
+                        "array": self,
+                        "start": start,
+                        "stop": stop,
+                        "stride": stride,
+                        "value": value,
+                    },
                 )
             else:
                 generic_msg(
                     cmd="[slice]=val",
-                    args="{} {} {} {} {} {}".format(
-                        self.name,
-                        start,
-                        stop,
-                        stride,
-                        self.dtype.name,
-                        self.format_other(value),
-                    ),
+                    args={
+                        "array": self,
+                        "start": start,
+                        "stop": stop,
+                        "stride": stride,
+                        "dtype": self.dtype,
+                        "value": self.format_other(value),
+                    },
                 )
         else:
             raise TypeError(f"Unhandled key type: {key} ({type(key)})")
@@ -625,8 +657,7 @@ class pdarray:
             Raised if value is not an int, int64, float, or float64
         """
         generic_msg(
-            cmd="set",
-            args="{} {} {}".format(self.name, self.dtype.name, self.format_other(value)),
+            cmd="set", args={"array": self, "dtype": self.dtype.name, "val": self.format_other(value)}
         )
 
     def any(self) -> np.bool_:
@@ -1091,7 +1122,7 @@ class pdarray:
         # The reply from the server will be binary data
         data = cast(
             memoryview,
-            generic_msg(cmd="tondarray", args="{}".format(self.name), recv_binary=True),
+            generic_msg(cmd="tondarray", args={"array": self}, recv_binary=True),
         )
         # Make sure the received data has the expected length
         if len(data) != self.size * self.dtype.itemsize:
@@ -1529,7 +1560,7 @@ class pdarray:
         >>> b.unregister()
         """
         try:
-            rep_msg = generic_msg(cmd="register", args=f"{self.name} {user_defined_name}")
+            rep_msg = generic_msg(cmd="register", args={"array": self, "user_name": user_defined_name})
             if isinstance(rep_msg, bytes):
                 rep_msg = str(rep_msg, "UTF-8")
             if rep_msg != "success":
@@ -1735,7 +1766,7 @@ def any(pda: pdarray) -> np.bool_:
     RuntimeError
         Raised if there's a server-side error thrown
     """
-    repMsg = generic_msg(cmd="reduction", args="{} {}".format("any", pda.name))
+    repMsg = generic_msg(cmd="reduction", args={"op": "any", "array": pda})
     return parse_single_value(cast(str, repMsg))
 
 
@@ -1761,7 +1792,7 @@ def all(pda: pdarray) -> np.bool_:
     RuntimeError
         Raised if there's a server-side error thrown
     """
-    repMsg = generic_msg(cmd="reduction", args="{} {}".format("all", pda.name))
+    repMsg = generic_msg(cmd="reduction", args={"op": "all", "array": pda})
     return parse_single_value(cast(str, repMsg))
 
 
@@ -1787,7 +1818,7 @@ def is_sorted(pda: pdarray) -> np.bool_:
     RuntimeError
         Raised if there's a server-side error thrown
     """
-    repMsg = generic_msg(cmd="reduction", args="{} {}".format("is_sorted", pda.name))
+    repMsg = generic_msg(cmd="reduction", args={"op": "is_sorted", "array": pda})
     return parse_single_value(cast(str, repMsg))
 
 
@@ -1813,7 +1844,7 @@ def sum(pda: pdarray) -> np.float64:
     RuntimeError
         Raised if there's a server-side error thrown
     """
-    repMsg = generic_msg(cmd="reduction", args="{} {}".format("sum", pda.name))
+    repMsg = generic_msg(cmd="reduction", args={"op": "sum", "array": pda})
     return parse_single_value(cast(str, repMsg))
 
 
@@ -1840,7 +1871,7 @@ def prod(pda: pdarray) -> np.float64:
     RuntimeError
         Raised if there's a server-side error thrown
     """
-    repMsg = generic_msg(cmd="reduction", args="{} {}".format("prod", pda.name))
+    repMsg = generic_msg(cmd="reduction", args={"op": "prod", "array": pda})
     return parse_single_value(cast(str, repMsg))
 
 
@@ -1865,7 +1896,7 @@ def min(pda: pdarray) -> numpy_scalars:
     RuntimeError
         Raised if there's a server-side error thrown
     """
-    repMsg = generic_msg(cmd="reduction", args="{} {}".format("min", pda.name))
+    repMsg = generic_msg(cmd="reduction", args={"op": "min", "array": pda})
     return parse_single_value(cast(str, repMsg))
 
 
@@ -1891,7 +1922,7 @@ def max(pda: pdarray) -> numpy_scalars:
     RuntimeError
         Raised if there's a server-side error thrown
     """
-    repMsg = generic_msg(cmd="reduction", args="{} {}".format("max", pda.name))
+    repMsg = generic_msg(cmd="reduction", args={"op": "max", "array": pda})
     return parse_single_value(cast(str, repMsg))
 
 
@@ -1917,7 +1948,7 @@ def argmin(pda: pdarray) -> np.int64:
     RuntimeError
         Raised if there's a server-side error thrown
     """
-    repMsg = generic_msg(cmd="reduction", args="{} {}".format("argmin", pda.name))
+    repMsg = generic_msg(cmd="reduction", args={"op": "argmin", "array": pda})
     return parse_single_value(cast(str, repMsg))
 
 
@@ -1943,7 +1974,7 @@ def argmax(pda: pdarray) -> np.int64:
     RuntimeError
         Raised if there's a server-side error thrown
     """
-    repMsg = generic_msg(cmd="reduction", args="{} {}".format("argmax", pda.name))
+    repMsg = generic_msg(cmd="reduction", args={"op": "argmax", "array": pda})
     return parse_single_value(cast(str, repMsg))
 
 
@@ -2193,7 +2224,7 @@ def mink(pda: pdarray, k: int_scalars) -> pdarray:
     if pda.size == 0:
         raise ValueError("must be a non-empty pdarray of type int or float")
 
-    repMsg = generic_msg(cmd="mink", args="{} {} {}".format(pda.name, k, False))
+    repMsg = generic_msg(cmd="mink", args={"array": pda, "k": k, "rtnInd": False})
     return create_pdarray(cast(str, repMsg))
 
 
@@ -2249,7 +2280,7 @@ def maxk(pda: pdarray, k: int_scalars) -> pdarray:
     if pda.size == 0:
         raise ValueError("must be a non-empty pdarray of type int or float")
 
-    repMsg = generic_msg(cmd="maxk", args="{} {} {}".format(pda.name, k, False))
+    repMsg = generic_msg(cmd="maxk", args={"array": pda, "k": k, "rtnInd": False})
     return create_pdarray(repMsg)
 
 
@@ -2302,7 +2333,7 @@ def argmink(pda: pdarray, k: int_scalars) -> pdarray:
     if pda.size == 0:
         raise ValueError("must be a non-empty pdarray of type int or float")
 
-    repMsg = generic_msg(cmd="mink", args="{} {} {}".format(pda.name, k, True))
+    repMsg = generic_msg(cmd="mink", args={"array": pda, "k": k, "rtnInd": True})
     return create_pdarray(repMsg)
 
 
@@ -2358,7 +2389,7 @@ def argmaxk(pda: pdarray, k: int_scalars) -> pdarray:
     if pda.size == 0:
         raise ValueError("must be a non-empty pdarray of type int or float")
 
-    repMsg = generic_msg(cmd="maxk", args="{} {} {}".format(pda.name, k, True))
+    repMsg = generic_msg(cmd="maxk", args={"array": pda, "k": k, "rtnInd": True})
     return create_pdarray(repMsg)
 
 
@@ -2591,6 +2622,16 @@ def rotr(x, rot) -> pdarray:
 
 
 @typechecked
+def power(pda: pdarray, pwr: Union[int, float, pdarray]) -> pdarray:
+    return pda**pwr
+
+
+@typechecked
+def sqrt(pda: pdarray) -> pdarray:
+    return power(pda, 0.5)
+
+
+@typechecked
 def attach_pdarray(user_defined_name: str) -> pdarray:
     """
     class method to return a pdarray attached to the registered name in the arkouda
@@ -2630,7 +2671,7 @@ def attach_pdarray(user_defined_name: str) -> pdarray:
     >>> # ...other work...
     >>> b.unregister()
     """
-    repMsg = generic_msg(cmd="attach", args="{}".format(user_defined_name))
+    repMsg = generic_msg(cmd="attach", args={"name": user_defined_name})
     return create_pdarray(repMsg)
 
 
@@ -2672,7 +2713,7 @@ def unregister_pdarray_by_name(user_defined_name: str) -> None:
     >>> # ...other work...
     >>> ak.unregister_pdarray_by_name(b)
     """
-    generic_msg(cmd="unregister", args=user_defined_name)
+    generic_msg(cmd="unregister", args={"name": user_defined_name})
 
 
 # TODO In the future move this to a specific errors file

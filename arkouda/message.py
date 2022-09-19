@@ -19,6 +19,8 @@ class ObjectType(Enum):
     LIST = "LIST"
     DICT = "DICT"
     VALUE = "VALUE"
+    DATETIME = "DATETIME"
+    TIMEDELTA = "TIMEDELTA"
 
     def __str__(self) -> str:
         """
@@ -101,6 +103,48 @@ class ParameterObject:
 
     @staticmethod
     @typechecked
+    def _build_datetime_param(key: str, val) -> ParameterObject:
+        """
+        Create a ParameterObject from a Datetime value
+
+        Parameters
+        ----------
+        key : str
+            key from the dictionary object
+        val
+            Datetime object ot load from the symbol table
+
+        Returns
+        -------
+        ParameterObject
+        """
+        # empty string if name of String obj is none
+        name = val.name if val.name else ""
+        return ParameterObject(key, ObjectType.DATETIME, str(val.values.dtype), name)
+
+    @staticmethod
+    @typechecked
+    def _build_timedelta_param(key: str, val) -> ParameterObject:
+        """
+        Create a ParameterObject from a Timedelta value
+
+        Parameters
+        ----------
+        key : str
+            key from the dictionary object
+        val
+            Timedelta object ot load from the symbol table
+
+        Returns
+        -------
+        ParameterObject
+        """
+        # empty string if name of String obj is none
+        name = val.name if val.name else ""
+        return ParameterObject(key, ObjectType.TIMEDELTA, str(val.values.dtype), name)
+
+    @staticmethod
+    @typechecked
     def _build_list_param(key: str, val: list) -> ParameterObject:
         """
         Create a ParameterObject from a list
@@ -174,10 +218,13 @@ class ParameterObject:
         """
         from arkouda.pdarrayclass import pdarray
         from arkouda.strings import Strings
+        from arkouda.timeclass import Datetime, Timedelta
 
         return {
             pdarray.__name__: ParameterObject._build_pdarray_param,
             Strings.__name__: ParameterObject._build_strings_param,
+            Datetime.__name__: ParameterObject._build_datetime_param,
+            Timedelta.__name__: ParameterObject._build_timedelta_param,
             list.__name__: ParameterObject._build_list_param,
             dict.__name__: ParameterObject._build_dict_param,
         }

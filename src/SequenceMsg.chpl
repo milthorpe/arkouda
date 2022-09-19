@@ -22,12 +22,12 @@ module SequenceMsg {
 
     :returns: MsgTuple
     */
-    proc arangeMsg(cmd: string, payload: string, st: borrowed SymTab): MsgTuple throws {
+    proc arangeMsg(cmd: string, payload: string, argSize: int, st: borrowed SymTab): MsgTuple throws {
         var repMsg: string; // response message
-        var (startstr, stopstr, stridestr) = payload.splitMsgToTuple(3);
-        var start = try! startstr:int;
-        var stop = try! stopstr:int;
-        var stride = try! stridestr:int;
+        var msgArgs = parseMessageArgs(payload, argSize);
+        var start = msgArgs.get("start").getIntValue();
+        var stop = msgArgs.get("stop").getIntValue();
+        var stride = msgArgs.get("stride").getIntValue();
         // compute length
         var len = (stop - start + stride - 1) / stride;
         overMemLimit(8*len);
@@ -69,12 +69,12 @@ module SequenceMsg {
 
     :returns: MsgTuple
     */
-    proc linspaceMsg(cmd: string, payload: string, st: borrowed SymTab): MsgTuple throws {
+    proc linspaceMsg(cmd: string, payload: string, argSize: int, st: borrowed SymTab): MsgTuple throws {
         var repMsg: string; // response message
-        var (startstr, stopstr, lenstr) = payload.splitMsgToTuple(3);
-        var start = try! startstr:real;
-        var stop = try! stopstr:real;
-        var len = try! lenstr:int;
+        var msgArgs = parseMessageArgs(payload, argSize);
+        var start = msgArgs.get("start").getRealValue();
+        var stop = msgArgs.get("stop").getRealValue();
+        var len = msgArgs.get("len").getIntValue();
         // compute stride
         var stride = (stop - start) / (len-1);
         overMemLimit(8*len);
