@@ -259,6 +259,23 @@ endif
 ARKOUDA_SOURCES = $(shell find $(ARKOUDA_SOURCE_DIR)/ -type f -name '*.chpl')
 ARKOUDA_MAIN_SOURCE := $(ARKOUDA_SOURCE_DIR)/$(ARKOUDA_MAIN_MODULE).chpl
 
+CUDA_SOURCES = $(shell find $(ARKOUDA_SOURCE_DIR)/ -type f -name '*.cu')
+CUDA_HEADERS=$(CUDA_SOURCES:.cu=.h)
+CUDA_OBJECTS=$(CUDA_SOURCES:.cu=.cu.o)
+
+%.cu.o:	%.cu
+	nvcc -c $< -o $@
+
+ifndef CHPL_GPU_HOME
+$(error CHPL_GPU_HOME not defined)
+endif
+
+GPU_FLAGS=-M $(CHPL_GPU_HOME)/modules $(CHPL_GPU_HOME)/include/GPUAPI.h $(CUDA_HEADERS) -I$(ZMQ_DIR)/include -I$(HDF5_DIR)/include -I$(ARROW_DIR)/include -L$(CHPL_GPU_HOME)/lib -L$(CHPL_GPU_HOME)/lib64 -lGPUAPICUDA_static -L$(CUDA_ROOT_DIR)/lib -lcudart
+
+ifeq ($(shell expr $(CHPL_MINOR) \< 27),1)
+	ARKOUDA_COMPAT_MODULES += -M $(ARKOUDA_SOURCE_DIR)/compat/lt-127
+endif
+
 ifeq ($(shell expr $(CHPL_MINOR) \= 27),1)
 	ARKOUDA_COMPAT_MODULES += -M $(ARKOUDA_SOURCE_DIR)/compat/e-127
 	CHPL_FLAGS += --instantiate-max 512
@@ -287,7 +304,6 @@ MODULE_GENERATION_SCRIPT=$(ARKOUDA_SOURCE_DIR)/serverModuleGen.py
 # This is the main compilation statement section
 $(ARKOUDA_MAIN_MODULE): check-deps $(ARROW_O) $(ARKOUDA_SOURCES) $(CUDA_HEADERS) $(CUDA_OBJECTS) $(ARKOUDA_MAKEFILES)
 	$(eval MOD_GEN_OUT=$(shell python3 $(MODULE_GENERATION_SCRIPT) $(ARKOUDA_CONFIG_FILE) $(ARKOUDA_SOURCE_DIR)))
-
 	$(CHPL) $(CHPL_DEBUG_FLAGS) $(PRINT_PASSES_FLAGS) $(REGEX_MAX_CAPTURES_FLAG) $(OPTIONAL_SERVER_FLAGS) $(CHPL_FLAGS_WITH_VERSION) $(ARKOUDA_MAIN_SOURCE) $(CUDA_OBJECTS) $(ARKOUDA_COMPAT_MODULES) $(ARKOUDA_SERVER_USER_MODULES) $(GPU_FLAGS) $(MOD_GEN_OUT) -o $@
 
 CLEAN_TARGETS += arkouda-clean
