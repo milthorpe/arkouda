@@ -15,6 +15,7 @@ from typeguard import typechecked
 from arkouda import list_registry
 from arkouda.categorical import Categorical
 from arkouda.client import generic_msg, maxTransferBytes
+from arkouda.client_dtypes import BitVector, Fields, IPv4
 from arkouda.dtypes import bool as akbool
 from arkouda.dtypes import float64 as akfloat64
 from arkouda.dtypes import int64 as akint64
@@ -34,6 +35,7 @@ from arkouda.segarray import SegArray
 from arkouda.series import Series
 from arkouda.sorting import argsort, coargsort
 from arkouda.strings import Strings
+from arkouda.timeclass import Datetime
 
 # This is necessary for displaying DataFrames with BitVector columns,
 # because pandas _html_repr automatically truncates the number of displayed bits
@@ -573,6 +575,14 @@ class DataFrame(UserDict):
                 msg_list.append(f"SegArray+{col}+{self[col].segments.name}+{self[col].values.name}")
             elif isinstance(self[col], Strings):
                 msg_list.append(f"Strings+{col}+{self[col].name}")
+            elif isinstance(self[col], Fields):
+                msg_list.append(f"Fields+{col}+{self[col].name}")
+            elif isinstance(self[col], IPv4):
+                msg_list.append(f"IPv4+{col}+{self[col].name}")
+            elif isinstance(self[col], Datetime):
+                msg_list.append(f"Datetime+{col}+{self[col].name}")
+            elif isinstance(self[col], BitVector):
+                msg_list.append(f"BitVector+{col}+{self[col].name}")
             else:
                 msg_list.append(f"pdarray+{col}+{self[col].name}")
 
@@ -601,6 +611,23 @@ class DataFrame(UserDict):
                 # split creates for segments and values
                 eles = msg[2].split("+")
                 df_dict[msg[1]] = SegArray.from_parts(create_pdarray(eles[0]), create_pdarray(eles[1]))
+            elif t == "Fields":
+                df_dict[msg[1]] = Fields(
+                    create_pdarray(msg[2]),
+                    self[msg[1]].names,
+                    MSB_left=self[msg[1]].MSB_left,
+                    pad=self[msg[1]].padchar,
+                    separator=self[msg[1]].separator,
+                    show_int=self[msg[1]].show_int,
+                )
+            elif t == "IPv4":
+                df_dict[msg[1]] = IPv4(create_pdarray(msg[2]))
+            elif t == "Datetime":
+                df_dict[msg[1]] = Datetime(create_pdarray(msg[2]), unit=self[msg[1]].unit)
+            elif t == "BitVector":
+                df_dict[msg[1]] = BitVector(
+                    create_pdarray(msg[2]), width=self[msg[1]].width, reverse=self[msg[1]].reverse
+                )
             else:
                 df_dict[msg[1]] = create_pdarray(msg[2])
 
@@ -1891,7 +1918,7 @@ class DataFrame(UserDict):
         array(self.columns).register(f"df_columns_{user_defined_name}")
 
         for col, data in self.data.items():
-            data.register(f"df_data_{col}_{data.objtype}_{user_defined_name}")
+            data.register(f"df_data_{data.objtype}_{col}_{user_defined_name}")
 
         self.name = user_defined_name
         return self
@@ -2003,8 +2030,8 @@ class DataFrame(UserDict):
         columns = dict.fromkeys(json.loads(col_resp))
         matches = []
         regEx = compile(
-            f"^df_data_[a-zA-Z0-9]+_({pdarray.objtype}|{Strings.objtype}|"
-            f"{Categorical.objtype}|{SegArray.objtype})_{user_defined_name}"
+            f"^df_data_({pdarray.objtype}|{Strings.objtype}|"
+            f"{Categorical.objtype}|{SegArray.objtype})_.*_{user_defined_name}"
         )
         # Using the regex, cycle through the registered items and find all the columns in the DataFrame
         for name in list_registry():
@@ -2018,7 +2045,7 @@ class DataFrame(UserDict):
         # Remove duplicates caused by multiple components in Categorical or SegArray and
         # loop through
         for name in set(matches):
-            colName = name.split("_")[2]
+            colName = name.split("_")[3]
             if f"_{Strings.objtype}_" in name or f"_{pdarray.objtype}_" in name:
                 cols_resp = cast(str, generic_msg(cmd="attach", args={"name": name}))
                 dtype = cols_resp.split()[2]
@@ -2072,8 +2099,8 @@ class DataFrame(UserDict):
 
         matches = []
         regEx = compile(
-            f"^df_data_[a-zA-Z0-9]+_({pdarray.objtype}|{Strings.objtype}|"
-            f"{Categorical.objtype}|{SegArray.objtype})_{user_defined_name}"
+            f"^df_data_({pdarray.objtype}|{Strings.objtype}|"
+            f"{Categorical.objtype}|{SegArray.objtype})_.*_{user_defined_name}"
         )
         # Using the regex, cycle through the registered items and find all the columns in the DataFrame
         for name in list_registry():
@@ -2101,6 +2128,101 @@ class DataFrame(UserDict):
 
         unregister_pdarray_by_name(f"df_index_{user_defined_name}_key")
         Strings.unregister_strings_by_name(f"df_columns_{user_defined_name}")
+
+    @staticmethod
+    def _parse_col_name(entryName, dfName):
+        """
+        Helper method used by from_return_msg to parse the registered name of the data component
+        and pull out the column type and column name
+
+        Parameters
+        ----------
+        entryName : string
+            The full registered name of the data component
+
+        dfName : string
+            The name of the DataFrame
+
+        Returns
+        -------
+        Tuple (columnName, columnType)
+        """
+        regName = entryName.split(" ")[1]
+        colParts = regName.split("_")
+        colType = colParts[2]
+
+        # Case of '_' in the column or dataframe name
+        if len(colParts) > 5:
+            nameInd = regName.rindex(dfName) - 1
+            startInd = len(colType) + 9
+            return regName[startInd:nameInd], colType
+        else:
+            return colParts[3], colType
+
+    @staticmethod
+    def from_return_msg(repMsg):
+        """
+        Creates and returns a DataFrame based on return components from ak.util.attach
+
+        Parameters
+        ----------
+        repMsg : string
+            A '+' delimited string of the DataFrame components to parse.
+
+        Returns
+        -------
+        DataFrame
+            A DataFrame representing a set of DataFrame components on the server
+
+        Raises
+        ------
+        RuntimeError
+            Raised if a server-side error is thrown in the process of creating
+            the DataFrame instance
+        """
+        parts = repMsg.split("+")
+        dfName = parts[1]
+        cols = dict.fromkeys(json.loads(parts[2][4:]))
+
+        # index could be a pdarray or a Strings
+        idxType = parts[3].split()[2]
+        if idxType == Strings.objtype:
+            idx = Index.factory(Strings.from_return_msg(f"{parts[3]}+{parts[4]}"))
+            i = 5
+        else:  # pdarray
+            idx = Index.factory(create_pdarray(parts[3]))
+            i = 4
+
+        # Column parsing
+        while i < len(parts):
+            if parts[i][:7] == "created":
+                colName, colType = DataFrame._parse_col_name(parts[i], dfName)
+                if colType == "pdarray":
+                    cols[colName] = create_pdarray(parts[i])
+                else:
+                    cols[colName] = Strings.from_return_msg(f"{parts[i]}+{parts[i+1]}")
+                    i += 1
+
+            elif parts[i] == "categorical":
+                colName = DataFrame._parse_col_name(parts[i + 1], dfName)[0]
+                catMsg = (
+                    f"{parts[i]}+{parts[i+1]}+{parts[i+2]}+{parts[i+3]}+"
+                    f"{parts[i+4]}+{parts[i+5]}+{parts[i+6]}"
+                )
+                cols[colName] = Categorical.from_return_msg(catMsg)
+                i += 6
+
+            elif parts[i] == "segarray":
+                colName = DataFrame._parse_col_name(parts[i + 1], dfName)[0]
+                segMsg = f"{parts[i]}+{parts[i+1]}+{parts[i+2]}+{parts[i+3]}"
+                cols[colName] = SegArray._from_attach_return_msg(segMsg)
+                i += 3
+
+            i += 1
+
+        df = DataFrame(cols, idx)
+        df.name = dfName
+        return df
 
 
 def sorted(df, column=False):
