@@ -183,10 +183,6 @@ module RadixSortLSD
         if (checkSorted && isSorted(a)) {
             var ranks: [aD] int = [i in aD] i;
             return ranks;
-        }
-	
-        if (nGPUs > 0) {
-            return cubRadixSortLSD_ranks(a);	
         } else {
             var kr: [aD] (t,int) = [(key,rank) in zip(a,aD)] (key,rank);
             var (nBits, negs) = getBitWidth(a);

@@ -220,6 +220,17 @@ module AryUtil
       return (bitWidth, negs);
     }
 
+    inline proc getBitWidth(a: [?aD] int(32)): (int, bool) {
+      var aMin = min reduce a;
+      var aMax = max reduce a;
+      var wPos = if aMax >= 0 then numBits(int) - clz(aMax) else 0;
+      var wNeg = if aMin < 0 then numBits(int) - clz((-aMin)-1) else 0;
+      const signBit = if aMin < 0 then 1 else 0;
+      const bitWidth = max(wPos, wNeg) + signBit;
+      const negs = aMin < 0;
+      return (bitWidth, negs);
+    }
+
     inline proc getBitWidth(a: [?aD] uint): (int, bool) {
       const negs = false;
       var aMax = max reduce a;

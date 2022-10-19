@@ -307,7 +307,11 @@ module ArgSortMsg
           iv = [(a, i) in AI] i;
         }
         when SortingAlgorithm.RadixSortLSD {
-          iv = radixSortLSD_ranks(A);
+          if (nGPUs > 0) {
+            iv = cubRadixSortLSD_ranks(a);
+          } else {
+            iv = radixSortLSD_ranks(A);
+          }
         }
         otherwise {
           throw getErrorWithContext(

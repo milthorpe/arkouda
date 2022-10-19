@@ -1,4 +1,5 @@
 module CUBHistogram {
+    use MultiTypeSymEntry;
     use GPUIterator;
     use GPUAPI;
     use CTypes;
@@ -15,12 +16,12 @@ module CUBHistogram {
     extern proc nextafterf(from: real(32), to: real(32)): real(32);
     extern proc nextafter(from: real(64), to: real(64)): real(64);
 
-    proc cubHistogram(samples: [] ?t, histogram: [] int(32), lower_bound: t, upper_bound: t, N: int, lo: int, hi: int) {
+    private proc cubHistogram(e: SymEntry, histogram: [] int, lower_bound: ?t, upper_bound: t, N: int, deviceId: int(32)) {
         var num_levels = histogram.size + 1;
         //try! writeln("num_levels %t lower_bound %t upper_bound %t".format(num_levels, lower_bound, upper_bound));
-        var devSamples = new GPUArray(samples.localSlice(lo .. hi));
+        var devSamples = e.getDeviceArray(deviceId);
         var devHistogram = new GPUArray(histogram);
-        devSamples.toDevice();
+
         // CUB histogram is exclusive of the upper bound, whereas Arkouda is inclusive
         if t == int(32) {
             var upper = upper_bound + 1;
@@ -39,28 +40,22 @@ module CUBHistogram {
         devHistogram.fromDevice();
     }
 
-    proc cubHistogram(a: [?aD] ?etype, aMin: etype, aMax: etype, bins: int, binWidth: real) {
-        // TODO CUB doesn't support int(64) histogram bins due to lack of atomic ops on GPU
-        if (a.size > max(int(32))) {
-            try! stderr.writeln("warning: CUB histogram will overflow if there are more than %t items in a bin".format(max(int(32))));
-        }
-
-        var nGPUs: int(32);
-        GetDeviceCount(nGPUs);
+    proc cubHistogram(e: SymEntry, aMin: ?etype, aMax: etype, bins: int, binWidth: real) {
+        e.toDevice();
 
         // each device computes its histogram in a separate array
-        var deviceHistograms: [0..#nGPUs][0..#bins] int(32);
+        var deviceHistograms: [0..#nGPUs][0..#bins] int;
 
         // TODO: proper lambda functions break Chapel compiler
         record Lambda {
             proc this(lo: int, hi: int, N: int) {
-                var device: int(32);
-                GetDevice(device);
-                cubHistogram(a, deviceHistograms[device], aMin, aMax, N, lo, hi);
+                var deviceId: int(32);
+                GetDevice(deviceId);
+                cubHistogram(e, deviceHistograms[deviceId], aMin, aMax, N, deviceId);
             }
         }
         // get local domain's indices
-        var lD = aD.localSubdomain();
+        var lD = e.a.domain.localSubdomain();
         // calc task's indices from local domain's indices
         var tD = {lD.low..lD.high};
         var cubHistogramCallback = new Lambda();
@@ -69,7 +64,6 @@ module CUBHistogram {
             exit(1);
         }
 
-        // need to return histogram bin counts at int(64) as per Arkouda API
         var finalHistogram: [0..#bins] int;
         if disableMultiGPUs || nGPUs == 1 {
             // no need to merge

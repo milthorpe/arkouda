@@ -13,6 +13,9 @@ module HistogramMsg
 
     use Histogram;
     use Message;
+
+    use GPUIterator;
+    use CUBHistogram;
  
     private config const logLevel = ServerConfig.logLevel;
     const hgmLogger = new Logger(logLevel);
@@ -59,8 +62,13 @@ module HistogramMsg
           else {
               hgmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
                                                             "%t > %t".format(bins,mBound));
-              var hist = histogramGlobalAtomic(e.a, aMin, aMax, bins, binWidth);
-              st.addEntry(rname, new shared SymEntry(hist));
+              if (nGPUs > 0) {
+                  var hist = cubHistogram(e, aMin, aMax, bins, binWidth);
+                  st.addEntry(rname, new shared SymEntry(hist));
+              } else {
+                  var hist = histogramGlobalAtomic(e.a, aMin, aMax, bins, binWidth);
+                  st.addEntry(rname, new shared SymEntry(hist));
+              }
           }
         }
 

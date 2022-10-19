@@ -1,4 +1,5 @@
 module CUBRadixSort {
+    use MultiTypeSymEntry;
     use GPUIterator;
     use GPUAPI;
     use CTypes;
@@ -11,12 +12,7 @@ module CUBRadixSort {
     extern proc cubSortPairs_float(keys_in: c_void_ptr, keys_out: c_void_ptr, values_in: c_void_ptr, values_out: c_void_ptr, N: c_size_t);
     extern proc cubSortPairs_double(keys_in: c_void_ptr, keys_out: c_void_ptr, values_in: c_void_ptr, values_out: c_void_ptr, N: c_size_t);
 
-    proc cubSortPairs(a:[?aD] ?t, aOut: [aD] t, ranksIn: [aD] int, ranksOut: [aD] int, N: int, lo: int, hi: int) {
-        var devA = new GPUArray(a.localSlice(lo .. hi));
-        var devAOut = new GPUArray(aOut.localSlice(lo .. hi));
-        var devRanksIn = new GPUArray(ranksIn.localSlice(lo .. hi));
-        var devRanksOut = new GPUArray(ranksOut.localSlice(lo .. hi));
-        devA.toDevice();
+    proc cubSortPairs(type t, devA: GPUArray, devAOut: GPUArray, devRanksIn: GPUArray, devRanksOut: GPUArray, N: int) {
         devRanksIn.toDevice();
         if t == int(32) {
             cubSortPairs_int32(devA.dPtr(), devAOut.dPtr(), devRanksIn.dPtr(), devRanksOut.dPtr(), N: c_size_t);
@@ -34,39 +30,48 @@ module CUBRadixSort {
         devRanksOut.fromDevice();
     }
 
+
+    // TODO update ArgSortMsg to call the SymEntry version of this proc
+    proc cubRadixSortLSD_ranks(a: [?aD] ?t) {
+        var aEntry = new SymEntry(a);
+        var ranksEntry = cubRadixSortLSD_ranks(aEntry);
+        var ranks = ranksEntry.a;
+        return ranks;
+    }
+
     /* Radix Sort Least Significant Digit
        radix sort a block distributed array
        returning a permutation vector as a block distributed array */
-    proc cubRadixSortLSD_ranks(a:[?aD] ?t): [aD] int {
-        var nGPUs: int(32);
-        GetDeviceCount(nGPUs);
-        /*
-        if (!disableMultiGPUs) {
-         writeln("Multiple GPUs are currently not supported, found ", nGPUs, " GPUs!");
-         exit(1);
-        }
-        */
-        /*
-        for i in 0..<nGPUs {
-            // TODO GA Tech API's chunk calculation is uneven
-            writeln("chunk ",i," is ",computeChunk(aD.dim(0), i, nGPUs));
-        }
-        */
+    proc cubRadixSortLSD_ranks(aEntry: SymEntry) {
+        aEntry.toDevice();
+
+        var a = aEntry.a;
+        var aD = a.domain;
+        type t = aEntry.etype;
 
         var ranksIn: [aD] int = [rank in aD] rank;
         var ranksOut: [aD] int;
         var aOut: [aD] t;
+        var ranks: [aD] int;
+        var ranksEntry = new shared SymEntry(ranks);
 
         // TODO: proper lambda functions break Chapel compiler
         record Lambda {
             proc this(lo: int, hi: int, N: int) {
+                var deviceId: int(32);
+                GetDevice(deviceId);
                 if (verbose) {
-                    var device, count: int(32);
-                    GetDevice(device);
+                    var count: int(32);
                     GetDeviceCount(count);
-                    //writeln("In countDigitsCallback, launching the CUDA kernel with a range of ", lo, "..", hi, " (Size: ", N, "), GPU", device, " of ", count, " @", here);
+                    writeln("In cubSortCallback, launching the CUDA kernel with a range of ", lo, "..", hi, " (Size: ", N, "), GPU", deviceId, " of ", count, " @", here);
                 }
-                cubSortPairs(a, aOut, ranksIn, ranksOut, N, lo, hi);
+                var devA = aEntry.getDeviceArray(deviceId);
+                var devRanksOut = ranksEntry.getDeviceArray(deviceId);
+                // these are temporary arrays that do not need to be cached on SymEntry
+                var devAOut = new GPUArray(aOut.localSlice(lo .. hi));
+                var devRanksIn = new GPUArray(ranksIn.localSlice(lo .. hi));
+
+                cubSortPairs(t, devA, devAOut, devRanksIn, devRanksOut, N);
             }
         }
         // get local domain's indices
@@ -81,14 +86,14 @@ module CUBRadixSort {
 
         if disableMultiGPUs || nGPUs == 1 {
             // no need to merge
-            return ranksOut;
+            ranks = ranksOut;
+        } else {
+            // merge sorted chunks
+            var kr: [aD] (t,int) = [(key,rank) in zip(aOut,ranksOut)] (key,rank);
+            var krOut: [aD] (t,int);
+            mergeSortedRanks(krOut, kr, nGPUs);
+            ranks = [(_, rank) in krOut] rank;
         }
-
-        // merge sorted chunks
-        var kr: [aD] (t,int) = [(key,rank) in zip(aOut,ranksOut)] (key,rank);
-        var krOut: [aD] (t,int);
-        mergeSortedRanks(krOut, kr, nGPUs);
-        var ranks: [aD] int = [(_, rank) in krOut] rank;
-        return ranks;
+        return ranksEntry;
     }
 }

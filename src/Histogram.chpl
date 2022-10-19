@@ -40,10 +40,6 @@ module Histogram
 
     */
     proc histogramGlobalAtomic(a: [?aD] ?etype, aMin: etype, aMax: etype, bins: int, binWidth: real) {
-        if (nGPUs > 0) {
-            return cubHistogram(a, aMin, aMax, bins, binWidth);
-        }
-
         var hD = makeDistDom(bins);
         var atomicHist: [hD] atomic int;
         

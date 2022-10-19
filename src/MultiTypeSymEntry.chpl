@@ -8,12 +8,24 @@ module MultiTypeSymEntry
     use Logging;
     use AryUtil;
 
+    use GPUAPI;
+    use GPUIterator;
+
     public use NumPyDType;
     public use SymArrayDmap;
     use MultiTypeSymbolTable;
 
     private config const logLevel = ServerConfig.logLevel;
     const genLogger = new Logger(logLevel);
+
+    var gpuDevices = 0..#GPUIterator.nGPUs;
+
+    proc computeChunks(r: range, numChunks) where r.stridable == false {
+        var chunks: [gpuDevices] range;
+        const numElems = r.size;
+        const elemsPerChunk = numElems/numChunks;
+        return [myID in gpuDevices] if (myID != numChunks - 1) then (r.low + elemsPerChunk * myID .. #elemsPerChunk) else (r.low + elemsPerChunk * myID .. r.high);
+    }
 
     /**
      * Internal Types we can use to build our Symbol type hierarchy.
@@ -187,6 +199,37 @@ module MultiTypeSymEntry
         */
         const aD: makeDistDom(size).type;
         var a: [aD] etype;
+
+        /** Represents a copy of the array cached on GPU devices */
+        class DeviceCache {
+            /** Is the device copy the latest version of the array? */
+            var isCurrent = false;
+            /* Indicates the range of data for each GPU device */
+            var deviceChunks: [gpuDevices] range;
+            //var hostArrays: [gpuDevices][1..0] etype; // GPU host arrays are empty until initialized
+            /* The GPU arrays (host + device array) for each device */
+            var deviceArrays: [gpuDevices] owned GPUArray;
+
+            proc init(a: [?aD] ?etype) {
+                deviceChunks = computeChunks(aD.dim(0), nGPUs);
+                deviceArrays = [deviceId in gpuDevices] new GPUArray(a.localSlice(deviceChunks[deviceId]));
+            }
+
+            proc toDevice() {
+                if (!isCurrent) {
+                    forall deviceId in gpuDevices do deviceArrays[deviceId].toDevice();
+                    isCurrent = true;
+                }
+            }
+
+            proc fromDevice() {
+                if (isCurrent) {
+                    forall deviceId in gpuDevices do deviceArrays[deviceId].fromDevice();
+                }
+            }
+        }
+
+        var deviceCache: owned DeviceCache?;
         
         /*
         This init takes length and element type
@@ -204,7 +247,6 @@ module MultiTypeSymEntry
 
             this.etype = etype;
             this.aD = makeDistDom(len);
-            // this.a uses default initialization
         }
 
         /*This init takes an array of a type
@@ -222,6 +264,20 @@ module MultiTypeSymEntry
             this.a = a;
         }
 
+        proc toDevice() {
+            if (deviceCache == nil) then deviceCache = new DeviceCache(a);
+            deviceCache!.toDevice();
+        }
+
+        proc fromDevice() {
+            deviceCache!.fromDevice();
+        }
+
+        proc getDeviceArray(deviceId: int(32)) {
+            if (deviceCache == nil) then deviceCache = new DeviceCache(a);
+            return deviceCache!.deviceArrays[deviceId].borrow();
+        }
+
         /*
         Verbose flag utility method
         */
@@ -233,6 +289,12 @@ module MultiTypeSymEntry
         */
         proc deinit() {
             if logLevel == LogLevel.DEBUG {writeln("deinit SymEntry");try! stdout.flush();}
+            /*
+            for deviceId in gpuDevices {
+                if (! is_c_nil(deviceArrays.dPtr())) then
+                    deviceArrays.free();
+            }
+            */
         }
         
         override proc writeThis(f) throws {
