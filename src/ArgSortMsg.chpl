@@ -23,6 +23,7 @@ module ArgSortMsg
     use MultiTypeSymEntry;
     use ServerErrorStrings;
 
+    use GPUIterator;
     use RadixSortLSD;
     use SegmentedString;
     use Reflection;
@@ -308,7 +309,7 @@ module ArgSortMsg
         }
         when SortingAlgorithm.RadixSortLSD {
           if (nGPUs > 0) {
-            iv = cubRadixSortLSD_ranks(a);
+            iv = cubRadixSortLSD_ranks(A);
           } else {
             iv = radixSortLSD_ranks(A);
           }
