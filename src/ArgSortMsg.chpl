@@ -24,6 +24,7 @@ module ArgSortMsg
     use ServerErrorStrings;
 
     use GPUIterator;
+    use CUBRadixSort;
     use RadixSortLSD;
     use SegmentedString;
     use Reflection;
