@@ -29,6 +29,7 @@ module CUBSum {
     }
 
        proc cubSum(e: SymEntry) {
+        e.createDeviceCache();
         e.toDevice();
 
         var deviceSum: [0..#nGPUs] e.etype;

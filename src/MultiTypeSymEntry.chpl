@@ -208,16 +208,31 @@ module MultiTypeSymEntry
             var deviceChunks: [gpuDevices] range;
             //var hostArrays: [gpuDevices][1..0] etype; // GPU host arrays are empty until initialized
             /* The GPU arrays (host + device array) for each device */
-            var deviceArrays: [gpuDevices] owned GPUArray;
+            var deviceArrays: [gpuDevices] shared GPUArray?;
 
-            proc init(a: [?aD] ?etype) {
+            proc createDeviceArrays(a: [?aD] ?etype) {
                 deviceChunks = computeChunks(aD.dim(0), nGPUs);
-                deviceArrays = [deviceId in gpuDevices] new GPUArray(a.localSlice(deviceChunks[deviceId]));
+                var tmpDeviceArrays: [gpuDevices] shared GPUArray?;
+                record Lambda {
+                    proc this(lo: int, hi: int, N: int) {
+                        var deviceId: int(32);
+                        GetDevice(deviceId);
+                        tmpDeviceArrays[deviceId] = new shared GPUArray(a.localSlice(lo .. hi));
+                    }
+                }
+                var createDeviceArrayCallback = new Lambda();
+                var lD = aD.localSubdomain();
+                var tD = {lD.low..lD.high};
+                forall i in GPU(tD, createDeviceArrayCallback) {
+                    writeln("Should not reach this point!");
+                    exit(1);
+                }
+                for deviceId in gpuDevices do deviceArrays[deviceId] = tmpDeviceArrays[deviceId];
             }
 
             proc toDevice() {
                 if (!isCurrent) {
-                    forall deviceId in gpuDevices do deviceArrays[deviceId].toDevice();
+                    forall deviceId in gpuDevices do deviceArrays[deviceId]!.toDevice();
                     isCurrent = true;
                 }
             }
@@ -265,7 +280,6 @@ module MultiTypeSymEntry
         }
 
         proc toDevice() {
-            if (deviceCache == nil) then deviceCache = new DeviceCache(a);
             deviceCache!.toDevice();
         }
 
@@ -274,8 +288,15 @@ module MultiTypeSymEntry
         }
 
         proc getDeviceArray(deviceId: int(32)) {
-            if (deviceCache == nil) then deviceCache = new DeviceCache(a);
-            return deviceCache!.deviceArrays[deviceId].borrow();
+            return deviceCache!.deviceArrays[deviceId]!.borrow();
+        }
+
+        // TODO find a thread-safe way of doing this on demand
+        proc createDeviceCache() {
+            if (deviceCache == nil) {
+                deviceCache = new DeviceCache();
+                deviceCache!.createDeviceArrays(a);
+            }
         }
 
         /*

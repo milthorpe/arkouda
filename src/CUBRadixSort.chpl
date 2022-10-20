@@ -43,6 +43,7 @@ module CUBRadixSort {
        radix sort a block distributed array
        returning a permutation vector as a block distributed array */
     proc cubRadixSortLSD_ranks(aEntry: SymEntry) {
+        aEntry.createDeviceCache();
         aEntry.toDevice();
 
         var a = aEntry.a;
@@ -50,10 +51,10 @@ module CUBRadixSort {
         type t = aEntry.etype;
 
         var ranksIn: [aD] int = [rank in aD] rank;
-        var ranksOut: [aD] int;
         var aOut: [aD] t;
-        var ranks: [aD] int;
-        var ranksEntry = new shared SymEntry(ranks);
+        var ranksOut: [aD] int;
+        var ranksEntry = new shared SymEntry(ranksOut);
+        ranksEntry.createDeviceCache();
 
         // TODO: proper lambda functions break Chapel compiler
         record Lambda {
@@ -70,7 +71,6 @@ module CUBRadixSort {
                 // these are temporary arrays that do not need to be cached on SymEntry
                 var devAOut = new GPUArray(aOut.localSlice(lo .. hi));
                 var devRanksIn = new GPUArray(ranksIn.localSlice(lo .. hi));
-
                 cubSortPairs(t, devA, devAOut, devRanksIn, devRanksOut, N);
             }
         }
@@ -86,14 +86,15 @@ module CUBRadixSort {
 
         if disableMultiGPUs || nGPUs == 1 {
             // no need to merge
-            ranks = ranksOut;
+            return ranksEntry;
         } else {
             // merge sorted chunks
+            var ranks: [aD] int;
             var kr: [aD] (t,int) = [(key,rank) in zip(aOut,ranksOut)] (key,rank);
             var krOut: [aD] (t,int);
             mergeSortedRanks(krOut, kr, nGPUs);
             ranks = [(_, rank) in krOut] rank;
+            return new shared SymEntry(ranks);
         }
-        return ranksEntry;
     }
 }

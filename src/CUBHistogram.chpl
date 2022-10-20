@@ -41,6 +41,7 @@ module CUBHistogram {
     }
 
     proc cubHistogram(e: SymEntry, aMin: ?etype, aMax: etype, bins: int, binWidth: real) {
+        e.createDeviceCache();
         e.toDevice();
 
         // each device computes its histogram in a separate array
