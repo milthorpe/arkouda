@@ -5,8 +5,6 @@ module CUBHistogram {
     use CTypes;
     use IO;
 
-    config param verbose = false;
-
     extern proc cubHistogram_int32(samples: c_void_ptr, histogram: c_void_ptr, num_levels: int, lower_bound: int(32), upper_bound: int(32), N: int);
     extern proc cubHistogram_int64(samples: c_void_ptr, histogram: c_void_ptr, num_levels: int, lower_bound: int(64), upper_bound: int(64), N: int);
     extern proc cubHistogram_float(samples: c_void_ptr, histogram: c_void_ptr, num_levels: int, lower_bound: real(32), upper_bound: real(32), N: int);
@@ -38,6 +36,12 @@ module CUBHistogram {
         }
         DeviceSynchronize();
         devHistogram.fromDevice();
+    }
+
+    // TODO update HistogramMsg to call the SymEntry version of this proc
+    proc cubHistogram(a: [?aD] ?t, aMin: t, aMax: t, bins: int, binWidth: real) {
+        var aEntry = new SymEntry(a);
+        return cubHistogram(aEntry, aMin, aMax, bins, binWidth);
     }
 
     proc cubHistogram(e: SymEntry, aMin: ?etype, aMax: etype, bins: int, binWidth: real) {

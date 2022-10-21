@@ -28,7 +28,13 @@ module CUBSum {
         return hostOut[0];
     }
 
-       proc cubSum(e: SymEntry) {
+    // TODO update ReductionMsg to call the SymEntry version of this proc
+    proc cubSum(a: [?aD] ?t) {
+        var aEntry = new SymEntry(a);
+        return cubSum(aEntry);
+    }
+
+    proc cubSum(e: SymEntry) {
         e.createDeviceCache();
         e.toDevice();
 
