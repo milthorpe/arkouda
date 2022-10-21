@@ -60,5 +60,4 @@ module CUBSum {
 
         return + reduce deviceSum;
     }
-
 }
