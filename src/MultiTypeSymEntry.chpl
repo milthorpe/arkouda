@@ -203,7 +203,7 @@ module MultiTypeSymEntry
         /** Represents a copy of the array cached on GPU devices */
         class DeviceCache {
             /** Is the device copy the latest version of the array? */
-            var isCurrent = false;
+            var isCurrent = false; // TODO thread-safe way to manage this
             /* Indicates the range of data for each GPU device */
             var deviceChunks: [gpuDevices] range;
             //var hostArrays: [gpuDevices][1..0] etype; // GPU host arrays are empty until initialized
@@ -230,17 +230,14 @@ module MultiTypeSymEntry
                 for deviceId in gpuDevices do deviceArrays[deviceId] = tmpDeviceArrays[deviceId];
             }
 
-            proc toDevice() {
+            proc toDevice(deviceId: int(32)) {
                 if (!isCurrent) {
-                    forall deviceId in gpuDevices do deviceArrays[deviceId]!.toDevice();
-                    isCurrent = true;
+                    deviceArrays[deviceId]!.toDevice();
                 }
             }
 
-            proc fromDevice() {
-                if (isCurrent) {
-                    forall deviceId in gpuDevices do deviceArrays[deviceId].fromDevice();
-                }
+            proc fromDevice(deviceId: int(32)) {
+                deviceArrays[deviceId].fromDevice();
             }
         }
 
@@ -279,12 +276,12 @@ module MultiTypeSymEntry
             this.a = a;
         }
 
-        proc toDevice() {
-            deviceCache!.toDevice();
+        proc toDevice(deviceId: int(32)) {
+            deviceCache!.toDevice(deviceId);
         }
 
-        proc fromDevice() {
-            deviceCache!.fromDevice();
+        proc fromDevice(deviceId: int(32)) {
+            deviceCache!.fromDevice(deviceId);
         }
 
         proc getDeviceArray(deviceId: int(32)) {

@@ -14,10 +14,8 @@ module CUBHistogram {
     extern proc nextafterf(from: real(32), to: real(32)): real(32);
     extern proc nextafter(from: real(64), to: real(64)): real(64);
 
-    private proc cubHistogram(e: SymEntry, histogram: [] int, lower_bound: ?t, upper_bound: t, N: int, deviceId: int(32)) {
+    private proc cubHistogram(type t, devSamples: GPUArray, histogram: [] int, lower_bound: t, upper_bound: t, N: int, deviceId: int(32)) {
         var num_levels = histogram.size + 1;
-        //try! writeln("num_levels %t lower_bound %t upper_bound %t".format(num_levels, lower_bound, upper_bound));
-        var devSamples = e.getDeviceArray(deviceId);
         var devHistogram = new GPUArray(histogram);
 
         // CUB histogram is exclusive of the upper bound, whereas Arkouda is inclusive
@@ -46,7 +44,6 @@ module CUBHistogram {
 
     proc cubHistogram(e: SymEntry, aMin: ?etype, aMax: etype, bins: int, binWidth: real) {
         e.createDeviceCache();
-        e.toDevice();
 
         // each device computes its histogram in a separate array
         var deviceHistograms: [0..#nGPUs][0..#bins] int;
@@ -56,7 +53,8 @@ module CUBHistogram {
             proc this(lo: int, hi: int, N: int) {
                 var deviceId: int(32);
                 GetDevice(deviceId);
-                cubHistogram(e, deviceHistograms[deviceId], aMin, aMax, N, deviceId);
+                e.toDevice(deviceId);
+                cubHistogram(e.etype, e.getDeviceArray(deviceId), deviceHistograms[deviceId], aMin, aMax, N, deviceId);
             }
         }
         // get local domain's indices
@@ -68,6 +66,7 @@ module CUBHistogram {
             writeln("Should not reach this point!");
             exit(1);
         }
+        e.deviceCache!.isCurrent = true;
 
         var finalHistogram: [0..#bins] int;
         if disableMultiGPUs || nGPUs == 1 {

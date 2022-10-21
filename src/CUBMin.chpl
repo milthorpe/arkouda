@@ -36,7 +36,6 @@ module CUBMin {
 
     proc cubMin(e: SymEntry) {
         e.createDeviceCache();
-        e.toDevice();
 
         var deviceMin: [0..#nGPUs] e.etype;
 
@@ -45,6 +44,7 @@ module CUBMin {
             proc this(lo: int, hi: int, N: int) {
                 var deviceId: int(32);
                 GetDevice(deviceId);
+                e.toDevice(deviceId);
                 deviceMin[deviceId] = cubMinDevice(e.etype, e.getDeviceArray(deviceId));
             }
         }

@@ -36,7 +36,6 @@ module CUBMax {
 
     proc cubMax(e: SymEntry) {
         e.createDeviceCache();
-        e.toDevice();
 
         var deviceMax: [0..#nGPUs] e.etype;
 
@@ -45,6 +44,7 @@ module CUBMax {
             proc this(lo: int, hi: int, N: int) {
                 var deviceId: int(32);
                 GetDevice(deviceId);
+                e.toDevice(deviceId);
                 deviceMax[deviceId] = cubMaxDevice(e.etype, e.getDeviceArray(deviceId));
             }
         }

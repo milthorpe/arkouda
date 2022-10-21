@@ -44,7 +44,6 @@ module CUBRadixSort {
        returning a permutation vector as a block distributed array */
     proc cubRadixSortLSD_ranks(aEntry: SymEntry) {
         aEntry.createDeviceCache();
-        aEntry.toDevice();
 
         var a = aEntry.a;
         var aD = a.domain;
@@ -66,6 +65,7 @@ module CUBRadixSort {
                     GetDeviceCount(count);
                     writeln("In cubSortCallback, launching the CUDA kernel with a range of ", lo, "..", hi, " (Size: ", N, "), GPU", deviceId, " of ", count, " @", here);
                 }
+                aEntry.toDevice(deviceId);
                 var devA = aEntry.getDeviceArray(deviceId);
                 var devRanksOut = ranksEntry.getDeviceArray(deviceId);
                 // these are temporary arrays that do not need to be cached on SymEntry
