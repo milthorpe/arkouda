@@ -13,13 +13,13 @@ module CUBHistogram {
     extern proc cubHistogram_double(samples: c_void_ptr, histogram: c_void_ptr, num_levels: int, lower_bound: real(64), upper_bound: real(64), N: int);
 
     extern proc gpuCommGetUniqueID(): c_void_ptr;
-    extern proc gpuCommInitRank(numRanks: int(32), commId: c_void_ptr, ranks: int): c_void_ptr;
+    extern proc gpuCommInitRank(numRanks: int(32), commId: c_void_ptr, rank: int(32)): c_void_ptr;
     extern proc gpuCommDestroy(comm: c_void_ptr);
 
-    extern proc gpuAllReduce_sum_int32(src: c_void_ptr, dst: c_void_ptr, N: int, comm: c_void_ptr);
-    extern proc gpuAllReduce_sum_int64(src: c_void_ptr, dst: c_void_ptr, N: int, comm: c_void_ptr);
-    extern proc gpuAllReduce_sum_float(src: c_void_ptr, dst: c_void_ptr, N: int, comm: c_void_ptr);
-    extern proc gpuAllReduce_sum_double(src: c_void_ptr, dst: c_void_ptr, N: int, comm: c_void_ptr);
+    extern proc gpuAllReduce_sum_int32(src: c_void_ptr, dst: c_void_ptr, N: c_size_t, comm: c_void_ptr);
+    extern proc gpuAllReduce_sum_int64(src: c_void_ptr, dst: c_void_ptr, N: c_size_t, comm: c_void_ptr);
+    extern proc gpuAllReduce_sum_float(src: c_void_ptr, dst: c_void_ptr, N: c_size_t, comm: c_void_ptr);
+    extern proc gpuAllReduce_sum_double(src: c_void_ptr, dst: c_void_ptr, N: c_size_t, comm: c_void_ptr);
 
     // Chapel doesn't seem to expose these common FP operations
     extern proc nextafterf(from: real(32), to: real(32)): real(32);
@@ -35,19 +35,19 @@ module CUBHistogram {
         if t == int(32) {
             var upper = upper_bound + 1;
             cubHistogram_int32(devSamples.dPtr(), devHistogram.dPtr(), num_levels, lower_bound, upper, N);
-            if reduceOnGPU then gpuAllReduce_sum_int32(devHistogram.dPtr(), devHistogram.dPtr(), num_levels, comm[deviceId]);
+            if reduceOnGPU && nGPUs > 1 then gpuAllReduce_sum_int32(devHistogram.dPtr(), devHistogram.dPtr(), num_levels: c_size_t, comm[deviceId]);
         } else if t == int(64) {
             var upper = upper_bound + 1;
             cubHistogram_int64(devSamples.dPtr(), devHistogram.dPtr(), num_levels, lower_bound, upper, N);
-            if reduceOnGPU then gpuAllReduce_sum_int64(devHistogram.dPtr(), devHistogram.dPtr(), num_levels, comm[deviceId]);
+            if reduceOnGPU && nGPUs > 1 then gpuAllReduce_sum_int64(devHistogram.dPtr(), devHistogram.dPtr(), num_levels: c_size_t, comm[deviceId]);
         } else if t == real(32) {
             var upper = nextafterf(upper_bound, max(real(32)));
             cubHistogram_float(devSamples.dPtr(), devHistogram.dPtr(), num_levels, lower_bound, upper, N);
-            if reduceOnGPU then gpuAllReduce_sum_float(devHistogram.dPtr(), devHistogram.dPtr(), num_levels, comm[deviceId]);
+            if reduceOnGPU && nGPUs > 1 then gpuAllReduce_sum_float(devHistogram.dPtr(), devHistogram.dPtr(), num_levels: c_size_t, comm[deviceId]);
         } else if t == real(64) {
             var upper = nextafter(upper_bound, max(real(64)));
             cubHistogram_double(devSamples.dPtr(), devHistogram.dPtr(), num_levels, lower_bound, upper, N);
-            if reduceOnGPU then gpuAllReduce_sum_double(devHistogram.dPtr(), devHistogram.dPtr(), num_levels, comm[deviceId]);
+            if reduceOnGPU && nGPUs > 1 then gpuAllReduce_sum_double(devHistogram.dPtr(), devHistogram.dPtr(), num_levels: c_size_t, comm[deviceId]);
         }
         DeviceSynchronize();
         if reduceOnGPU {
@@ -102,9 +102,13 @@ module CUBHistogram {
         var commId = gpuCommGetUniqueID();
         forall deviceId in 0..#nGPUs {
             SetDevice(deviceId:int(32));
-            comm[deviceId] = gpuCommInitRank(nGPUs, commId, deviceId);
+            comm[deviceId] = gpuCommInitRank(nGPUs:int(32), commId, deviceId:int(32));
         }
     }
     proc destroyCommunicator() {
         forall deviceId in 0..#nGPUs {
             SetDevice(deviceId:int(32));
+            gpuCommDestroy(comm[deviceId]);
+        }
+    }
+}
