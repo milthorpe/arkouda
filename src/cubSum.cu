@@ -1,4 +1,5 @@
 #include <cub/cub.cuh>
+#include <stdio.h>
 
 using namespace cub;
 
@@ -11,12 +12,12 @@ template <typename T> void cubSum(const T *d_in, T *d_out, int64_t num_items) {
   CubDebugExit(DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items));
 
   // Allocate temporary storage
-  CubDebugExit(g_allocator.DeviceAllocate(&d_temp_storage, temp_storage_bytes));
+  cudaMalloc(&d_temp_storage, temp_storage_bytes);
 
   // Compute Sum
   CubDebugExit(DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items));
 
-  if (d_temp_storage) CubDebugExit(g_allocator.DeviceFree(d_temp_storage));
+  cudaFree(d_temp_storage);
 }
 
 extern "C" {
