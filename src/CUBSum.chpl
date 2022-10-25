@@ -10,18 +10,17 @@ module CUBSum {
     extern proc cubSum_float(input: c_void_ptr, output: c_void_ptr, num_items: c_size_t);
     extern proc cubSum_double(input: c_void_ptr, output: c_void_ptr, num_items: c_size_t);
 
-    private proc cubSumDevice(type etype, devIn: GPUArray) {
-        var num_items = devIn.size;
-        var hostOut: [0..<1] etype;
+    private proc cubSumDevice(type etype, devIn: GPUArray, N: int) {
+        var hostOut: [0..#1] etype;
         var devOut = new GPUArray(hostOut);
         if etype == int(32) {
-            cubSum_int32(devIn.dPtr(), devOut.dPtr(), num_items: c_size_t);
+            cubSum_int32(devIn.dPtr(), devOut.dPtr(), N: c_size_t);
         } else if etype == int(64) {
-            cubSum_int64(devIn.dPtr(), devOut.dPtr(), num_items: c_size_t);
+            cubSum_int64(devIn.dPtr(), devOut.dPtr(), N: c_size_t);
         } else if etype == real(32) {
-            cubSum_float(devIn.dPtr(), devOut.dPtr(), num_items: c_size_t);
+            cubSum_float(devIn.dPtr(), devOut.dPtr(), N: c_size_t);
         } else if etype == real(64) {
-            cubSum_double(devIn.dPtr(), devOut.dPtr(), num_items: c_size_t);
+            cubSum_double(devIn.dPtr(), devOut.dPtr(), N: c_size_t);
         }
         DeviceSynchronize();
         devOut.fromDevice();
@@ -45,7 +44,7 @@ module CUBSum {
                 var deviceId: int(32);
                 GetDevice(deviceId);
                 e.toDevice(deviceId);
-                deviceSum[deviceId] = cubSumDevice(e.etype, e.getDeviceArray(deviceId));
+                deviceSum[deviceId] = cubSumDevice(e.etype, e.getDeviceArray(deviceId), N);
             }
         }
         // get local domain's indices
@@ -56,6 +55,11 @@ module CUBSum {
         forall i in GPU(tD, cubSumCallback) {
             writeln("Should not reach this point!");
             exit(1);
+        }
+
+        if disableMultiGPUs || nGPUs == 1 {
+            // no need to merge
+            return deviceSum[0];
         }
 
         return + reduce deviceSum;

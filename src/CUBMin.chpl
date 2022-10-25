@@ -10,18 +10,17 @@ module CUBMin {
     extern proc cubMin_float(input: c_void_ptr, output: c_void_ptr, num_items: c_size_t);
     extern proc cubMin_double(input: c_void_ptr, output: c_void_ptr, num_items: c_size_t);
 
-    private proc cubMinDevice(type etype, devIn: GPUArray) {
-        var num_items = devIn.size;
-        var hostOut: [0..<1] etype;
+    private proc cubMinDevice(type etype, devIn: GPUArray, N: int) {
+        var hostOut: [0..#1] etype;
         var devOut = new GPUArray(hostOut);
         if etype == int(32) {
-            cubMin_int32(devIn.dPtr(), devOut.dPtr(), num_items: c_size_t);
+            cubMin_int32(devIn.dPtr(), devOut.dPtr(), N: c_size_t);
         } else if etype == int(64) {
-            cubMin_int64(devIn.dPtr(), devOut.dPtr(), num_items: c_size_t);
+            cubMin_int64(devIn.dPtr(), devOut.dPtr(), N: c_size_t);
         } else if etype == real(32) {
-            cubMin_float(devIn.dPtr(), devOut.dPtr(), num_items: c_size_t);
+            cubMin_float(devIn.dPtr(), devOut.dPtr(), N: c_size_t);
         } else if etype == real(64) {
-            cubMin_double(devIn.dPtr(), devOut.dPtr(), num_items: c_size_t);
+            cubMin_double(devIn.dPtr(), devOut.dPtr(), N: c_size_t);
         }
         DeviceSynchronize();
         devOut.fromDevice();
@@ -45,7 +44,7 @@ module CUBMin {
                 var deviceId: int(32);
                 GetDevice(deviceId);
                 e.toDevice(deviceId);
-                deviceMin[deviceId] = cubMinDevice(e.etype, e.getDeviceArray(deviceId));
+                deviceMin[deviceId] = cubMinDevice(e.etype, e.getDeviceArray(deviceId), N);
             }
         }
         // get local domain's indices
@@ -58,6 +57,11 @@ module CUBMin {
             exit(1);
         }
 
-        return + reduce deviceMin;
+        if disableMultiGPUs || nGPUs == 1 {
+            // no need to merge
+            return deviceMin[0];
+        }
+
+        return min reduce deviceMin;
     }
 }
