@@ -135,7 +135,7 @@ def unique(
     if nkeys == 1:
         unique_keys = pda[unique_key_indices]
     else:
-        unique_keys = tuple([a[unique_key_indices] for a in pda])
+        unique_keys = tuple(a[unique_key_indices] for a in pda)
     if return_groups:
         return (unique_keys, permutation, segments, nkeys)
     else:
@@ -283,15 +283,15 @@ class GroupBy:
             rep_json = json.loads(repmsg)
             fields = rep_json["groupby"].split()
             self.name = fields[1]
-            self.length = int(fields[3])
-            self.ngroups = int(fields[4])
+            self.length = int(fields[2])
+            self.ngroups = int(fields[3])
             self.permutation = create_pdarray(rep_json["permutation"])
             self.segments = create_pdarray(rep_json["segments"])
             uki = create_pdarray(rep_json["uniqueKeyIdx"])
             if self.nkeys == 1:
                 self.unique_keys = self.keys[uki]
             else:
-                self.unique_keys = tuple([a[uki] for a in self.keys])
+                self.unique_keys = tuple(a[uki] for a in self.keys)
 
     def size(self) -> Tuple[groupable, pdarray]:
         """

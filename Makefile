@@ -112,7 +112,7 @@ install-hdf5:
 	rm -rf $(HDF5_BUILD_DIR)
 	echo '$$(eval $$(call add-path,$(HDF5_INSTALL_DIR)))' >> Makefile.paths
 
-ARROW_VER := 7.0.0
+ARROW_VER := 9.0.0
 ARROW_NAME_VER := apache-arrow-$(ARROW_VER)
 ARROW_FULL_NAME_VER := arrow-apache-arrow-$(ARROW_VER)
 ARROW_BUILD_DIR := $(DEP_BUILD_DIR)/$(ARROW_FULL_NAME_VER)
@@ -154,7 +154,7 @@ endif
 
 .PHONY: compile-arrow-cpp
 compile-arrow-cpp:
-	$(CXX) -O3 -std=c++11 -c $(ARROW_CPP) -o $(ARROW_O) $(INCLUDE_FLAGS) $(ARROW_SANITIZE)
+	$(CXX) -O3 -std=c++17 -c $(ARROW_CPP) -o $(ARROW_O) $(INCLUDE_FLAGS) $(ARROW_SANITIZE)
 
 $(ARROW_O): $(ARROW_CPP) $(ARROW_H)
 	make compile-arrow-cpp
