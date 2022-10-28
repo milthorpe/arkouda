@@ -1,9 +1,11 @@
 module CUBHistogram {
     use MultiTypeSymEntry;
+    use GPUCollectives;
     use GPUIterator;
     use GPUAPI;
     use CTypes;
     use IO;
+    use Time;
 
     config const reduceOnGPU = true;
 
@@ -12,20 +14,10 @@ module CUBHistogram {
     extern proc cubHistogram_float(samples: c_void_ptr, histogram: c_void_ptr, num_levels: int, lower_bound: real(32), upper_bound: real(32), N: int);
     extern proc cubHistogram_double(samples: c_void_ptr, histogram: c_void_ptr, num_levels: int, lower_bound: real(64), upper_bound: real(64), N: int);
 
-    extern proc gpuCommGetUniqueID(): c_void_ptr;
-    extern proc gpuCommInitRank(numRanks: int(32), commId: c_void_ptr, rank: int(32)): c_void_ptr;
-    extern proc gpuCommDestroy(comm: c_void_ptr);
-
-    extern proc gpuAllReduce_sum_int32(src: c_void_ptr, dst: c_void_ptr, N: c_size_t, comm: c_void_ptr);
-    extern proc gpuAllReduce_sum_int64(src: c_void_ptr, dst: c_void_ptr, N: c_size_t, comm: c_void_ptr);
-    extern proc gpuAllReduce_sum_float(src: c_void_ptr, dst: c_void_ptr, N: c_size_t, comm: c_void_ptr);
-    extern proc gpuAllReduce_sum_double(src: c_void_ptr, dst: c_void_ptr, N: c_size_t, comm: c_void_ptr);
 
     // Chapel doesn't seem to expose these common FP operations
     extern proc nextafterf(from: real(32), to: real(32)): real(32);
     extern proc nextafter(from: real(64), to: real(64)): real(64);
-
-    var comm: [0..#nGPUs] c_void_ptr;
 
     private proc cubHistogram(type t, devSamples: GPUArray, histogram: [] int, lower_bound: t, upper_bound: t, N: int, deviceId: int(32)) {
         var num_levels = histogram.size + 1;
@@ -94,21 +86,6 @@ module CUBHistogram {
             return deviceHistograms[0];
         } else {
             return + reduce deviceHistograms;
-        }
-    }
-
-    // TODO move collective communications to separate module?
-    proc setupCommunicator() {
-        var commId = gpuCommGetUniqueID();
-        forall deviceId in 0..#nGPUs {
-            SetDevice(deviceId:int(32));
-            comm[deviceId] = gpuCommInitRank(nGPUs:int(32), commId, deviceId:int(32));
-        }
-    }
-    proc destroyCommunicator() {
-        forall deviceId in 0..#nGPUs {
-            SetDevice(deviceId:int(32));
-            gpuCommDestroy(comm[deviceId]);
         }
     }
 }
