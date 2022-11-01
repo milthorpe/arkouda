@@ -1,31 +1,38 @@
 module CUBSum {
     use MultiTypeSymEntry;
+    use GPUCollectives;
     use GPUIterator;
     use GPUAPI;
     use CTypes;
     use IO;
     use Time;
+
     config const logSumKernelTime = false;
+    config const sumReduceOnGPU = true;
 
     extern proc cubSum_int32(input: c_void_ptr, output: c_void_ptr, num_items: c_size_t);
     extern proc cubSum_int64(input: c_void_ptr, output: c_void_ptr, num_items: c_size_t);
     extern proc cubSum_float(input: c_void_ptr, output: c_void_ptr, num_items: c_size_t);
     extern proc cubSum_double(input: c_void_ptr, output: c_void_ptr, num_items: c_size_t);
 
-    private proc cubSumDevice(type etype, devIn: GPUArray, N: int) {
+    private proc cubSumDevice(type etype, devIn: GPUArray, N: int, deviceId: int(32)) {
         var hostOut: [0..#1] etype;
         var devOut = new GPUArray(hostOut);
         if etype == int(32) {
             cubSum_int32(devIn.dPtr(), devOut.dPtr(), N: c_size_t);
+            if sumReduceOnGPU && nGPUs > 1 then gpuReduce_sum_int32(devOut.dPtr(), devOut.dPtr(), 1, 0, comm[deviceId]);
         } else if etype == int(64) {
             cubSum_int64(devIn.dPtr(), devOut.dPtr(), N: c_size_t);
+            if sumReduceOnGPU && nGPUs > 1 then gpuReduce_sum_int64(devOut.dPtr(), devOut.dPtr(), 1, 0, comm[deviceId]);
         } else if etype == real(32) {
             cubSum_float(devIn.dPtr(), devOut.dPtr(), N: c_size_t);
+            if sumReduceOnGPU && nGPUs > 1 then gpuReduce_sum_float(devOut.dPtr(), devOut.dPtr(), 1, 0, comm[deviceId]);
         } else if etype == real(64) {
             cubSum_double(devIn.dPtr(), devOut.dPtr(), N: c_size_t);
+            if sumReduceOnGPU && nGPUs > 1 then gpuReduce_sum_double(devOut.dPtr(), devOut.dPtr(), 1, 0, comm[deviceId]);
         }
         DeviceSynchronize();
-        devOut.fromDevice();
+        if !sumReduceOnGPU || deviceId == 0 then devOut.fromDevice();
         return hostOut[0];
     }
 
@@ -50,7 +57,7 @@ module CUBSum {
                 if logSumKernelTime {
                     timer.start();
                 }
-                deviceSum[deviceId] = cubSumDevice(e.etype, e.getDeviceArray(deviceId), N);
+                deviceSum[deviceId] = cubSumDevice(e.etype, e.getDeviceArray(deviceId), N, deviceId);
                 if logSumKernelTime {
                     timer.stop();
                     if deviceId == 0 then writef("%10.3dr", timer.elapsed(TimeUnits.milliseconds));
@@ -68,7 +75,7 @@ module CUBSum {
             exit(1);
         }
 
-        if disableMultiGPUs || nGPUs == 1 {
+        if sumReduceOnGPU || disableMultiGPUs || nGPUs == 1 {
             // no need to merge
             return deviceSum[0];
         }

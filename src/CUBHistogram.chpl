@@ -7,7 +7,7 @@ module CUBHistogram {
     use IO;
     use Time;
 
-    config const reduceOnGPU = true;
+    config const histogramReduceOnGPU = true;
 
     extern proc cubHistogram_int32(samples: c_void_ptr, histogram: c_void_ptr, num_levels: int, lower_bound: int(32), upper_bound: int(32), N: int);
     extern proc cubHistogram_int64(samples: c_void_ptr, histogram: c_void_ptr, num_levels: int, lower_bound: int(64), upper_bound: int(64), N: int);
@@ -27,22 +27,22 @@ module CUBHistogram {
         if t == int(32) {
             var upper = upper_bound + 1;
             cubHistogram_int32(devSamples.dPtr(), devHistogram.dPtr(), num_levels, lower_bound, upper, N);
-            if reduceOnGPU && nGPUs > 1 then gpuAllReduce_sum_int32(devHistogram.dPtr(), devHistogram.dPtr(), num_levels: c_size_t, comm[deviceId]);
+            if histogramReduceOnGPU && nGPUs > 1 then gpuAllReduce_sum_int32(devHistogram.dPtr(), devHistogram.dPtr(), num_levels: c_size_t, comm[deviceId]);
         } else if t == int(64) {
             var upper = upper_bound + 1;
             cubHistogram_int64(devSamples.dPtr(), devHistogram.dPtr(), num_levels, lower_bound, upper, N);
-            if reduceOnGPU && nGPUs > 1 then gpuAllReduce_sum_int64(devHistogram.dPtr(), devHistogram.dPtr(), num_levels: c_size_t, comm[deviceId]);
+            if histogramReduceOnGPU && nGPUs > 1 then gpuAllReduce_sum_int64(devHistogram.dPtr(), devHistogram.dPtr(), num_levels: c_size_t, comm[deviceId]);
         } else if t == real(32) {
             var upper = nextafterf(upper_bound, max(real(32)));
             cubHistogram_float(devSamples.dPtr(), devHistogram.dPtr(), num_levels, lower_bound, upper, N);
-            if reduceOnGPU && nGPUs > 1 then gpuAllReduce_sum_float(devHistogram.dPtr(), devHistogram.dPtr(), num_levels: c_size_t, comm[deviceId]);
+            if histogramReduceOnGPU && nGPUs > 1 then gpuAllReduce_sum_float(devHistogram.dPtr(), devHistogram.dPtr(), num_levels: c_size_t, comm[deviceId]);
         } else if t == real(64) {
             var upper = nextafter(upper_bound, max(real(64)));
             cubHistogram_double(devSamples.dPtr(), devHistogram.dPtr(), num_levels, lower_bound, upper, N);
-            if reduceOnGPU && nGPUs > 1 then gpuAllReduce_sum_double(devHistogram.dPtr(), devHistogram.dPtr(), num_levels: c_size_t, comm[deviceId]);
+            if histogramReduceOnGPU && nGPUs > 1 then gpuAllReduce_sum_double(devHistogram.dPtr(), devHistogram.dPtr(), num_levels: c_size_t, comm[deviceId]);
         }
         DeviceSynchronize();
-        if reduceOnGPU {
+        if histogramReduceOnGPU {
             if deviceId == 0 then devHistogram.fromDevice();
         } else {
             devHistogram.fromDevice();
@@ -81,7 +81,7 @@ module CUBHistogram {
         }
         e.deviceCache!.isCurrent = true;
 
-        if reduceOnGPU || disableMultiGPUs || nGPUs == 1 {
+        if histogramReduceOnGPU || disableMultiGPUs || nGPUs == 1 {
             // no need to merge
             return deviceHistograms[0];
         } else {
