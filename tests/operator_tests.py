@@ -294,6 +294,12 @@ class OperatorsTest(ArkoudaTest):
             ak.concatenate([pdaOne, pdaTwo]).to_list(),
         )
 
+    def test_invert(self):
+        ak_uint = ak.arange(10, dtype=ak.uint64)
+        inverted = ~ak_uint
+        np_uint_inv = ~np.arange(10, dtype=np.uint)
+        self.assertListEqual(np_uint_inv.tolist(), inverted.to_list())
+
     def test_float_uint_binops(self):
         # Test fix for issue #1620
         ak_uint = ak.array([5], dtype=ak.uint64)
@@ -455,15 +461,6 @@ class OperatorsTest(ArkoudaTest):
                 )
             )
 
-    def test_pda_sqrt(self):
-        n = np.array([4, 16, -1, 0, np.inf])
-        a = ak.array(n)
-
-        s = ak.sqrt(a)
-        ex = np.sqrt(n)
-
-        self.assertTrue(np.allclose(s.to_ndarray(), ex, equal_nan=True))
-
     def test_pda_power(self):
         n = np.array([10, 5, 2])
         a = ak.array(n)
@@ -476,12 +473,109 @@ class OperatorsTest(ArkoudaTest):
         ex = np.power(n, [2, 3, 4])
         self.assertListEqual(p.to_list(), ex.tolist())
 
+        # Test a singleton with and without a Boolean argument
+        a = ak.array([7])
+        self.assertListEqual(ak.power(a, 3, True).to_list(), ak.power(a, 3).to_list())
+        self.assertListEqual(ak.power(a, 3, False).to_list(), a.to_list())
+
+        # Test an with and without a Boolean argument, all the same
+        a = ak.array([0, 0.0, 1, 7.0, 10])
+        self.assertListEqual(ak.power(a, 3, ak.ones(5, bool)).to_list(), ak.power(a, 3).to_list())
+        self.assertListEqual(ak.power(a, 3, ak.zeros(5, bool)).to_list(), a.to_list())
+
+        # Test a singleton with a mixed Boolean argument
+        a = ak.arange(10)
+        self.assertListEqual([i if i % 2 else i**2 for i in range(10)],
+                             ak.power(a, 2, a % 2 == 0).to_list())
+
+        # Test invalid input, negative
         n = np.array([-1.0, -3.0])
         a = ak.array(n)
 
         p = ak.power(a, 0.5)
         ex = np.power(n, 0.5)
         self.assertTrue(np.allclose(p.to_ndarray(), ex, equal_nan=True))
+
+        # Test edge case input, inf
+        n = np.array([np.inf, -np.inf])
+        a = ak.array([np.inf, -np.inf])
+        self.assertListEqual(np.power(n, 2).tolist(), ak.power(a, 2).to_list())
+
+    def test_pda_sqrt(self):
+        # Base cases and edge cases
+        # Most cases are taken care of in the test_pda_power tests
+        n = np.array([4, 16.0, -1, 0, np.inf])
+        a = ak.array(n)
+        self.assertTrue(np.allclose(ak.sqrt(a).to_ndarray(), np.sqrt(n), equal_nan=True))
+
+        # Test with a mixed Boolean array
+        a = ak.arange(5)
+        self.assertListEqual([i if i % 2 else i**.5 for i in range(5)], ak.sqrt(a, a % 2 == 0).to_list())
+
+    def test_uint_operation_equals(self):
+        u_arr = ak.arange(10, dtype=ak.uint64)
+        i_arr = ak.arange(10)
+        f_arr = ak.linspace(1, 5, 10)
+        b_arr = i_arr % 2 == 0
+        u = np.uint(7)
+        i = 7
+        f = 3.14
+        b = True
+
+        # test uint opequals uint functionality against numpy
+        np_arr = np.arange(10, dtype=np.uint)
+        u_tmp = u_arr[:]
+        u_tmp += u
+        np_arr += u
+        self.assertListEqual(u_tmp.to_list(), np_arr.tolist())
+        u_tmp += u_tmp
+        np_arr += np_arr
+        self.assertListEqual(u_tmp.to_list(), np_arr.tolist())
+        u_tmp -= u
+        np_arr -= u
+        self.assertListEqual(u_tmp.to_list(), np_arr.tolist())
+        u_tmp -= u_tmp
+        np_arr -= np_arr
+        self.assertListEqual(u_tmp.to_list(), np_arr.tolist())
+        u_tmp *= u
+        np_arr *= u
+        self.assertListEqual(u_tmp.to_list(), np_arr.tolist())
+        u_tmp *= u_tmp
+        np_arr *= np_arr
+        self.assertListEqual(u_tmp.to_list(), np_arr.tolist())
+        u_tmp **= u
+        np_arr **= u
+        self.assertListEqual(u_tmp.to_list(), np_arr.tolist())
+        u_tmp **= u_tmp
+        np_arr **= np_arr
+        self.assertListEqual(u_tmp.to_list(), np_arr.tolist())
+        u_tmp %= u
+        np_arr %= u
+        self.assertListEqual(u_tmp.to_list(), np_arr.tolist())
+        u_tmp //= u
+        np_arr //= u
+        self.assertListEqual(u_tmp.to_list(), np_arr.tolist())
+        u_tmp //= u_tmp
+        np_arr //= np_arr
+        self.assertListEqual(u_tmp.to_list(), np_arr.tolist())
+
+        # the only arrays that can be added in place are uint and bool
+        # scalars are cast to same type if possible
+        for v in [b_arr, u, b, i, f]:
+            u_tmp = u_arr[:]
+            i_tmp = i_arr[:]
+            u_tmp += v
+            i_tmp += v
+            self.assertListEqual(u_tmp.to_list(), i_tmp.to_list())
+
+        # adding a float or int inplace could have a result which is not a uint
+        for e in [i_arr, f_arr]:
+            with self.assertRaises(RuntimeError):
+                u_arr += e
+
+        # verify other types can have uint applied to them
+        f_arr += u_arr
+        f_arr += u
 
     def testAllOperators(self):
         run_tests(verbose)

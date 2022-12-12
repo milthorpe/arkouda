@@ -35,7 +35,7 @@ module Cast {
     const before = toSymEntry(gse, fromType);
     const oname = st.nextName();
     var segments = st.addEntry(oname, before.size, int);
-    var strings: [before.aD] string;
+    var strings: [before.a.domain] string;
     if fromType == real {
       try {
           forall (s, v) in zip(strings, before.a) {
@@ -64,7 +64,7 @@ module Cast {
     var values = st.addEntry(vname, totBytes, uint(8));
     ref va = values.a;
     forall (o, s) in zip(segments.a, strings) with (var agg = newDstAggregator(uint(8))) {
-      for (i, b) in zip(0.., s.bytes()) {
+      for (b, i) in zip(s.bytes(), 0..) {
         agg.copy(va[o+i], b);
       }
     }
@@ -138,7 +138,7 @@ module Cast {
           entry.a = computeOnSegments(oa, va, SegFunction.StringToNumericIgnore, toType);
         }
         when ErrorMode.return_validity {
-          var valWithFlag: [entry.aD] (toType, bool) = computeOnSegments(oa, va, SegFunction.StringToNumericReturnValidity, (toType, bool));
+          var valWithFlag: [entry.a.domain] (toType, bool) = computeOnSegments(oa, va, SegFunction.StringToNumericReturnValidity, (toType, bool));
           const vname = st.nextName();
           var valid = st.addEntry(vname, s.size, bool);
           forall (n, v, vf) in zip(entry.a, valid.a, valWithFlag) {

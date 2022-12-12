@@ -421,7 +421,7 @@ module ParquetMsg {
     
     const extraOffset = ss.values.size;
     const lastOffset = A[A.domain.high];
-    const lastValIdx = ss.values.aD.high;
+    const lastValIdx = ss.values.a.domain.high;
     // For each locale gather the string bytes corresponding to the offsets in its local domain
     coforall (loc, idx) in zip(A.targetLocales(), filenames.domain) with (ref ss) do on loc {
         const myFilename = filenames[idx];
@@ -528,9 +528,8 @@ module ParquetMsg {
     return writeDistArrayToParquet(A, filename, dsetname, dtype, ROWGROUPS, compressed, mode);
   }
 
-  proc readAllParquetMsg(cmd: string, payload: string, argSize: int, st: borrowed SymTab): MsgTuple throws {
+  proc readAllParquetMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
     var repMsg: string;
-    var msgArgs = parseMessageArgs(payload, argSize);
     var strictTypes: bool = msgArgs.get("strict_types").getBoolValue();
 
     var allowErrors: bool = msgArgs.get("allow_errors").getBoolValue(); // default is false
@@ -697,8 +696,7 @@ module ParquetMsg {
     return new list(datasets.split(","));
   }
   
-  proc toparquetMsg(cmd: string, payload: string, argSize: int, st: borrowed SymTab): MsgTuple throws {
-    var msgArgs = parseMessageArgs(payload, argSize);
+  proc toparquetMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
     var mode = msgArgs.get("mode").getIntValue();
     var filename: string = msgArgs.getValueOf("prefix");
     var entry = st.lookup(msgArgs.getValueOf("values"));
@@ -771,10 +769,9 @@ module ParquetMsg {
     }
   }
 
-  proc lspqMsg(cmd: string, payload: string, argSize: int, st: borrowed SymTab): MsgTuple throws {
+  proc lspqMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
     // reqMsg: "lshdf [<json_filename>]"
     var repMsg: string;
-    var msgArgs = parseMessageArgs(payload, argSize);
 
     // Retrieve filename from payload
     var filename: string = msgArgs.getValueOf("filename");
@@ -829,9 +826,8 @@ module ParquetMsg {
     return new MsgTuple(repMsg, MsgType.NORMAL);
   }
 
-  proc nullIndicesMsg(cmd: string, payload: string, argSize: int, st: borrowed SymTab): MsgTuple throws {
+  proc nullIndicesMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
     var repMsg: string;
-    var msgArgs = parseMessageArgs(payload, argSize);
 
     var ndsets = msgArgs.get("dset_size").getIntValue();
     var nfiles = msgArgs.get("filename_size").getIntValue();

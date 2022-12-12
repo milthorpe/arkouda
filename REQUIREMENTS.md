@@ -7,6 +7,8 @@ The dependencies listed here have varying installation instructions depending up
 - `zeromq>=4.2.5`
 - `hdf5`
 - `python>=3.8`
+- `iconv`
+- `idn2`
 
 # Python Dependencies
 
@@ -38,7 +40,7 @@ The dependencies listed here are only required if you will be doing development 
 - `sphinx-argparse`
 - `sphinx-autoapi`
 - `typed-ast`
-- `mypy>=0.931`
+- `mypy>=0.931,<0.990`
 - `flake8`
 
 ## Installing/Updating Python Dependencies

@@ -63,10 +63,18 @@ module MultiTypeSymEntry
     class AbstractSymEntry {
         var entryType:SymbolEntryType;
         var assignableTypes:set(SymbolEntryType); // All subclasses should add their type to this set
+        var name = ""; // used to track the symbol table name assigned to the entry
         proc init() {
             this.entryType = SymbolEntryType.AbstractSymEntry;
             this.assignableTypes = new set(SymbolEntryType);
             this.assignableTypes.add(this.entryType);
+        }
+
+        /*
+            Sets the name of the entry when it is added to the Symbol Table
+        */
+        proc setName(name: string) {
+            this.name = name;
         }
 
         /**
@@ -201,11 +209,12 @@ module MultiTypeSymEntry
         type etype;
 
         /*
-        'aD' is the distributed domain for 'a' whose value and type
-        are defined by makeDistDom() to support varying distributions
+        'a' is the distributed array whose value and type are defined by
+        makeDist{Dom,Array}() to support varying distributions
         */
-        const aD: makeDistDom(size).type;
-        var a: [aD] etype;
+        var a = makeDistArray(size, etype);
+        /* Removed domain accessor, use `a.domain` instead */
+        proc aD { compilerError("SymEntry.aD has been removed, use SymEntry.a.domain instead"); }
 
         /** Represents a copy of the array cached on GPU devices */
         class DeviceCache {
@@ -265,21 +274,21 @@ module MultiTypeSymEntry
             assignableTypes.add(this.entryType);
 
             this.etype = etype;
-            this.aD = makeDistDom(len);
+            this.a = makeDistArray(size, etype);
         }
 
-        /*This init takes an array of a type
+        /*
+        This init takes an array whose type matches `makeDistArray()`
 
         :arg a: array
         :type a: [] ?etype
         */
-        proc init(a: [?D] ?etype) {
+        proc init(in a: [?D] ?etype) {
             super.init(etype, D.size);
             this.entryType = SymbolEntryType.PrimitiveTypedArraySymEntry;
             assignableTypes.add(this.entryType);
 
             this.etype = etype;
-            this.aD = D;
             this.a = a;
         }
 
@@ -304,11 +313,17 @@ module MultiTypeSymEntry
         }
 
         /*
-        Verbose flag utility method
+        This init takes an array whose type is defaultRectangular (convenience
+        function for creating a distributed array from a non-distributed one)
+
+        :arg a: array
+        :type a: [] ?etype
         */
-        proc postinit() {
-            //if v {write("aD = "); printOwnership(this.a);}
+        proc init(a: [?D] ?etype) where MyDmap != Dmap.defaultRectangular && a.isDefaultRectangular() {
+            this.init(D.size, etype);
+            this.a = a;
         }
+
         /*
         Verbose flag utility method
         */
@@ -473,14 +488,21 @@ module MultiTypeSymEntry
 
         var segmentsEntry: shared SymEntry(int);
         var valuesEntry: shared SymEntry(etype);
+        var lengthsEntry: shared SymEntry(int);
 
-        proc init(segmentsSymEntry: shared SymEntry, valuesSymEntry: shared SymEntry, type etype){
+        proc init(segmentsSymEntry: shared SymEntry, valuesSymEntry: shared SymEntry, type etype) {
             super.init(etype, valuesSymEntry.size);
             this.entryType = SymbolEntryType.SegArraySymEntry;
             assignableTypes.add(this.entryType);
             this.etype = etype;
             this.segmentsEntry = segmentsSymEntry;
             this.valuesEntry = valuesSymEntry;
+
+            ref sa = segmentsSymEntry.a;
+            const high = segmentsSymEntry.a.domain.high;
+            var lengths = [(i, s) in zip (segmentsSymEntry.a.domain, sa)] if i == high then valuesSymEntry.size - s else sa[i+1] - s;
+            
+            lengthsEntry = new shared SymEntry(lengths);
 
             this.dtype = whichDtype(etype);
             this.itemsize = this.valuesEntry.itemsize;

@@ -111,6 +111,7 @@ module MultiTypeSymbolTable
             }
 
             tab.addOrSet(name, entry);
+            entry.setName(name);
             // When we retrieve from table, it comes back as AbstractSymEntry so we need to cast it
             // back to the original type. Since we know it already we can skip isAssignableTo check
             return (tab.getBorrowed(name):borrowed GenSymEntry).toSymEntry(t);
@@ -146,6 +147,7 @@ module MultiTypeSymbolTable
             }
 
             tab.addOrSet(name, entry);
+            entry.setName(name);
             return tab.getBorrowed(name);
         }
 
@@ -309,7 +311,7 @@ module MultiTypeSymbolTable
         */
         proc parseJson(names:string): [] string throws {
             var mem = openmem();
-            var writer = mem.writer().write(names);
+            mem.writer().write(names);
             var reader = mem.reader();
 
             var num_elements = 0;

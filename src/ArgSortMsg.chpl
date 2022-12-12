@@ -128,7 +128,7 @@ module ArgSortMsg
           when DType.Int64 {
               var e = toSymEntry(g, int);
               // Permute the keys array with the initial iv
-              var newa: [e.aD] int;
+              var newa: [e.a.domain] int;
               ref olda = e.a;
               // Effectively: newa = olda[iv]
               forall (newai, idx) in zip(newa, iv) with (var agg = newSrcAggregator(int)) {
@@ -140,7 +140,7 @@ module ArgSortMsg
           when DType.UInt64 {
               var e = toSymEntry(g, uint);
               // Permute the keys array with the initial iv
-              var newa: [e.aD] uint;
+              var newa: [e.a.domain] uint;
               ref olda = e.a;
               // Effectively: newa = olda[iv]
               forall (newai, idx) in zip(newa, iv) with (var agg = newSrcAggregator(uint)) {
@@ -151,7 +151,7 @@ module ArgSortMsg
           }
           when DType.Float64 {
               var e = toSymEntry(g, real);
-              var newa: [e.aD] real;
+              var newa: [e.a.domain] real;
               ref olda = e.a;
               forall (newai, idx) in zip(newa, iv) with (var agg = newSrcAggregator(real)) {
                   agg.copy(newai, olda[idx]);
@@ -209,10 +209,9 @@ module ArgSortMsg
     /* Find the permutation that sorts multiple arrays, treating each array as a
        new level of the sorting key.
      */
-    proc coargsortMsg(cmd: string, payload: string, argSize: int, st: borrowed SymTab): MsgTuple throws {
+    proc coargsortMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
       param pn = Reflection.getRoutineName();
       var repMsg: string;
-      var msgArgs = parseMessageArgs(payload, argSize);
       var algoName = msgArgs.getValueOf("algoName");
       var algorithm: SortingAlgorithm = defaultSortAlgorithm;
       if algoName != "" {
@@ -331,10 +330,9 @@ module ArgSortMsg
     }
     
     /* argsort takes pdarray and returns an index vector iv which sorts the array */
-    proc argsortMsg(cmd: string, payload: string, argSize: int, st: borrowed SymTab): MsgTuple throws {
+    proc argsortMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
         param pn = Reflection.getRoutineName();
         var repMsg: string; // response message
-        var msgArgs = parseMessageArgs(payload, argSize);
         var name = msgArgs.getValueOf("name");
         var algoName = msgArgs.getValueOf("algoName");
         var algorithm: SortingAlgorithm = defaultSortAlgorithm;

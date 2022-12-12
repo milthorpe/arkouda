@@ -6,6 +6,7 @@ from warnings import warn
 import h5py  # type: ignore
 import numpy as np  # type: ignore
 
+import arkouda.array_view
 from arkouda.categorical import Categorical
 from arkouda.client import generic_msg, get_config, get_mem_used
 from arkouda.client_dtypes import BitVector, BitVectorizer, IPv4
@@ -13,7 +14,7 @@ from arkouda.groupbyclass import GroupBy, broadcast
 from arkouda.infoclass import list_symbol_table
 from arkouda.pdarrayclass import RegistrationError, create_pdarray, pdarray
 from arkouda.pdarraycreation import arange
-from arkouda.pdarrayIO import read
+from arkouda.io import read
 from arkouda.pdarraysetops import unique
 from arkouda.segarray import SegArray
 from arkouda.sorting import coargsort
@@ -244,7 +245,12 @@ def arkouda_to_numpy(A: pdarray, tmp_dir: str = "") -> np.ndarray:
 
 def numpy_to_arkouda(
     A: np.ndarray, tmp_dir: str = ""
-) -> Union[pdarray, Strings, Mapping[str, Union[pdarray, Strings]]]:
+) -> Union[
+    pdarray,
+    Strings,
+    arkouda.array_view.ArrayView,
+    Mapping[str, Union[pdarray, Strings, arkouda.array_view.ArrayView]],
+]:
     """
     Convert from numpy to arkouda using disk rather than sockets.
     """
@@ -286,8 +292,6 @@ def attach(name: str, dtype: str = "infer"):
 
     if repType == "categorical":
         return Categorical.from_return_msg(repMsg)
-    elif repType == "segarray":
-        return SegArray._from_attach_return_msg(repMsg)
     elif repType == "series":
         from arkouda.series import Series
 
@@ -296,13 +300,18 @@ def attach(name: str, dtype: str = "infer"):
         from arkouda.dataframe import DataFrame
 
         return DataFrame.from_return_msg(repMsg)
-    else:
+    elif repType == "segarray":
+        repMsg = repMsg[len(repType) + 1 :]
+        return SegArray.from_return_msg(repMsg)
+    elif repType == "simple":
         dtype = repMsg.split()[2]
-
+        repMsg = repMsg[len(repType) + 1 :]
         if dtype == "str":
             return Strings.from_return_msg(repMsg)
         else:
             return create_pdarray(repMsg)
+    else:
+        raise ValueError(f"Unknown object type returned by genericAttach - {repType}")
 
 
 def unregister_by_name(name: str, dtype: str = "infer"):

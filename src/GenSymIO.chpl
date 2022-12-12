@@ -26,12 +26,11 @@ module GenSymIO {
      * Creates a pdarray server-side and returns the SymTab name used to
      * retrieve the pdarray from the SymTab.
      */
-    proc arrayMsg(cmd: string, args: string, argSize: int, ref data: bytes, st: borrowed SymTab): MsgTuple throws {
+    proc arrayMsg(cmd: string, msgArgs: borrowed MessageArgs, ref data: bytes, st: borrowed SymTab): MsgTuple throws {
         // Set up our return items
         var msgType = MsgType.NORMAL;
         var msg:string = "";
         var rname:string = "";
-        var msgArgs = parseMessageArgs(args, argSize);
         var dtype = DType.UNDEF;
         var size:int;
         var asSegStr = false;
@@ -82,7 +81,7 @@ module GenSymIO {
                 var g = st.lookup(rname);
                 if g.isAssignableTo(SymbolEntryType.TypedArraySymEntry){
                     var values = toSymEntry( (g:GenSymEntry), uint(8) );
-                    var offsets = segmentedCalcOffsets(values.a, values.aD);
+                    var offsets = segmentedCalcOffsets(values.a, values.a.domain);
                     var oname = st.nextName();
                     var offsetsEntry = new shared SymEntry(offsets);
                     st.addEntry(oname, offsetsEntry);
@@ -128,10 +127,9 @@ module GenSymIO {
      * Outputs the pdarray as a Numpy ndarray in the form of a 
      * Chapel Bytes object
      */
-    proc tondarrayMsg(cmd: string, payload: string, argSize: int, st: 
+    proc tondarrayMsg(cmd: string, msgArgs: borrowed MessageArgs, st: 
                                           borrowed SymTab): bytes throws {
         var arrayBytes: bytes;
-        var msgArgs = parseMessageArgs(payload, argSize);
         var abstractEntry = st.lookup(msgArgs.getValueOf("array"));
         if !abstractEntry.isAssignableTo(SymbolEntryType.TypedArraySymEntry) {
             var errorMsg = "Error: Unhandled SymbolEntryType %s".format(abstractEntry.entryType);
@@ -234,6 +232,10 @@ module GenSymIO {
             var item = "{" + Q + "dataset_name"+ QCQ + dsetName + Q +
                        "," + Q + "arkouda_type" + QCQ + akType + Q;
             select (akType) {
+                when ("ArrayView") {
+                    var (valName, segName) = id.splitMsgToTuple("+", 2);
+                    item += "," + Q + "created" + QCQ + "created " + st.attrib(valName) + "+created " + st.attrib(segName) + Q + "}";
+                }
                 when ("pdarray") {
                     item +="," + Q + "created" + QCQ + "created " + st.attrib(id) + Q + "}";
                 }

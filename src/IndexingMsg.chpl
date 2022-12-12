@@ -33,8 +33,7 @@ module IndexingMsg
         return tup;
     }
 
-    proc arrayViewMixedIndexMsg(cmd: string, payload: string, argSize: int, st: borrowed SymTab): MsgTuple throws {
-        var msgArgs = parseMessageArgs(payload, argSize);
+    proc arrayViewMixedIndexMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
         var ndim = msgArgs.get("ndim").getIntValue();
         const pdaName = msgArgs.getValueOf("base");
         const indexDimName = msgArgs.getValueOf("index_dim");
@@ -78,7 +77,7 @@ module IndexingMsg
                 //     var indArrEntry = toSymEntry(indArr, int);
                 //     var scaledArray = indArrEntry.a * dimProdEntry.a[i/2];
                 //     // var localizedArray = new lowLevelLocalizingSlice(scaledArray, offsets[i/2]..#indArrEntry.a.size);
-                //     forall (j, s) in zip(indArrEntry.aD, scaledArray) with (var DstAgg = newDstAggregator(int)) {
+                //     forall (j, s) in zip(indArrEntry.a.domain, scaledArray) with (var DstAgg = newDstAggregator(int)) {
                 //         DstAgg.copy(scaledCoords[offsets[i/2]+j], s);
                 //     }
                 // }
@@ -116,15 +115,13 @@ module IndexingMsg
         var arrParam = msgArgs.get("base");
         arrParam.setKey("array");
         var idxParam = new ParameterObj("idx", indiciesName, ObjectType.PDARRAY, "int");
-
-        var json: [0..#2] string = [arrParam.getJSON(), idxParam.getJSON()];
-        return pdarrayIndexMsg(cmd, "%jt".format(json), json.size, st);
+        var subArgs = new MessageArgs(new list([arrParam, idxParam]));
+        return pdarrayIndexMsg(cmd, subArgs, st);
     }
 
     /* arrayViewIntIndexMsg "av[int_list]" response to __getitem__(int_list) where av is an ArrayView */
-    proc arrayViewIntIndexMsg(cmd: string, payload: string, argSize: int, st: borrowed SymTab): MsgTuple throws {
+    proc arrayViewIntIndexMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
         param pn = Reflection.getRoutineName();
-        var msgArgs = parseMessageArgs(payload, argSize);
         const pdaName = msgArgs.getValueOf("base");
         const dimProdName = msgArgs.getValueOf("dim_prod");
         const coordsName = msgArgs.getValueOf("coords");
@@ -146,16 +143,16 @@ module IndexingMsg
                 var idx = + reduce (dimProdEntry.a * coordsEntry.a);
                 idxParam.setVal(idx:string);
                 idxParam.setDType("int");
-                const json: [0..#2] string = [arrParam.getJSON(), idxParam.getJSON()];
-                return intIndexMsg(cmd, "%jt".format(json), json.size, st);
+                var subArgs = new MessageArgs(new list([arrParam, idxParam]));
+                return intIndexMsg(cmd, subArgs, st);
             }
             when (DType.UInt64) {
                 var coordsEntry = toSymEntry(coords, uint);
                 var idx = + reduce (dimProdEntry.a: uint * coordsEntry.a);
                 idxParam.setVal(idx:string);
                 idxParam.setDType("uint");
-                const json: [0..#2] string = [arrParam.getJSON(), idxParam.getJSON()];
-                return intIndexMsg(cmd, "%jt".format(json), json.size, st);
+                var subArgs = new MessageArgs(new list([arrParam, idxParam]));
+                return intIndexMsg(cmd, subArgs, st);
             }
             otherwise {
                  var errorMsg = notImplementedError(pn, "("+dtype2str(coords.dtype)+")");
@@ -166,9 +163,8 @@ module IndexingMsg
     }
 
     /* arrayViewIntIndexAssignMsg "av[int_list]=value" response to __getitem__(int_list) where av is an ArrayView */
-    proc arrayViewIntIndexAssignMsg(cmd: string, payload: string, argSize: int, st: borrowed SymTab): MsgTuple throws {
+    proc arrayViewIntIndexAssignMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
         param pn = Reflection.getRoutineName();
-        var msgArgs = parseMessageArgs(payload, argSize);
         const pdaName = msgArgs.getValueOf("base");
         const dimProdName = msgArgs.getValueOf("dim_prod");
         const coordsName = msgArgs.getValueOf("coords");
@@ -182,8 +178,6 @@ module IndexingMsg
 
         var arrParam = msgArgs.get("base");
         arrParam.setKey("array");
-        var dtypeJSON = msgArgs.get("dtype").getJSON();
-        var valJSON = msgArgs.get("value").getJSON();
         var idxParam = new ParameterObj("idx", "", ObjectType.VALUE, "");
 
         // multi-dim to 1D address calculation
@@ -194,16 +188,16 @@ module IndexingMsg
                 var idx = + reduce (dimProdEntry.a * coordsEntry.a);
                 idxParam.setVal(idx:string);
                 idxParam.setDType("int");
-                var json: [0..#4] string = [arrParam.getJSON(), valJSON, dtypeJSON, idxParam.getJSON()];
-                return setIntIndexToValueMsg(cmd, "%jt".format(json), json.size, st);
+                var subArgs = new MessageArgs(new list([arrParam, msgArgs.get("value"), msgArgs.get("dtype"), idxParam]));
+                return setIntIndexToValueMsg(cmd, subArgs, st);
             }
             when (DType.UInt64) {
                 var coordsEntry = toSymEntry(coords, uint);
                 var idx = + reduce (dimProdEntry.a: uint * coordsEntry.a);
                 idxParam.setVal(idx:string);
                 idxParam.setDType("uint");
-                var json: [0..#4] string = [arrParam.getJSON(), valJSON, dtypeJSON, idxParam.getJSON()];
-                return setIntIndexToValueMsg(cmd, "%jt".format(json), json.size, st);
+                var subArgs = new MessageArgs(new list([arrParam, msgArgs.get("value"), msgArgs.get("dtype"), idxParam]));
+                return setIntIndexToValueMsg(cmd, subArgs, st);
             }
             otherwise {
                  var errorMsg = notImplementedError(pn, "("+dtype2str(coords.dtype)+")");
@@ -214,10 +208,9 @@ module IndexingMsg
     }
 
     /* intIndex "a[int]" response to __getitem__(int) */
-    proc intIndexMsg(cmd: string, payload: string, argSize: int, st: borrowed SymTab): MsgTuple throws {
+    proc intIndexMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
         param pn = Reflection.getRoutineName();
         var repMsg: string; // response message
-        var msgArgs = parseMessageArgs(payload, argSize);
         var idx = msgArgs.get("idx").getIntValue();
         const name = msgArgs.getValueOf("array");
         imLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
@@ -276,10 +269,9 @@ module IndexingMsg
     }
 
     /* sliceIndex "a[slice]" response to __getitem__(slice) */
-    proc sliceIndexMsg(cmd: string, payload: string, argSize: int, st: borrowed SymTab): MsgTuple throws {
+    proc sliceIndexMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
         param pn = Reflection.getRoutineName();
         var repMsg: string; // response message
-        var msgArgs = parseMessageArgs(payload, argSize);
         const start = msgArgs.get("start").getIntValue();
         const stop = msgArgs.get("stop").getIntValue();
         const stride = msgArgs.get("stride").getIntValue();
@@ -329,10 +321,9 @@ module IndexingMsg
     }
 
     /* pdarrayIndex "a[pdarray]" response to __getitem__(pdarray) */
-    proc pdarrayIndexMsg(cmd: string, payload: string, argSize: int, st: borrowed SymTab): MsgTuple throws {
+    proc pdarrayIndexMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
         param pn = Reflection.getRoutineName();
         var repMsg: string; // response message
-        var msgArgs = parseMessageArgs(payload, argSize);
         const name = msgArgs.getValueOf("array");
         const iname = msgArgs.getValueOf("idx");
 
@@ -369,7 +360,7 @@ module IndexingMsg
                 return new MsgTuple(errorMsg,MsgType.ERROR);
             }
             var a = st.addEntry(rname, iv.size, XType);
-            //[i in iv.aD] a.a[i] = e.a[iv.a[i]]; // bounds check iv[i] against e.aD?
+            //[i in iv.a.domain] a.a[i] = e.a[iv.a[i]]; // bounds check iv[i] against e.a.domain?
             ref a2 = e.a;
             ref iva = iv.a;
             ref aa = a.a;
@@ -405,7 +396,7 @@ module IndexingMsg
                 return new MsgTuple(errorMsg,MsgType.ERROR);
             }
             var a = st.addEntry(rname, iv.size, XType);
-            //[i in iv.aD] a.a[i] = e.a[iv.a[i]]; // bounds check iv[i] against e.aD?
+            //[i in iv.a.domain] a.a[i] = e.a[iv.a[i]]; // bounds check iv[i] against e.a.domain?
             ref a2 = e.a;
             ref iva = iv.a;
             ref aa = a.a;
@@ -430,14 +421,14 @@ module IndexingMsg
             }
             // check there's enough room to create a copy for scan and throw if creating a copy would go over memory limit
             overMemLimit(numBytes(int) * truth.size);
-            var iv: [truth.aD] int = (+ scan truth.a);
+            var iv: [truth.a.domain] int = (+ scan truth.a);
             var pop = iv[iv.size-1];
             imLogger.debug(getModuleName(),getRoutineName(),getLineNumber(), 
                                               "pop = %t last-scan = %t".format(pop,iv[iv.size-1]));
 
             var a = st.addEntry(rname, pop, XType);
-            //[i in e.aD] if (truth.a[i] == true) {a.a[iv[i]-1] = e.a[i];}// iv[i]-1 for zero base index
-            ref ead = e.aD;
+            //[i in e.a.domain] if (truth.a[i] == true) {a.a[iv[i]-1] = e.a[i];}// iv[i]-1 for zero base index
+            const ref ead = e.a.domain;
             ref ea = e.a;
             ref trutha = truth.a;
             ref aa = a.a;
@@ -499,10 +490,9 @@ module IndexingMsg
     }
 
     /* setIntIndexToValue "a[int] = value" response to __setitem__(int, value) */
-    proc setIntIndexToValueMsg(cmd: string, payload: string, argSize: int, st: borrowed SymTab): MsgTuple throws {
+    proc setIntIndexToValueMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
         param pn = Reflection.getRoutineName();
         var repMsg: string; // response message
-        var msgArgs = parseMessageArgs(payload, argSize);
         const name = msgArgs.getValueOf("array");
         const idx = msgArgs.get("idx").getIntValue();
         var dtype = str2dtype(msgArgs.getValueOf("dtype"));
@@ -610,10 +600,9 @@ module IndexingMsg
     }
 
     /* setPdarrayIndexToValue "a[pdarray] = value" response to __setitem__(pdarray, value) */
-    proc setPdarrayIndexToValueMsg(cmd: string, payload: string, argSize: int, st: borrowed SymTab): MsgTuple throws {
+    proc setPdarrayIndexToValueMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
         param pn = Reflection.getRoutineName();
         var repMsg: string; // response message
-        var msgArgs = parseMessageArgs(payload, argSize);
         const dtype = str2dtype(msgArgs.getValueOf("dtype"));
         const name = msgArgs.getValueOf("array");
         const iname = msgArgs.getValueOf("idx");
@@ -705,7 +694,7 @@ module IndexingMsg
                 value = value.replace("False","false"); // chapel to python bool
             }
             var val = try! value:dtype;
-            ref ead = e.aD;
+            const ref ead = e.a.domain;
             ref ea = e.a;
             ref trutha = truth.a;
             forall i in ead with (var agg = newDstAggregator(dtype)) {
@@ -766,10 +755,9 @@ module IndexingMsg
     }
 
     /* setPdarrayIndexToPdarray "a[pdarray] = pdarray" response to __setitem__(pdarray, pdarray) */
-    proc setPdarrayIndexToPdarrayMsg(cmd: string, payload: string, argSize: int, st: borrowed SymTab): MsgTuple throws {
+    proc setPdarrayIndexToPdarrayMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
         param pn = Reflection.getRoutineName();
         var repMsg: string; // response message
-        var msgArgs = parseMessageArgs(payload, argSize);
         const name = msgArgs.getValueOf("array");
         const iname = msgArgs.getValueOf("idx");
         const yname = msgArgs.getValueOf("value");
@@ -869,7 +857,7 @@ module IndexingMsg
             var truth = toSymEntry(gIV,bool);
             // check there's enough room to create a copy for scan and throw if creating a copy would go over memory limit
             overMemLimit(numBytes(int) * truth.size);
-            var iv: [truth.aD] int = (+ scan truth.a);
+            var iv: [truth.a.domain] int = (+ scan truth.a);
             var pop = iv[iv.size-1];
             imLogger.debug(getModuleName(),getRoutineName(),getLineNumber(), 
                                          "pop = %t last-scan = %t".format(pop,iv[iv.size-1]));
@@ -880,7 +868,7 @@ module IndexingMsg
                 return new MsgTuple(errorMsg,MsgType.ERROR);;                
             }
             ref ya = y.a;
-            ref ead = e.aD;
+            const ref ead = e.a.domain;
             ref ea = e.a;
             ref trutha = truth.a;
             forall (eai, i) in zip(ea, ead) with (var agg = newSrcAggregator(t)) {
@@ -941,10 +929,9 @@ module IndexingMsg
     }
 
     /* setSliceIndexToValue "a[slice] = value" response to __setitem__(slice, value) */
-    proc setSliceIndexToValueMsg(cmd: string, payload: string, argSize: int, st: borrowed SymTab): MsgTuple throws {
+    proc setSliceIndexToValueMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
         param pn = Reflection.getRoutineName();
         var repMsg: string; // response message
-        var msgArgs = parseMessageArgs(payload, argSize);
         const name = msgArgs.getValueOf("array");
         const start = msgArgs.get("start").getIntValue();
         const stop = msgArgs.get("stop").getIntValue();
@@ -1056,10 +1043,9 @@ module IndexingMsg
     }
     
     /* setSliceIndexToPdarray "a[slice] = pdarray" response to __setitem__(slice, pdarray) */
-    proc setSliceIndexToPdarrayMsg(cmd: string, payload: string, argSize: int, st: borrowed SymTab): MsgTuple throws {
+    proc setSliceIndexToPdarrayMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
         param pn = Reflection.getRoutineName();
         var repMsg: string; // response message
-        var msgArgs = parseMessageArgs(payload, argSize);
         const start = msgArgs.get("start").getIntValue();
         const stop = msgArgs.get("stop").getIntValue();
         const stride = msgArgs.get("stride").getIntValue();

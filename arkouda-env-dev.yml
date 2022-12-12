@@ -16,6 +16,8 @@ dependencies:
   - types-tabulate
   - pytables>=3.7.0
   - pyarrow==9.0.0
+  - libiconv
+  - libidn2
 
   # Developer dependencies
   - pexpect
@@ -26,7 +28,7 @@ dependencies:
   - sphinx-autoapi
   - typed-ast
   - flake8
-  - mypy>=0.931
+  - mypy>=0.931,<0.990
   - black
   - isort
   

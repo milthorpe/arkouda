@@ -46,41 +46,37 @@ module SegmentedArray {
 
         var segments: shared SymEntry(int);
         var values;
+        var lengths: shared SymEntry(int);
         var size: int;
         var nBytes: int;
-        var lengths: [segments.aD] int;
 
         proc init(entryName:string, entry:borrowed SegArraySymEntry, type eType) {
             name = entryName;
             composite = entry;
             segments = composite.segmentsEntry: shared SymEntry(int);
             values = composite.valuesEntry: shared SymEntry(eType);
+            lengths = composite.lengthsEntry: shared SymEntry(int);
 
             size = segments.size;
             nBytes = values.size;
-
-            ref sa = segments.a;
-            const low = segments.aD.low;
-            const high = segments.aD.high;
-            lengths = [(i, s) in zip (segments.aD, sa)] if i == high then values.size - s else sa[i+1] - s;
 
             // Note - groupby remaining client side because groupby does not have server side object
         }
 
         /* Retrieve one string from the array */
         proc this(idx: ?t) throws where t == int || t == uint {
-            if (idx < segments.aD.low) || (idx > segments.aD.high) {
+            if (idx < segments.a.domain.low) || (idx > segments.a.domain.high) {
                 throw new owned OutOfBoundsError();
             }
             // Start index of the segment
             var start: int = segments.a[idx:int];
             // end index
-            var end: int = if idx:int == segments.aD.high then values.size-1 else segments.a[idx:int+1]-1;
+            var end: int = if idx:int == segments.a.domain.high then values.size-1 else segments.a[idx:int+1]-1;
             return values.a[start..end];
         }
 
         proc this(const slice: range(stridable=false)) throws {
-            if (slice.low < segments.aD.low) || (slice.high > segments.aD.high) {
+            if (slice.low < segments.a.domain.low) || (slice.high > segments.a.domain.high) {
                 saLogger.error(getModuleName(),getRoutineName(),getLineNumber(),
                 "Slice is out of bounds");
                 throw new owned OutOfBoundsError();
@@ -93,7 +89,7 @@ module SegmentedArray {
             ref sa = segments.a;
             var start = sa[slice.low];
             // end index
-            var end: int = if slice.high == segments.aD.high then values.size-1 else sa[slice.high:int+1]-1;
+            var end: int = if slice.high == segments.a.domain.high then values.size-1 else sa[slice.high:int+1]-1;
 
             // Segment offsets of the new slice
             var newSegs = makeDistArray(slice.size, int);
@@ -132,7 +128,7 @@ module SegmentedArray {
                                                     "Computing lengths and offsets");
             var t1 = getCurrentTime();
             ref oa = segments.a;
-            const low = segments.aD.low, high = segments.aD.high;
+            const low = segments.a.domain.low, high = segments.a.domain.high;
 
             // Gather the right and left boundaries of the indexed strings
             // NOTE: cannot compute lengths inside forall because agg.copy will
@@ -212,7 +208,7 @@ module SegmentedArray {
         /* Logical indexing (compress) of SegArray. */
         proc this(iv: [?D] bool) throws {
             // Index vector must be same domain as array
-            if (D != segments.aD) {
+            if (D != segments.a.domain) {
                 saLogger.info(getModuleName(),getRoutineName(),getLineNumber(),
                                                                 "Array out of bounds");
                 throw new owned OutOfBoundsError();
@@ -221,7 +217,7 @@ module SegmentedArray {
                                                         "Computing lengths and offsets");
 
             ref oa = segments.a;
-            const low = segments.aD.low, high = segments.aD.high;
+            const low = segments.a.domain.low, high = segments.a.domain.high;
             // check there's enough room to create a copy for scan and throw if creating a copy would go over memory limit
             overMemLimit(numBytes(int) * iv.size);
             // Calculate the destination indices
@@ -242,7 +238,7 @@ module SegmentedArray {
         }
 
         proc getNonEmpty() throws {
-            return lengths > 0;
+            return lengths.a > 0;
         }
 
         proc getNonEmptyCount() throws {
@@ -250,29 +246,21 @@ module SegmentedArray {
             return + reduce non_empty:int;
         }
 
-        proc getValuesName(st: borrowed SymTab): string throws {
-            var vname = st.nextName();
-            st.addEntry(vname, values);
-            return vname;
-        }
-
-        proc getSegmentsName(st: borrowed SymTab): string throws {
-            var sname = st.nextName();
-            st.addEntry(sname, segments);
-            return sname;
-        }
-
-        proc getLengthsName(st: borrowed SymTab): string throws {
-            var lname = st.nextName();
-            st.addEntry(lname, new shared SymEntry(lengths));
-            return lname;
+        proc getComponentName(obj: SymEntry, st: borrowed SymTab): string throws {
+            // early out if name exists
+            if obj.name != "" {
+                return obj.name;
+            }
+            var rname = st.nextName();
+            st.addEntry(rname, obj);
+            return obj.name;
         }
 
         proc fillReturnMap(ref rm: map(string, string), st: borrowed SymTab) throws {
             rm.add("segarray", "created " + st.attrib(this.name));
-            rm.add("values", "created " + st.attrib(this.getValuesName(st)));
-            rm.add("segments", "created " + st.attrib(this.getSegmentsName(st)));
-            rm.add("lengths", "created " + st.attrib(this.getLengthsName(st)));
+            rm.add("values", "created " + st.attrib(this.getComponentName(this.values, st)));
+            rm.add("segments", "created " + st.attrib(this.getComponentName(this.segments, st)));
+            rm.add("lengths", "created " + st.attrib(this.getComponentName(this.lengths, st)));
         }
     }
 }

@@ -27,10 +27,9 @@ module ReductionMsg
     // these functions take an array and produce a scalar
     // parse and respond to reduction message
     // scalar = reductionop(vector)
-    proc reductionMsg(cmd: string, payload: string, argSize: int, st: borrowed SymTab): MsgTuple throws {
+    proc reductionMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
         param pn = Reflection.getRoutineName();
         var repMsg: string = ""; // response message
-        var msgArgs = parseMessageArgs(payload, argSize);
         const reductionop = msgArgs.getValueOf("op");
         const name = msgArgs.getValueOf("array");
         rmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
@@ -52,7 +51,7 @@ module ReductionMsg
                     when "all" {
                         var val:string;
                         var sum = + reduce (e.a != 0);
-                        if sum == e.aD.size {val = "True";} else {val = "False";}
+                        if sum == e.a.domain.size {val = "True";} else {val = "False";}
                        repMsg = "bool %s".format(val);
                     }
                     when "sum" {
@@ -74,11 +73,11 @@ module ReductionMsg
                         repMsg = "int64 %i".format(val);
                     }
                     when "argmin" {
-                        var (minVal, minLoc) = minloc reduce zip(e.a,e.aD);
+                        var (minVal, minLoc) = minloc reduce zip(e.a,e.a.domain);
                         repMsg = "int64 %i".format(minLoc);
                     }
                     when "argmax" {
-                        var (maxVal, maxLoc) = maxloc reduce zip(e.a,e.aD);
+                        var (maxVal, maxLoc) = maxloc reduce zip(e.a,e.a.domain);
                         repMsg = "int64 %i".format(maxLoc);
                     }
                     when "is_sorted" {
@@ -134,11 +133,11 @@ module ReductionMsg
                         repMsg = "uint64 %i".format(val);
                     }
                     when "argmin" {
-                        var (minVal, minLoc) = minloc reduce zip(e.a,e.aD);
+                        var (minVal, minLoc) = minloc reduce zip(e.a,e.a.domain);
                         repMsg = "uint64 %i".format(minLoc);
                     }
                     when "argmax" {
-                        var (maxVal, maxLoc) = maxloc reduce zip(e.a,e.aD);
+                        var (maxVal, maxLoc) = maxloc reduce zip(e.a,e.a.domain);
                         repMsg = "uint64 %i".format(maxLoc);
                     }
                     when "is_sorted" {
@@ -168,7 +167,7 @@ module ReductionMsg
                     when "all" {
                         var val:string;
                         var sum = + reduce (e.a != 0.0);
-                        if sum == e.aD.size {val = "True";} else {val = "False";}
+                        if sum == e.a.domain.size {val = "True";} else {val = "False";}
                         repMsg = "bool %s".format(val);
                     }
                     when "sum" {
@@ -188,11 +187,11 @@ module ReductionMsg
                         repMsg = "float64 %.17r".format(val);
                     }
                     when "argmin" {
-                        var (minVal, minLoc) = minloc reduce zip(e.a,e.aD);
+                        var (minVal, minLoc) = minloc reduce zip(e.a,e.a.domain);
                         repMsg = "int64 %i".format(minLoc);
                     }
                     when "argmax" {
-                        var (maxVal, maxLoc) = maxloc reduce zip(e.a,e.aD);
+                        var (maxVal, maxLoc) = maxloc reduce zip(e.a,e.a.domain);
                         repMsg = "int64 %i".format(maxLoc);
                     }
                     when "is_sorted" {
@@ -243,11 +242,11 @@ module ReductionMsg
                         repMsg = "bool %s".format(val);
                     }
                     when "argmax" {
-                        var (maxVal, maxLoc) = maxloc reduce zip(e.a,e.aD);
+                        var (maxVal, maxLoc) = maxloc reduce zip(e.a,e.a.domain);
                         repMsg = "int64 %i".format(maxLoc);
                     }
                     when "argmin" {
-                        var (minVal, minLoc) = minloc reduce zip(e.a,e.aD);
+                        var (minVal, minLoc) = minloc reduce zip(e.a,e.a.domain);
                         repMsg = "int64 %i".format(minLoc);
                     }
                     otherwise {
@@ -267,11 +266,10 @@ module ReductionMsg
         return new MsgTuple(repMsg, MsgType.NORMAL);          
     }
 
-    proc countReductionMsg(cmd: string, payload: string, argSize: int, st: borrowed SymTab): MsgTuple throws {
+    proc countReductionMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
         param pn = Reflection.getRoutineName();
       // reqMsg: segmentedReduction values segments operator
       // 'segments_name' describes the segment offsets
-      var msgArgs = parseMessageArgs(payload, argSize);
       const segments_name = msgArgs.getValueOf("segments");
       const size = msgArgs.get("size").getIntValue();
       var rname = st.nextName();
@@ -332,13 +330,12 @@ module ReductionMsg
       return nancounts;
     }
     
-    proc segmentedReductionMsg(cmd: string, payload: string, argSize: int, st: borrowed SymTab): MsgTuple throws {
+    proc segmentedReductionMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
         param pn = Reflection.getRoutineName();
         // reqMsg: segmentedReduction values segments operator
         // 'values_name' is the segmented array of values to be reduced
         // 'segments_name' is the sement offsets
         // 'op' is the reduction operator
-        var msgArgs = parseMessageArgs(payload, argSize);
         const skipNan = msgArgs.get("skip_nan").getBoolValue();
         const values_name = msgArgs.getValueOf("values");
         const segments_name = msgArgs.getValueOf("segments");

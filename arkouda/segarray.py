@@ -12,11 +12,12 @@ from arkouda.dtypes import bool as akbool
 from arkouda.dtypes import int64 as akint64
 from arkouda.dtypes import isSupportedInt, str_, translate_np_dtype
 from arkouda.groupbyclass import GroupBy, broadcast
+from arkouda.infoclass import list_registry
 from arkouda.logger import getArkoudaLogger
 from arkouda.numeric import cumsum
-from arkouda.pdarrayclass import attach_pdarray, create_pdarray, is_sorted, pdarray
+from arkouda.pdarrayclass import RegistrationError, create_pdarray, is_sorted, pdarray
 from arkouda.pdarraycreation import arange, array, ones, zeros
-from arkouda.pdarrayIO import load
+from arkouda.io import load
 from arkouda.pdarraysetops import concatenate
 
 
@@ -262,7 +263,7 @@ class SegArray:
             n = len(m)
             newvals = zeros(size * n, dtype=dtype)
             for j in range(n):
-                newvals[j:: n] = m[j]
+                newvals[j::n] = m[j]
             return cls.from_parts(arange(size) * n, newvals)
 
     @property
@@ -968,14 +969,14 @@ class SegArray:
         _, lengths = g.count()
         return SegArray.from_parts(g.segments, uval, grouping=g, lengths=lengths)
 
-    def save(
-        self,
-        prefix_path,
-        dataset="segarray",
-        segment_suffix="_segments",
-        value_suffix="_values",
-        mode="truncate",
-        file_format="HDF5",
+    def to_hdf(
+            self,
+            prefix_path,
+            dataset="segarray",
+            segment_suffix="_segments",
+            value_suffix="_values",
+            mode="truncate",
+            file_type="distribute",
     ):
         """
         Save the SegArray to HDF5. The result is a collection of HDF5 files, one file
@@ -994,8 +995,61 @@ class SegArray:
         mode : str {'truncate' | 'append'}
             By default, truncate (overwrite) output files, if they exist.
             If 'append', add data as a new column to existing files.
+        file_type: str ("single" | "distribute")
+            Default: "distribute"
+            When set to single, dataset is written to a single file.
+            When distribute, dataset is written on a file per locale.
+            This is only supported by HDF5 files and will have no impact of Parquet Files.
+
+        Returns
+        -------
+        None
+
+        Notes
+        -----
+        Unlike for ak.Strings, SegArray is saved as two datasets in the top level of
+        the HDF5 file, not nested under a group.
+
+        SegArray is not currently supported by Parquet
+        """
+        self.segments.to_hdf(prefix_path, dataset=dataset+segment_suffix, mode=mode, file_type=file_type)
+        self.values.to_hdf(prefix_path, dataset=dataset+value_suffix, mode="append", file_type=file_type)
+
+    def save(
+        self,
+        prefix_path,
+        dataset="segarray",
+        segment_suffix="_segments",
+        value_suffix="_values",
+        mode="truncate",
+        file_format="HDF5",
+        file_type="distribute",
+    ):
+        """
+        DEPRECATED
+        Save the SegArray to HDF5. The result is a collection of HDF5 files, one file
+        per locale of the arkouda server, where each filename starts with prefix_path.
+
+        Parameters
+        ----------
+        prefix_path : str
+            Directory and filename prefix that all output files will share
+        dataset : str
+            Name prefix for saved data within the HDF5 file
+        segment_suffix : str
+            Suffix to append to dataset name for segments array
+        value_suffix : str
+            Suffix to append to dataset name for values array
+        mode : str {'truncate' | 'append'}
+            By default, truncate (overwrite) output files, if they exist.
+            If 'append', add data as a new column to existing files.
         file_format : str {'HDF5' | 'Parquet'}
             Defaults to `'HDF5'`. Indicates the file format to use to store data.
+        file_type: str ("single" | "distribute")
+            Default: "distribute"
+            When set to single, dataset is written to a single file.
+            When distribute, dataset is written on a file per locale.
+            This is only supported by HDF5 files and will have no impact of Parquet Files.
 
         Returns
         -------
@@ -1006,13 +1060,25 @@ class SegArray:
         Unlike for ak.Strings, SegArray is saved as two datasets in the top level of
         the HDF5 file, not nested under a group.
         """
+        warn(
+            "ak.SegArray.save has been deprecated. Please use ak.SegArray.to_hdf",
+            DeprecationWarning,
+        )
         if segment_suffix == value_suffix:
             raise ValueError("Segment suffix and value suffix must be different")
         self.segments.save(
-            prefix_path, dataset=dataset + segment_suffix, mode=mode, file_format=file_format
+            prefix_path,
+            dataset=dataset + segment_suffix,
+            mode=mode,
+            file_format=file_format,
+            file_type=file_type,
         )
         self.values.save(
-            prefix_path, dataset=dataset + value_suffix, mode="append", file_format=file_format
+            prefix_path,
+            dataset=dataset + value_suffix,
+            mode="append",
+            file_format=file_format,
+            file_type=file_type,
         )
 
     @classmethod
@@ -1022,10 +1088,9 @@ class SegArray:
         dataset="segarray",
         segment_suffix="_segments",
         value_suffix="_values",
-        mode="truncate",
     ):
         """
-        Load a saved SegArray from HDF5. All arguments msut match what
+        Load a saved SegArray from HDF5. All arguments must match what
         was supplied to SegArray.save()
 
         Parameters
@@ -1265,71 +1330,133 @@ class SegArray:
             segments[truth] = segments[arange(self.size)[truth] + 1]
             return SegArray.from_parts(segments, new_values[g.permutation])
 
-    def register(
-        self,
-        name,
-        segment_suffix="_segments",
-        value_suffix="_values",
-        length_suffix="_lengths",
-        grouping_suffix="_grouping",
-    ):
-        if len(set((segment_suffix, value_suffix, length_suffix, grouping_suffix))) != 4:
-            raise ValueError("Suffixes must all be different")
-        self.segments.register(name + segment_suffix)
-        self.values.register(name + value_suffix)
-        self.lengths.register(name + length_suffix)
-        # TODO - groupby does not have register.
-        # self.grouping.register(name+grouping_suffix)
+    def register(self, user_defined_name):
+        """
+        Save this SegArray object by registering it to the Symbol Table using a defined name
+
+        Parameters
+        ----------
+        user_defined_name : str
+            user defined name which this SegArray object will be registered under
+
+        Returns
+        -------
+        SegArray
+            This SegArray object
+
+        Raises
+        ------
+        RegistrationError
+            Raised if the server could not register the SegArray object
+
+        See Also
+        --------
+        unregister, attach, is_registered
+        """
+        try:
+            rep_msg = generic_msg(
+                cmd="register", args={"array": self.name, "user_name": user_defined_name}
+            )
+            if rep_msg != "success":
+                raise RegistrationError
+        except (
+            RuntimeError,
+            RegistrationError,
+        ):  # Registering two objects with the same name is not allowed
+            raise RegistrationError(f"Server was unable to register {user_defined_name}")
+
+        self.name = user_defined_name
+        return self
 
     def unregister(self):
-        self.segments.unregister()
-        self.values.unregister()
-        self.lengths.unregister()
-        # TODO - groupby does not have unregister.
-        # self.grouping.unregister()
+        """
+        Remove this SegArray object from the Symbol Table
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        RuntimeError
+            Raised if the server could not unregister the SegArray object from the Symbol Table
+
+        See Also
+        --------
+        register, attach, is_registered
+        """
+        SegArray.unregister_segarray_by_name(self.name)
+
+    @staticmethod
+    def unregister_segarray_by_name(user_defined_name):
+        """
+        Using the defined name, remove the registered SegArray object from the Symbol Table
+
+        Parameters
+        ----------
+        user_defined_name : str
+            user defined name which the SegArray object was registered under
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        RuntimeError
+            Raised if the server could not unregister the SegArray object from the Symbol Table
+
+        See Also
+        --------
+        register, unregister, attach, is_registered
+        """
+        generic_msg(cmd="unregister", args={"name": user_defined_name})
 
     @classmethod
-    def attach(
-        cls,
-        name,
-        segment_suffix="_segments",
-        value_suffix="_values",
-        length_suffix="_lengths",
-        grouping_suffix="_grouping",
-    ):
-        if len(set((segment_suffix, value_suffix, length_suffix, grouping_suffix))) != 4:
-            raise ValueError("Suffixes must all be different")
-        # TODO - add grouping attaching grouping=ak.GroupBy.attach(name+grouping_suffix)
-        return cls.from_parts(
-            attach_pdarray(name + segment_suffix),
-            attach_pdarray(name + value_suffix),
-            lengths=attach_pdarray(name + length_suffix),
+    def attach(cls, user_defined_name):
+        """
+        Using the defined name, attach to a SegArray that has been registered to the Symbol Table
+
+        Parameters
+        ----------
+        user_defined_name : str
+            user defined name which the SegArray object was registered under
+
+        Returns
+        -------
+        SegArray
+            The resulting SegArray
+
+        Raises
+        ------
+        RuntimeError
+            Raised if the server could not attach to the SegArray object
+
+        See Also
+        --------
+        register, unregister, is_registered
+        """
+        repMsg = generic_msg(
+            cmd="attach",
+            args={
+                "name": user_defined_name,
+                "objtype": SegArray.objtype,
+            },
         )
+        return cls.from_return_msg(repMsg)
 
     def is_registered(self) -> bool:
         """
-        Checks if all components of the SegArray object are registered
+        Checks if the name of the SegArray object is registered in the Symbol Table
 
         Returns
         -------
         bool
-            True if all components are registered, false if not
+            True if SegArray is registered, false if not
 
         See Also
         --------
         register, unregister, attach
         """
 
-        # SegArray contains 3 parts - segments, values, and lengths
-        regParts = [
-            self.segments.is_registered(),
-            self.values.is_registered(),
-            self.lengths.is_registered(),
-        ]
-
-        if any(regParts) and not all(regParts):
-            warn(
-                f"SegArray expected {len(regParts)} components to be registered,"
-                f" but only located {sum(regParts)}"
-            )
-        return all(regParts)
+        return self.name in list_registry()

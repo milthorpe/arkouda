@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import builtins
 from typing import List, Sequence, Union, cast
+from warnings import warn
 
 import numpy as np  # type: ignore
 from typeguard import typechecked
@@ -456,6 +457,8 @@ class pdarray:
     def __invert__(self):
         if self.dtype == akint64:
             return self._binop(~0, "^")
+        if self.dtype == akuint64:
+            return self._binop(~np.uint(0), "^")
         if self.dtype == bool:
             return self._binop(True, "^")
         raise TypeError(f"Unhandled dtype: {self} ({self.dtype})")
@@ -1251,8 +1254,10 @@ class pdarray:
         mode: str = "truncate",
         compressed: bool = False,
         file_format: str = "HDF5",
+        file_type: str = "distribute",
     ) -> str:
         """
+        DEPRECATED
         Save the pdarray to HDF5 or Parquet. The result is a collection of files,
         one file per locale of the arkouda server, where each filename starts
         with prefix_path. Each locale saves its chunk of the array to its
@@ -1275,6 +1280,11 @@ class pdarray:
             By default, saved files will be written to the HDF5 file format. If
             'Parquet', the files will be written to the Parquet file format. This
             is case insensitive.
+        file_type: str ("single" | "distribute")
+            Default: "distribute"
+            When set to single, dataset is written to a single file.
+            When distribute, dataset is written on a file per locale.
+            This is only supported by HDF5 files and will have no impact of Parquet Files.
 
         Returns
         -------
@@ -1332,32 +1342,90 @@ class pdarray:
         Saves the array in numLocales Parquet files with the name
         ``cwd/path/name_prefix_LOCALE####.parquet`` where #### is replaced by each locale number
         """
-        if mode.lower() in ["a", "app", "append"]:
-            m = 1
-        elif mode.lower() in ["t", "trunc", "truncate"]:
-            m = 0
-        else:
-            raise ValueError("Allowed modes are 'truncate' and 'append'")
+        warn(
+            "ak.pdarray.save has been deprecated. Please use ak.pdarray.to_parquet or ak.pdarray.to_hdf",
+            DeprecationWarning,
+        )
+        from arkouda.io import file_type_to_int, mode_str_to_int
 
         if file_format.lower() == "hdf5":
-            cmd = "tohdf"
+            return cast(
+                str,
+                generic_msg(
+                    cmd="tohdf",
+                    args={
+                        "values": self,
+                        "dset": dataset,
+                        "write_mode": mode_str_to_int(mode),
+                        "filename": prefix_path,
+                        "dtype": self.dtype,
+                        "objType": "pdarray",
+                        "file_format": file_type_to_int(file_type),
+                    },
+                ),
+            )
         elif file_format.lower() == "parquet":
-            cmd = "writeParquet"
+            return cast(
+                str,
+                generic_msg(
+                    cmd="writeParquet",
+                    args={
+                        "values": self,
+                        "dset": dataset,
+                        "mode": mode_str_to_int(mode),
+                        "prefix": prefix_path,
+                        "dtype": self.dtype,
+                        "save_offsets": False,  # only used by strings
+                        "compressed": compressed,
+                    },
+                ),
+            )
         else:
             raise ValueError("Supported file formats are 'HDF5' and 'Parquet'")
+
+    @typechecked
+    def to_parquet(
+        self, prefix_path: str, dataset: str = "array", mode: str = "truncate", compressed: bool = False
+    ) -> str:
+        from arkouda.io import mode_str_to_int
 
         return cast(
             str,
             generic_msg(
-                cmd=cmd,
+                cmd="writeParquet",
                 args={
                     "values": self,
                     "dset": dataset,
-                    "mode": m,
+                    "mode": mode_str_to_int(mode),
                     "prefix": prefix_path,
                     "dtype": self.dtype,
-                    "save_offsets": False,  # only used by strings
                     "compressed": compressed,
+                },
+            ),
+        )
+
+    @typechecked
+    def to_hdf(
+        self,
+        prefix_path: str,
+        dataset: str = "array",
+        mode: str = "truncate",
+        file_type: str = "distribute",
+    ) -> str:
+        from arkouda.io import file_type_to_int, mode_str_to_int
+
+        return cast(
+            str,
+            generic_msg(
+                cmd="tohdf",
+                args={
+                    "values": self,
+                    "dset": dataset,
+                    "write_mode": mode_str_to_int(mode),
+                    "filename": prefix_path,
+                    "dtype": self.dtype,
+                    "objType": "pdarray",
+                    "file_format": file_type_to_int(file_type),
                 },
             ),
         )
@@ -1371,6 +1439,7 @@ class pdarray:
         compressed: bool = False,
     ) -> str:
         """
+        DEPRECATED
         Save the pdarray to Parquet. The result is a collection of Parquet files,
         one file per locale of the arkouda server, where each filename starts
         with prefix_path. Each locale saves its chunk of the array to its
@@ -1431,6 +1500,10 @@ class pdarray:
         >>> (a == b).all()
         True
         """
+        warn(
+            "ak.pdarray.save_parquet has been deprecated. Please use ak.pdarray.to_parquet",
+            DeprecationWarning,
+        )
         return self.save(
             prefix_path=prefix_path,
             dataset=dataset,
@@ -1440,8 +1513,15 @@ class pdarray:
         )
 
     @typechecked
-    def save_hdf(self, prefix_path: str, dataset: str = "array", mode: str = "truncate") -> str:
+    def save_hdf(
+        self,
+        prefix_path: str,
+        dataset: str = "array",
+        mode: str = "truncate",
+        file_type: str = "distribute",
+    ) -> str:
         """
+        DEPRECATED
         Save the pdarray to HDF5. The result is a collection of HDF5 files,
         one file per locale of the arkouda server, where each filename starts
         with prefix_path. Each locale saves its chunk of the array to its
@@ -1455,8 +1535,10 @@ class pdarray:
             Name of the dataset to create in HDF5 files (must not already exist)
         mode : str {'truncate', 'append'}
             By default, truncate (overwrite) output files, if they exist.
-        compressed : bool
-            By default, write without Snappy compression and RLE encoding.
+        file_type : str ("single" | "distribute")
+            Default: distribute
+            Single writes the dataset to a single file
+            Distribute writes the dataset to a file per locale
 
         Returns
         -------
@@ -1502,12 +1584,17 @@ class pdarray:
         >>> (a == b).all()
         True
         """
+        warn(
+            "ak.pdarray.save_hdf has been deprecated. Please use ak.pdarray.to_hdf",
+            DeprecationWarning,
+        )
         return self.save(
             prefix_path=prefix_path,
             dataset=dataset,
             mode=mode,
             compressed=False,
             file_format="HDF5",
+            file_type=file_type,
         )
 
     @typechecked
@@ -2622,17 +2709,128 @@ def rotr(x, rot) -> pdarray:
 
 
 @typechecked
-def power(pda: pdarray, pwr: Union[int, float, pdarray]) -> pdarray:
-    return pda**pwr
+def power(pda: pdarray, pwr: Union[int, float, pdarray], where: Union[bool, pdarray] = True) -> pdarray:
+    """
+    Raises an array to a power. If where is given, the operation will only take place in the positions
+    where the where condition is True.
+
+    Note:
+    Our implementation of the where argument deviates from numpy. The difference in behavior occurs
+    at positions where the where argument contains a False. In numpy, these position will have
+    uninitialized memory (which can contain anything and will vary between runs). We have chosen to
+    instead return the value of the original array in these positions.
+
+    Parameters
+    ----------
+    pda : pdarray
+        A pdarray of values that will be raised to a power (pwr)
+    pwr : integer, float, or pdarray
+        The power(s) that pda is raised to
+    where : Boolean or pdarray
+        This condition is broadcast over the input. At locations where the condition is True, the
+        corresponding value will be raised to the respective power. Elsewhere, it will retain its
+        original value. Default set to True.
+
+    Returns
+    -------
+        pdarray
+        Returns a pdarray of values raised to a power, under the boolean where condition.
+
+    Examples
+    --------
+    >>> a = ak.arange(5)
+    >>> ak.power(a, 3)
+    array([0, 1, 8, 27, 64])
+    >>> ak.power(a), 3, a % 2 == 0)
+    array([0, 1, 8, 3, 64])
+    """
+    from arkouda.numeric import cast as akcast
+    from arkouda.numeric import where as akwhere
+
+    if where is True:
+        return pda**pwr
+    elif where is False:
+        return pda
+    else:
+        exp = pda**pwr
+        return akwhere(where, exp, akcast(pda, dtype(exp)))
 
 
 @typechecked
-def sqrt(pda: pdarray) -> pdarray:
-    return power(pda, 0.5)
+def sqrt(pda: pdarray, where: Union[bool, pdarray] = True) -> pdarray:
+    """
+    Takes the square root of array. If where is given, the operation will only take place in
+    the positions where the where condition is True.
+
+    Parameters
+    ----------
+    pda : pdarray
+        A pdarry of values that will be square rooted
+    where : Boolean or pdaarray
+        This condition is broadcast over the input. At locations where the condition is True, the
+        corresponding value will be square rooted. Elsewhere, it will retain its original value.
+        Default set to True.
+
+    Returns
+    -------
+        pdarray
+        Returns a pdarray of square rooted values, under the boolean where condition.
+
+    Examples:
+    >>> a = ak.arange(5)
+    >>> ak.sqrt(a)
+    array([0 1 1.4142135623730951 1.7320508075688772 2])
+    >>> ak.sqrt(a, ak.sqrt([True, True, False, False, True]))
+    array([0, 1, 2, 3, 2])
+    """
+    return power(pda, 0.5, where)
 
 
 @typechecked
 def attach_pdarray(user_defined_name: str) -> pdarray:
+    """
+    class method to return a pdarray attached to the registered name in the arkouda
+    server which was registered using register()
+
+    Parameters
+    ----------
+    user_defined_name : str
+        user defined name which array was registered under
+
+    Returns
+    -------
+    pdarray
+        pdarray which is bound to the corresponding server side component which was registered
+        with user_defined_name
+
+    Raises
+    ------
+    TypeError
+      Raised if user_defined_name is not a str
+
+    See also
+    --------
+    attach, register, unregister, is_registered, unregister_pdarray_by_name, list_registry
+
+    Notes
+    -----
+    Registered names/pdarrays in the server are immune to deletion
+    until they are unregistered.
+
+    Examples
+    --------
+    >>> a = zeros(100)
+    >>> a.register("my_zeros")
+    >>> # potentially disconnect from server and reconnect to server
+    >>> b = ak.attach_pdarray("my_zeros")
+    >>> # ...other work...
+    >>> b.unregister()
+    """
+    return attach(user_defined_name)
+
+
+@typechecked
+def attach(user_defined_name: str) -> pdarray:
     """
     class method to return a pdarray attached to the registered name in the arkouda
     server which was registered using register()
@@ -2667,7 +2865,7 @@ def attach_pdarray(user_defined_name: str) -> pdarray:
     >>> a = zeros(100)
     >>> a.register("my_zeros")
     >>> # potentially disconnect from server and reconnect to server
-    >>> b = ak.attach_pdarray("my_zeros")
+    >>> b = ak.pdarrayclass.attach("my_zeros")
     >>> # ...other work...
     >>> b.unregister()
     """

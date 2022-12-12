@@ -33,8 +33,7 @@ module UniqueMsg
     private config const logLevel = ServerConfig.logLevel;
     const umLogger = new Logger(logLevel);
 
-    proc uniqueMsg(cmd: string, payload: string, argSize: int, st: borrowed SymTab): MsgTuple throws {
-        var msgArgs = parseMessageArgs(payload, argSize);
+    proc uniqueMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
         // flag to return segments and permutation for GroupBy
         const returnGroups = msgArgs.get("returnGroupStr").getBoolValue();
         const assumeSorted = msgArgs.get("assumeSortedStr").getBoolValue();
@@ -144,7 +143,7 @@ module UniqueMsg
 
         if assumeSorted {
           // set permutation to 0..#size and go directly to finding segment boundaries.
-          permutation.a = permutation.aD;
+          permutation.a = permutation.a.domain;
         }
         else {
           // Sort the keys
@@ -168,7 +167,8 @@ module UniqueMsg
         // Only one array which is a strings
         var (myNames, _) = namesList[0].splitMsgToTuple("+", 2);
         var strings = getSegString(myNames, st);
-        var max_bytes = max reduce strings.getLengths();
+        // should we do strings.getLengths()-1 to not account for null
+        const max_bytes = max reduce strings.getLengths();
         if max_bytes < 16 {
           var str_names = strings.bytesToUintArr(max_bytes, st).split("+");
           var (totalDigits, bitWidths, negs) = getNumDigitsNumericArrays(str_names, st);

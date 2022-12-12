@@ -1,5 +1,6 @@
 from typing import List, Optional, Union
 from typing import cast as typecast
+from warnings import warn
 
 import pandas as pd  # type: ignore
 from typeguard import typechecked
@@ -197,6 +198,20 @@ class Index:
 
         return in1d(self.values, key)
 
+    def to_hdf(
+        self,
+        prefix_path: str,
+        dataset: str = "index",
+        mode: str = "truncate",
+        file_type: str = "distribute",
+    ) -> str:
+        return self.values.to_hdf(prefix_path, dataset=dataset, mode=mode, file_type=file_type)
+
+    def to_parquet(
+        self, prefix_path: str, dataset: str = "index", mode: str = "truncate", compressed: bool = False
+    ):
+        return self.values.to_parquet(prefix_path, dataset=dataset, mode=mode, compressed=compressed)
+
     def save(
         self,
         prefix_path: str,
@@ -204,8 +219,10 @@ class Index:
         mode: str = "truncate",
         compressed: bool = False,
         file_format: str = "HDF5",
+        file_type: str = "distribute",
     ) -> str:
         """
+        DEPRECATED
         Save the index to HDF5 or Parquet. The result is a collection of files,
         one file per locale of the arkouda server, where each filename starts
         with prefix_path. Each locale saves its chunk of the array to its
@@ -228,6 +245,11 @@ class Index:
             By default, saved files will be written to the HDF5 file format. If
             'Parquet', the files will be written to the Parquet file format. This
             is case insensitive.
+        file_type: str ("single" | "distribute")
+            Default: "distribute"
+            When set to single, dataset is written to a single file.
+            When distribute, dataset is written on a file per locale.
+            This is only supported by HDF5 files and will have no impact of Parquet Files.
 
         Returns
         -------
@@ -267,35 +289,46 @@ class Index:
         Any file extension can be used. The file I/O does not rely on the extension to determine the
         file format.
         """
-        if mode.lower() in ["a", "app", "append"]:
-            m = 1
-        elif mode.lower() in ["t", "trunc", "truncate"]:
-            m = 0
-        else:
-            raise ValueError("Allowed modes are 'truncate' and 'append'")
+        warn(
+            "ak.Index.save has been deprecated. Please use ak.Index.to_parquet or ak.Index.to_hdf",
+            DeprecationWarning,
+        )
+        from arkouda.io import file_type_to_int, mode_str_to_int
 
         if file_format.lower() == "hdf5":
-            cmd = "tohdf"
+            return typecast(
+                str,
+                generic_msg(
+                    cmd="tohdf",
+                    args={
+                        "values": self.values,
+                        "dset": dataset,
+                        "write_mode": mode_str_to_int(mode),
+                        "filename": prefix_path,
+                        "dtype": self.dtype,
+                        "objType": "pdarray",
+                        "file_format": file_type_to_int(file_type),
+                    },
+                ),
+            )
         elif file_format.lower() == "parquet":
-            cmd = "writeParquet"
+            return typecast(
+                str,
+                generic_msg(
+                    cmd="writeParquet",
+                    args={
+                        "values": self.values,
+                        "dset": dataset,
+                        "mode": mode_str_to_int(mode),
+                        "prefix": prefix_path,
+                        "dtype": self.dtype,
+                        "save_offsets": False,  # only used by strings
+                        "compressed": compressed,
+                    },
+                ),
+            )
         else:
             raise ValueError("Supported file formats are 'HDF5' and 'Parquet'")
-
-        return typecast(
-            str,
-            generic_msg(
-                cmd=cmd,
-                args={
-                    "values": self.values,
-                    "dset": dataset,
-                    "mode": m,
-                    "prefix": prefix_path,
-                    "dtype": self.dtype,
-                    "save_offsets": False,  # this is only used by strings
-                    "compressed": compressed,
-                },
-            ),
-        )
 
 
 class MultiIndex(Index):
