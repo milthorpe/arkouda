@@ -11,7 +11,7 @@ module KWayMerge {
     inline proc key(kr) { const (k, _) = kr; return k; }
   }
 
-  proc mergeSortedChunks(dst: [?aD] ?keyType, src: [aD] keyType, chunks: int) {
+  proc mergeSortedKeys(dst: [?aD] ?keyType, src: [aD] keyType, chunks: int) {
     merge(dst, src, chunks, new KeysComparator(max(keyType)));
   }
 

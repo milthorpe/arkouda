@@ -22,8 +22,6 @@ module RadixSortLSD
     use RangeChunk;
     use Logging;
     use ServerConfig;
-    use GPUIterator;
-    use CUBRadixSort;
 
     private config const logLevel = ServerConfig.logLevel;
     const rsLogger = new Logger(logLevel);

@@ -10,6 +10,8 @@ module SortMsg
     use MultiTypeSymbolTable;
     use MultiTypeSymEntry;
     use ServerErrorStrings;
+    use GPUIterator;
+    use CUBRadixSort;
     use RadixSortLSD;
     use AryUtil;
     use Logging;
@@ -66,7 +68,11 @@ module SortMsg
             return b;
           }
           when SortingAlgorithm.RadixSortLSD {
-            return radixSortLSD_keys(a);
+            if (nGPUs > 0) {
+              return cubRadixSortLSD_keys(a);
+            } else {
+              return radixSortLSD_keys(a);
+            }
           }
           otherwise {
             throw getErrorWithContext(
