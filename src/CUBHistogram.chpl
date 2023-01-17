@@ -7,7 +7,7 @@ module CUBHistogram {
     use IO;
     use Time;
 
-    config const histogramReduceOnGPU = true;
+    config param histogramReduceOnGPU = true;
 
     extern proc cubHistogram_int32(samples: c_void_ptr, histogram: c_void_ptr, num_levels: int, lower_bound: int(32), upper_bound: int(32), N: int);
     extern proc cubHistogram_int64(samples: c_void_ptr, histogram: c_void_ptr, num_levels: int, lower_bound: int(64), upper_bound: int(64), N: int);
