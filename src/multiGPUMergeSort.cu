@@ -1,4 +1,5 @@
 #include "tanasic_sort.cuh"
+#include <cub/cub.cuh>
 #include <stdio.h>
 
 template <typename T>
@@ -15,6 +16,12 @@ DeviceBuffers<T>* createDeviceBuffers(const size_t num_elements, const int *gpus
                 device_buffers->AtPrimary(lastDevice)->end() - num_fillers, device_buffers->AtPrimary(lastDevice)->end(),
                 std::numeric_limits<T>::max());
   return device_buffers;
+}
+
+template <typename T>
+T *destroyDeviceBuffers(void *device_buffers_ptr) {
+  DeviceBuffers<T>* device_buffers = (DeviceBuffers<T>*)device_buffers_ptr;
+  delete device_buffers;
 }
 
 template <typename T>
@@ -75,8 +82,7 @@ void swapPartitions(void *device_buffers_ptr, size_t pivot, const int *gpus, con
 
 template <typename T>
 void mergeLocalPartitions(void *device_buffers_ptr, size_t pivot,
-                          int deviceToMerge, const int *gpus, const int nGPUs,
-                          size_t num_fillers) {
+                          int deviceToMerge, const int *gpus, const int nGPUs) {
   DeviceBuffers<T>* device_buffers = (DeviceBuffers<T>*)device_buffers_ptr;
   std::vector<int> devices(gpus, gpus+nGPUs);
 
@@ -85,8 +91,8 @@ void mergeLocalPartitions(void *device_buffers_ptr, size_t pivot,
 
   for (size_t i = 0; i < devices.size(); ++i) {
     const int device = devices[i];
-    const size_t offset = i >= devices.size() / 2 ? pivot : partition_size - pivot;
     if (device == deviceToMerge) {
+      const size_t offset = i >= devices.size() / 2 ? pivot : partition_size - pivot;
       CheckCudaError(cudaSetDevice(device));
       //printf("merging local partitions on %d partition_size %ld pivot %ld offset %ld\n", device, partition_size, pivot, offset);
 
@@ -103,7 +109,36 @@ void mergeLocalPartitions(void *device_buffers_ptr, size_t pivot,
   }
 }
 
+using namespace cub;
+
+template <typename T>
+void cubSortKeysOnStream(const T *d_keys_in, T *d_keys_out, size_t N, cudaStream_t stream) {
+  size_t temp_storage_bytes = 0;
+  void *d_temp_storage = NULL;
+
+  CachingDeviceAllocator  g_allocator(true);  // Caching allocator for device memory
+  // run SortKeys once to determine the necessary size of d_temp_storage
+  CubDebugExit(DeviceRadixSort::SortKeys(d_temp_storage, temp_storage_bytes, d_keys_in, d_keys_out, N, 0, sizeof(T)*8, stream));
+  CubDebugExit(g_allocator.DeviceAllocate(&d_temp_storage, temp_storage_bytes, stream));
+
+  CubDebugExit(DeviceRadixSort::SortKeys(d_temp_storage, temp_storage_bytes, d_keys_in, d_keys_out, N, 0, sizeof(T)*8, stream));
+  if (d_temp_storage) CubDebugExit(g_allocator.DeviceFree(d_temp_storage));
+}
+
+template <typename T>
+void sortToDeviceBuffer(const T *d_keys_in, void *device_buffers_ptr, size_t N) {
+  int deviceId;
+  CheckCudaError(cudaGetDevice(&deviceId));
+  DeviceBuffers<T>* device_buffers = (DeviceBuffers<T>*)device_buffers_ptr;
+  cudaStream_t primaryStream = *device_buffers->GetPrimaryStream(deviceId);
+  T *d_keys_out = (T*)(device_buffers->AtPrimary(deviceId)->data().get());
+  cubSortKeysOnStream(d_keys_in, d_keys_out, N, primaryStream);
+  CheckCudaError(cudaStreamSynchronize(primaryStream));
+  device_buffers->GetDeviceAllocator(deviceId)->SetOffset(N * sizeof(T));
+}
+
 extern "C" {
+
 void *createDeviceBuffers_int32(const size_t num_elements, const int *devices, const int nGPUs) {
   return createDeviceBuffers<int32_t>(num_elements, devices, nGPUs);
 }
@@ -118,6 +153,21 @@ void *createDeviceBuffers_float(const size_t num_elements, const int *devices, c
 
 void *createDeviceBuffers_double(const size_t num_elements, const int *devices, const int nGPUs) {
   return createDeviceBuffers<double>(num_elements, devices, nGPUs);
+}
+
+void *destroyDeviceBuffers_int32(void *device_buffers_ptr) {
+  return destroyDeviceBuffers<int32_t>(device_buffers_ptr);
+}
+
+void *destroyDeviceBuffers_int64(void *device_buffers_ptr) {
+  return destroyDeviceBuffers<int64_t>(device_buffers_ptr);
+}
+
+void *destroyDeviceBuffers_float(void *device_buffers_ptr) {
+  return destroyDeviceBuffers<float>(device_buffers_ptr);
+}
+void *destroyDeviceBuffers_double(void *device_buffers_ptr) {
+  return destroyDeviceBuffers<double>(device_buffers_ptr);
 }
 
 int32_t *getDeviceBufferData_int32(void *device_buffers_ptr) {
@@ -200,19 +250,35 @@ void swapPartitions_double(void *device_buffers_ptr, size_t pivot, const int *gp
   swapPartitions<double>(device_buffers_ptr, pivot, gpus, nGPUs, devicesToMerge);
 }
 
-void mergeLocalPartitions_int32(void *device_buffers_ptr, size_t pivot, int deviceToMerge, const int *gpus, const int nGPUs, size_t num_fillers) {
-  mergeLocalPartitions<int32_t>(device_buffers_ptr, pivot, deviceToMerge, gpus, nGPUs, num_fillers);
+void mergeLocalPartitions_int32(void *device_buffers_ptr, size_t pivot, int deviceToMerge, const int *gpus, const int nGPUs) {
+  mergeLocalPartitions<int32_t>(device_buffers_ptr, pivot, deviceToMerge, gpus, nGPUs);
 }
 
-void mergeLocalPartitions_int64(void *device_buffers_ptr, size_t pivot, int deviceToMerge, const int *gpus, const int nGPUs, size_t num_fillers) {
-  mergeLocalPartitions<int64_t>(device_buffers_ptr, pivot, deviceToMerge, gpus, nGPUs, num_fillers);
+void mergeLocalPartitions_int64(void *device_buffers_ptr, size_t pivot, int deviceToMerge, const int *gpus, const int nGPUs) {
+  mergeLocalPartitions<int64_t>(device_buffers_ptr, pivot, deviceToMerge, gpus, nGPUs);
 }
 
-void mergeLocalPartitions_float(void *device_buffers_ptr, size_t pivot, int deviceToMerge, const int *gpus, const int nGPUs, size_t num_fillers) {
-  mergeLocalPartitions<float>(device_buffers_ptr, pivot, deviceToMerge, gpus, nGPUs, num_fillers);
+void mergeLocalPartitions_float(void *device_buffers_ptr, size_t pivot, int deviceToMerge, const int *gpus, const int nGPUs) {
+  mergeLocalPartitions<float>(device_buffers_ptr, pivot, deviceToMerge, gpus, nGPUs);
 }
 
-void mergeLocalPartitions_double(void *device_buffers_ptr, size_t pivot, int deviceToMerge, const int *gpus, const int nGPUs, size_t num_fillers) {
-  mergeLocalPartitions<double>(device_buffers_ptr, pivot, deviceToMerge, gpus, nGPUs, num_fillers);
+void mergeLocalPartitions_double(void *device_buffers_ptr, size_t pivot, int deviceToMerge, const int *gpus, const int nGPUs) {
+  mergeLocalPartitions<double>(device_buffers_ptr, pivot, deviceToMerge, gpus, nGPUs);
+}
+
+void sortToDeviceBuffer_int32(const int32_t *d_keys_in, void *device_buffers_ptr, size_t N) {
+  sortToDeviceBuffer<int32_t>(d_keys_in, device_buffers_ptr, N);
+}
+
+void sortToDeviceBuffer_int64(const int64_t *d_keys_in, void *device_buffers_ptr, size_t N) {
+  sortToDeviceBuffer<int64_t>(d_keys_in, device_buffers_ptr, N);
+}
+
+void sortToDeviceBuffer_float(const float *d_keys_in, void *device_buffers_ptr, size_t N) {
+  sortToDeviceBuffer<float>(d_keys_in, device_buffers_ptr, N);
+}
+
+void sortToDeviceBuffer_double(const double *d_keys_in, void *device_buffers_ptr, size_t N) {
+  sortToDeviceBuffer<double>(d_keys_in, device_buffers_ptr, N);
 }
 }

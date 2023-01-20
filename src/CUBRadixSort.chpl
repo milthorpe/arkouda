@@ -15,10 +15,16 @@ module CUBRadixSort {
     extern proc cubSortPairs_int64(keys_in: c_void_ptr, keys_out: c_void_ptr, values_in: c_void_ptr, values_out: c_void_ptr, N: c_size_t);
     extern proc cubSortPairs_float(keys_in: c_void_ptr, keys_out: c_void_ptr, values_in: c_void_ptr, values_out: c_void_ptr, N: c_size_t);
     extern proc cubSortPairs_double(keys_in: c_void_ptr, keys_out: c_void_ptr, values_in: c_void_ptr, values_out: c_void_ptr, N: c_size_t);
+
     extern proc createDeviceBuffers_int32(num_elements: c_size_t, devices: [] int(32), nGPUs: int(32)): c_void_ptr;
     extern proc createDeviceBuffers_int64(num_elements: c_size_t, devices: [] int(32), nGPUs: int(32)): c_void_ptr;
     extern proc createDeviceBuffers_float(num_elements: c_size_t, devices: [] int(32), nGPUs: int(32)): c_void_ptr;
     extern proc createDeviceBuffers_double(num_elements: c_size_t, devices: [] int(32), nGPUs: int(32)): c_void_ptr;
+    extern proc destroyDeviceBuffers_int32(device_buffers: c_void_ptr): c_ptr(int(32));
+    extern proc destroyDeviceBuffers_int64(device_buffers: c_void_ptr): c_ptr(int(64));
+    extern proc destroyDeviceBuffers_float(device_buffers: c_void_ptr): c_ptr(real(32));
+    extern proc destroyDeviceBuffers_double(device_buffers: c_void_ptr): c_ptr(real(64));
+
     extern proc getDeviceBufferData_int32(device_buffers: c_void_ptr): c_ptr(int(32));
     extern proc getDeviceBufferData_int64(device_buffers: c_void_ptr): c_ptr(int(64));
     extern proc getDeviceBufferData_float(device_buffers: c_void_ptr): c_ptr(real(32));
@@ -31,6 +37,7 @@ module CUBRadixSort {
     extern proc updateDeviceBufferOffset_int64(device_buffers: c_void_ptr, N: c_size_t);
     extern proc updateDeviceBufferOffset_float(device_buffers: c_void_ptr, N: c_size_t);
     extern proc updateDeviceBufferOffset_double(device_buffers: c_void_ptr, N: c_size_t);
+
     extern proc findPivot_int32(device_buffers: c_void_ptr, devices: [] int(32), nGPUs: int(32)): int;
     extern proc findPivot_int64(device_buffers: c_void_ptr, devices: [] int(32), nGPUs: int(32)): int;
     extern proc findPivot_float(device_buffers: c_void_ptr, devices: [] int(32), nGPUs: int(32)): int;
@@ -39,10 +46,15 @@ module CUBRadixSort {
     extern proc swapPartitions_int64(device_buffers: c_void_ptr, pivot: c_size_t, devices: [] int(32), nGPUs: int(32), devicesToMerge: [] int(32));
     extern proc swapPartitions_float(device_buffers: c_void_ptr, pivot: c_size_t, devices: [] int(32), nGPUs: int(32), devicesToMerge: [] int(32));
     extern proc swapPartitions_double(device_buffers: c_void_ptr, pivot: c_size_t, devices: [] int(32), nGPUs: int(32), devicesToMerge: [] int(32));
-    extern proc mergeLocalPartitions_int32(device_buffers: c_void_ptr, pivot: c_size_t, deviceToMerge: int, devices: [] int(32), nGPUs: int(32), num_fillers: c_size_t);
-    extern proc mergeLocalPartitions_int64(device_buffers: c_void_ptr, pivot: c_size_t, deviceToMerge: int, devices: [] int(32), nGPUs: int(32), num_fillers: c_size_t);
-    extern proc mergeLocalPartitions_float(device_buffers: c_void_ptr, pivot: c_size_t, deviceToMerge: int, devices: [] int(32), nGPUs: int(32), num_fillers: c_size_t);
-    extern proc mergeLocalPartitions_double(device_buffers: c_void_ptr, pivot: c_size_t, deviceToMerge: int, devices: [] int(32), nGPUs: int(32), num_fillers: c_size_t);
+    extern proc mergeLocalPartitions_int32(device_buffers: c_void_ptr, pivot: c_size_t, deviceToMerge: int, devices: [] int(32), nGPUs: int(32));
+    extern proc mergeLocalPartitions_int64(device_buffers: c_void_ptr, pivot: c_size_t, deviceToMerge: int, devices: [] int(32), nGPUs: int(32));
+    extern proc mergeLocalPartitions_float(device_buffers: c_void_ptr, pivot: c_size_t, deviceToMerge: int, devices: [] int(32), nGPUs: int(32));
+    extern proc mergeLocalPartitions_double(device_buffers: c_void_ptr, pivot: c_size_t, deviceToMerge: int, devices: [] int(32), nGPUs: int(32));
+
+    extern proc sortToDeviceBuffer_int32(keys_in: c_void_ptr, device_buffers: c_void_ptr, N: c_size_t);
+    extern proc sortToDeviceBuffer_int64(keys_in: c_void_ptr, device_buffers: c_void_ptr, N: c_size_t);
+    extern proc sortToDeviceBuffer_float(keys_in: c_void_ptr, device_buffers: c_void_ptr, N: c_size_t);
+    extern proc sortToDeviceBuffer_double(keys_in: c_void_ptr, device_buffers: c_void_ptr, N: c_size_t);
 
     private proc findPivot(type t, device_buffers: c_void_ptr, devices: [] int(32), nGPUs: int(32)): int {
         if t == int(32) {
@@ -70,26 +82,25 @@ module CUBRadixSort {
         }
     }
 
-    private proc mergeLocalPartitions(type t, device_buffers: c_void_ptr, pivot: c_size_t, deviceToMerge: int, devices: [] int(32), nGPUs: int(32), num_fillers: c_size_t) {
+    private proc mergeLocalPartitions(type t, device_buffers: c_void_ptr, pivot: c_size_t, deviceToMerge: int, devices: [] int(32), nGPUs: int(32)) {
         if t == int(32) {
-            mergeLocalPartitions_int32(device_buffers, pivot, deviceToMerge, devices, nGPUs, num_fillers);
+            mergeLocalPartitions_int32(device_buffers, pivot, deviceToMerge, devices, nGPUs);
         } else if t == int(64) {
-            mergeLocalPartitions_int64(device_buffers, pivot, deviceToMerge, devices, nGPUs, num_fillers);
+            mergeLocalPartitions_int64(device_buffers, pivot, deviceToMerge, devices, nGPUs);
         } else if t == real(32) {
-            mergeLocalPartitions_float(device_buffers, pivot, deviceToMerge, devices, nGPUs, num_fillers);
+            mergeLocalPartitions_float(device_buffers, pivot, deviceToMerge, devices, nGPUs);
         } else if t == real(64) {
-            mergeLocalPartitions_double(device_buffers, pivot, deviceToMerge, devices, nGPUs, num_fillers);
+            mergeLocalPartitions_double(device_buffers, pivot, deviceToMerge, devices, nGPUs);
         }
     }
 
-    private proc mergePartitions(type t, deviceBuffers: c_void_ptr, devices: [] int(32), numFillers: int) {
+    private proc mergePartitions(type t, deviceBuffers: c_void_ptr, devices: [] int(32)) {
         if (devices.size > 2) {
-            forall i in {0..1} {
+            forall i in 0..1 {
                 mergePartitions(
                     t,
                     deviceBuffers,
-                    devices((i * (devices.size / 2)) .. ((i + 1) * (devices.size / 2))-1),
-                    numFillers);
+                    devices((i * (devices.size / 2)) .. ((i + 1) * (devices.size / 2))-1));
             }
         }
 
@@ -97,17 +108,16 @@ module CUBRadixSort {
         if (pivot > 0) {
             var devicesToMerge: [0..1] int(32);
             swapPartitions(t, deviceBuffers, pivot, devices, devices.size: int(32), devicesToMerge);
-            forall i in {0..1} do
-                mergeLocalPartitions(t, deviceBuffers, pivot, devicesToMerge[i], devices, devices.size: int(32), numFillers);
+            forall i in 0..1 do
+                mergeLocalPartitions(t, deviceBuffers, pivot, devicesToMerge[i], devices, devices.size: int(32));
         }
 
         if (devices.size > 2) {
-            forall i in {0..1} {
+            forall i in 0..1 {
                 mergePartitions(
                     t,
                     deviceBuffers,
-                    devices((i * (devices.size / 2)) .. ((i + 1) * (devices.size / 2))-1),
-                    numFillers);
+                    devices((i * (devices.size / 2)) .. ((i + 1) * (devices.size / 2))-1));
             }
         }
     }
@@ -129,29 +139,22 @@ module CUBRadixSort {
         }
     }
 
-    private proc cubSortKeysMergeOnGPU(type t, devA: GPUArray, aOut: [?aD] t, N: int, deviceBuffers: c_void_ptr, devices: [] int(32)) {
+    private proc cubSortKeysMergeOnGPU(type t, devA: GPUArray, N: int, deviceBuffers: c_void_ptr) {
         if t == int(32) {
-            var deviceBufferPtr = getDeviceBufferData_int32(deviceBuffers);
-            cubSortKeys_int32(devA.dPtr(), deviceBufferPtr, N: c_size_t);
-            DeviceSynchronize();
-            updateDeviceBufferOffset_int32(deviceBuffers, N);
+            sortToDeviceBuffer_int32(devA.dPtr(), deviceBuffers, N);
         } else if t == int(64) {
-            var deviceBufferPtr = getDeviceBufferData_int64(deviceBuffers);
-            cubSortKeys_int64(devA.dPtr(), deviceBufferPtr, N: c_size_t);
-            DeviceSynchronize();
-            updateDeviceBufferOffset_int64(deviceBuffers, N);
+            sortToDeviceBuffer_int64(devA.dPtr(), deviceBuffers, N);
         } else if t == real(32) {
-            var deviceBufferPtr = getDeviceBufferData_float(deviceBuffers);
-            cubSortKeys_float(devA.dPtr(), deviceBufferPtr, N: c_size_t);
-            DeviceSynchronize();
-            updateDeviceBufferOffset_float(deviceBuffers, N);
+            sortToDeviceBuffer_float(devA.dPtr(), deviceBuffers, N);
         } else if t == real(64) {
+            sortToDeviceBuffer_double(devA.dPtr(), deviceBuffers, N);
+            /*
             var deviceBufferPtr = getDeviceBufferData_double(deviceBuffers);
             cubSortKeys_double(devA.dPtr(), deviceBufferPtr, N: c_size_t);
             DeviceSynchronize();
             updateDeviceBufferOffset_double(deviceBuffers, N);
+            */
         }
-
     }
 
     private proc cubSortPairs(type t, devA: GPUArray, devAOut: GPUArray, devRanksIn: GPUArray, devRanksOut: GPUArray, N: int) {
@@ -273,7 +276,7 @@ module CUBRadixSort {
                 }
                 aEntry.toDevice(deviceId);
                 var devA = aEntry.getDeviceArray(deviceId);
-                cubSortKeysMergeOnGPU(t, devA, aOut.localSlice(lo .. hi), N, deviceBuffers, devices);
+                cubSortKeysMergeOnGPU(t, devA, N, deviceBuffers);
             }
         }
         // get local domain's indices
@@ -286,13 +289,16 @@ module CUBRadixSort {
             exit(1);
         }
         
-        var numFillers: int = if (a.size % nGPUs != 0) then (nGPUs - a.size % nGPUs) else 0;
-        mergePartitions(t, deviceBuffers, devices, numFillers);
+        mergePartitions(t, deviceBuffers, devices);
 
         record Lambda2 {
             proc this(lo: int, hi: int, N: int) {
                 if t == int(32) {
                     copyDeviceBufferToHost_int32(deviceBuffers, aOut.localSlice(lo .. hi), N);
+                } else if t == int(64) {
+                    copyDeviceBufferToHost_int64(deviceBuffers, aOut.localSlice(lo .. hi), N);
+                } else if t == real(32) {
+                    copyDeviceBufferToHost_float(deviceBuffers, aOut.localSlice(lo .. hi), N);
                 } else if t == real(64) {
                     copyDeviceBufferToHost_double(deviceBuffers, aOut.localSlice(lo .. hi), N);
                 }
@@ -302,6 +308,16 @@ module CUBRadixSort {
         forall i in GPU(tD, syncAndCopyBack) {
             writeln("Should not reach this point!");
             exit(1);
+        }
+
+        if t == int(32) {
+            deviceBuffers = destroyDeviceBuffers_int32(deviceBuffers);
+        } else if t == int(64) {
+            deviceBuffers = destroyDeviceBuffers_int64(deviceBuffers);
+        } else if t == real(32) {
+            deviceBuffers = destroyDeviceBuffers_float(deviceBuffers);
+        } else if t == real(64) {
+            deviceBuffers = destroyDeviceBuffers_double(deviceBuffers);
         }
 
         return aOut;
