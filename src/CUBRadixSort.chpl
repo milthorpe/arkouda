@@ -4,6 +4,7 @@ module CUBRadixSort {
     use GPUAPI;
     use CTypes;
     use KWayMerge;
+    use Time;
 
     config param cubRadixSortVerbose = false;
 
@@ -20,10 +21,10 @@ module CUBRadixSort {
     extern proc createDeviceBuffers_int64(num_elements: c_size_t, devices: [] int(32), nGPUs: int(32)): c_void_ptr;
     extern proc createDeviceBuffers_float(num_elements: c_size_t, devices: [] int(32), nGPUs: int(32)): c_void_ptr;
     extern proc createDeviceBuffers_double(num_elements: c_size_t, devices: [] int(32), nGPUs: int(32)): c_void_ptr;
-    extern proc destroyDeviceBuffers_int32(device_buffers: c_void_ptr): c_ptr(int(32));
-    extern proc destroyDeviceBuffers_int64(device_buffers: c_void_ptr): c_ptr(int(64));
-    extern proc destroyDeviceBuffers_float(device_buffers: c_void_ptr): c_ptr(real(32));
-    extern proc destroyDeviceBuffers_double(device_buffers: c_void_ptr): c_ptr(real(64));
+    extern proc destroyDeviceBuffers_int32(device_buffers: c_void_ptr);
+    extern proc destroyDeviceBuffers_int64(device_buffers: c_void_ptr);
+    extern proc destroyDeviceBuffers_float(device_buffers: c_void_ptr);
+    extern proc destroyDeviceBuffers_double(device_buffers: c_void_ptr);
 
     extern proc getDeviceBufferData_int32(device_buffers: c_void_ptr): c_ptr(int(32));
     extern proc getDeviceBufferData_int64(device_buffers: c_void_ptr): c_ptr(int(64));
@@ -245,7 +246,16 @@ module CUBRadixSort {
     }
 
     proc cubRadixSortLSDKeysMergeOnGPU(aEntry: SymEntry) {
+        var timer: Timer;
+        timer.start();
+
         aEntry.createDeviceCache();
+
+        timer.stop();
+        writef("create device cache %10.3dr\n", timer.elapsed(TimeUnits.milliseconds));
+
+        timer.clear();
+        timer.start();
 
         var a = aEntry.a;
         var aD = a.domain;
@@ -264,6 +274,12 @@ module CUBRadixSort {
             deviceBuffers = createDeviceBuffers_double(a.size, devices, devices.size: int(32));
         }
 
+        timer.stop();
+        writef("create device buffers %10.3dr\n", timer.elapsed(TimeUnits.milliseconds));
+
+        timer.clear();
+        timer.start();
+
         // TODO: proper lambda functions break Chapel compiler
         record Lambda {
             proc this(lo: int, hi: int, N: int) {
@@ -274,7 +290,6 @@ module CUBRadixSort {
                     GetDeviceCount(count);
                     writeln("In cubSortKeysCallback, launching the CUDA kernel with a range of ", lo, "..", hi, " (Size: ", N, "), GPU", deviceId, " of ", count, " @", here);
                 }
-                aEntry.toDevice(deviceId);
                 var devA = aEntry.getDeviceArray(deviceId);
                 cubSortKeysMergeOnGPU(t, devA, N, deviceBuffers);
             }
@@ -288,8 +303,19 @@ module CUBRadixSort {
             writeln("Should not reach this point!");
             exit(1);
         }
+
+        timer.stop();
+        writef("sort %10.3dr\n", timer.elapsed(TimeUnits.milliseconds));
+
+        timer.clear();
         
+        timer.start();
         mergePartitions(t, deviceBuffers, devices);
+        timer.stop();
+        writef("merge %10.3dr\n", timer.elapsed(TimeUnits.milliseconds));
+
+        timer.clear();
+        timer.start();
 
         record Lambda2 {
             proc this(lo: int, hi: int, N: int) {
@@ -309,16 +335,24 @@ module CUBRadixSort {
             writeln("Should not reach this point!");
             exit(1);
         }
+        timer.stop();
+        writef("copy back %10.3dr\n", timer.elapsed(TimeUnits.milliseconds));
+
+        timer.clear();
+        timer.start();
 
         if t == int(32) {
-            deviceBuffers = destroyDeviceBuffers_int32(deviceBuffers);
+            destroyDeviceBuffers_int32(deviceBuffers);
         } else if t == int(64) {
-            deviceBuffers = destroyDeviceBuffers_int64(deviceBuffers);
+            destroyDeviceBuffers_int64(deviceBuffers);
         } else if t == real(32) {
-            deviceBuffers = destroyDeviceBuffers_float(deviceBuffers);
+            destroyDeviceBuffers_float(deviceBuffers);
         } else if t == real(64) {
-            deviceBuffers = destroyDeviceBuffers_double(deviceBuffers);
+            destroyDeviceBuffers_double(deviceBuffers);
         }
+
+        timer.stop();
+        writef("destroy %10.3dr\n", timer.elapsed(TimeUnits.milliseconds));
 
         return aOut;
     }

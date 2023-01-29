@@ -6,10 +6,10 @@ void *createDeviceBuffers_int32(const size_t num_elements, const int *devices, c
 void *createDeviceBuffers_int64(const size_t num_elements, const int *devices, const int nGPUs);
 void *createDeviceBuffers_float(const size_t num_elements, const int *devices, const int nGPUs);
 void *createDeviceBuffers_double(const size_t num_elements, const int *devices, const int nGPUs);
-void *destroyDeviceBuffers_int32(const size_t num_elements, const int *devices, const int nGPUs);
-void *destroyDeviceBuffers_int64(const size_t num_elements, const int *devices, const int nGPUs);
-void *destroyDeviceBuffers_float(const size_t num_elements, const int *devices, const int nGPUs);
-void *destroyDeviceBuffers_double(const size_t num_elements, const int *devices, const int nGPUs);
+void destroyDeviceBuffers_int32(const size_t num_elements, const int *devices, const int nGPUs);
+void destroyDeviceBuffers_int64(const size_t num_elements, const int *devices, const int nGPUs);
+void destroyDeviceBuffers_float(const size_t num_elements, const int *devices, const int nGPUs);
+void destroyDeviceBuffers_double(const size_t num_elements, const int *devices, const int nGPUs);
 int32_t *getDeviceBufferData_int32(void *device_buffers_ptr);
 int64_t *getDeviceBufferData_int64(void *device_buffers_ptr);
 float *getDeviceBufferData_float(void *device_buffers_ptr);

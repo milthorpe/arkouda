@@ -11,7 +11,7 @@ module SegmentedString {
   use PrivateDist;
   use ServerConfig;
   use Unique;
-  use Time only Timer, getCurrentTime;
+  use Time only getCurrentTime;
   use Reflection;
   use Logging;
   use ServerErrors;
@@ -23,7 +23,8 @@ module SegmentedString {
   use FileSystem;
 
   private config const logLevel = ServerConfig.logLevel;
-  const ssLogger = new Logger(logLevel);
+  private config const logChannel = ServerConfig.logChannel;
+  const ssLogger = new Logger(logLevel, logChannel);
 
   private config param useHash = true;
   param SegmentedStringUseHash = useHash;
@@ -340,26 +341,24 @@ module SegmentedString {
        this permutation will not sort the strings, but all equivalent strings
        will fall in one contiguous block. */
     proc argGroup() throws {
-      var t = new Timer();
       if useHash {
         // Hash all strings
         ssLogger.debug(getModuleName(),getRoutineName(),getLineNumber(), "Hashing strings"); 
-        if logLevel == LogLevel.DEBUG { t.start(); }
+        var t1: real;
+        if logLevel == LogLevel.DEBUG { t1 = getCurrentTime(); }
         var hashes = this.siphash();
 
         if logLevel == LogLevel.DEBUG { 
-            t.stop();    
             ssLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
-                           "hashing took %t seconds\nSorting hashes".format(t.elapsed())); 
-            t.clear(); t.start(); 
+                           "hashing took %t seconds\nSorting hashes".format(getCurrentTime() - t1));
+            t1 = getCurrentTime();
         }
 
         // Return the permutation that sorts the hashes
         var iv = radixSortLSD_ranks(hashes);
         if logLevel == LogLevel.DEBUG { 
-            t.stop(); 
             ssLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
-                                            "sorting took %t seconds".format(t.elapsed())); 
+                                            "sorting took %t seconds".format(getCurrentTime() - t1));
         }
         if logLevel == LogLevel.DEBUG {
           var sortedHashes = [i in iv] hashes[i];
@@ -508,73 +507,6 @@ module SegmentedString {
         st.addEntry(concat2Name, new shared SymEntry(numeric2));
         return "%s+%s".format(concat1Name, concat2Name);
       }
-    }
-
-    proc idnaEncodeDecode(cmd: string) throws {
-      // select the appropriate file based on the command
-      var procFile: string;
-      // we need to add this dir check for testing functionality
-      var basePath: string = realPath(curDir);
-      var (pathName, dirName) = splitPath(basePath);
-      if "tests" == dirName {
-        basePath = pathName;
-      }
-      select cmd {
-        when "encode" {
-          procFile = "/"+basePath+"/src/exec/ak_encode.py";
-        }
-        when "decode" {
-          procFile = "/"+basePath+"/src/exec/ak_decode.py";
-        }
-        otherwise {
-          throw getErrorWithContext(msg="Invalid encode/decode cmd. %s".format(cmd),
-                      lineNumber=getLineNumber(), 
-                      routineName=getRoutineName(), 
-                      moduleName=getModuleName(), 
-                      errorClass='ValueError');
-        }
-      }
-    
-      ref origVals = this.values.a;
-      ref offs = this.offsets.a;
-      var encodeArr: [0..#this.size] string; 
-      var encodeOffsets: [this.offsets.a.domain] int;
-      var encodeLengths: [this.offsets.a.domain] int;
-      const lengths = this.getLengths();
-      forall (i, off, len) in zip(0..#this.size, offs, lengths) {
-        const filename: string = basePath+"/src/exec/%i_tmp.txt".format(i);
-        var str_entry: string = interpretAsString(origVals, off..#len);
-        // only run the encoding if the string value is not empty string to avoid segfaults
-        if str_entry != "" {
-          // use subprocessing to make a call to a python file for the encoding
-          var sub = spawn(["python3", procFile, "-v", str_entry, "-f", filename]);
-          sub.wait();
-
-          // read file python wrote to
-          var encodedFile = open(filename, iomode.r);
-          var encodedStr: string;
-          var reader = encodedFile.reader();
-          var readSomething = reader.read(encodedStr);
-          encodeArr[i] = encodedStr;
-          // delete the temp file if it was created
-          remove(filename);
-        }
-        else {
-          encodeArr[i] = "";
-        }
-      }
-      // calculate offsets and lengths
-      encodeLengths = [e in encodeArr] e.numBytes;
-      encodeOffsets = (+ scan encodeLengths) - encodeLengths + [i in 0..<encodeLengths.size] i;
-      
-      //calculate values for the segmentedstring
-      var finalValues = makeDistArray((+ reduce encodeLengths)+encodeLengths.size, uint(8));
-      forall (s, o) in zip(encodeArr, encodeOffsets) with (var agg = newDstAggregator(uint(8))) {
-        for (c, j) in zip(s.chpl_bytes(), 0..) {
-          agg.copy(finalValues[j+o], c);
-        }
-      }
-      return (encodeOffsets, finalValues);
     }
 
     proc findSubstringInBytes(const substr: string) {

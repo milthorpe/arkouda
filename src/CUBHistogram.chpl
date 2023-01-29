@@ -66,7 +66,6 @@ module CUBHistogram {
             proc this(lo: int, hi: int, N: int) {
                 var deviceId: int(32);
                 GetDevice(deviceId);
-                e.toDevice(deviceId);
                 cubHistogram(e.etype, e.getDeviceArray(deviceId).dPtr(), deviceHistograms[deviceId], aMin, aMax, N, deviceId);
             }
         }

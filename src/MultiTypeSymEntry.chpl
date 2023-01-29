@@ -16,7 +16,8 @@ module MultiTypeSymEntry
     use MultiTypeSymbolTable;
 
     private config const logLevel = ServerConfig.logLevel;
-    const genLogger = new Logger(logLevel);
+    private config const logChannel = ServerConfig.logChannel;
+    const genLogger = new Logger(logLevel, logChannel);
 
     var gpuDevices = 0..#GPUIterator.nGPUs;
 
@@ -259,6 +260,9 @@ module MultiTypeSymEntry
 
         var deviceCache: owned DeviceCache?;
         
+        /* only used with bigint pdarrays */
+        var max_bits = -1;
+
         /*
         This init takes length and element type
 
@@ -283,13 +287,14 @@ module MultiTypeSymEntry
         :arg a: array
         :type a: [] ?etype
         */
-        proc init(in a: [?D] ?etype) {
+        proc init(in a: [?D] ?etype, max_bits=-1) {
             super.init(etype, D.size);
             this.entryType = SymbolEntryType.PrimitiveTypedArraySymEntry;
             assignableTypes.add(this.entryType);
 
             this.etype = etype;
             this.a = a;
+            this.max_bits=max_bits;
         }
 
         proc toDevice(deviceId: int(32)) {

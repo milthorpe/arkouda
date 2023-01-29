@@ -1,12 +1,9 @@
 from typing import List, Optional, Union
-from typing import cast as typecast
-from warnings import warn
 
 import pandas as pd  # type: ignore
 from typeguard import typechecked
 
-from arkouda import Strings
-from arkouda.client import generic_msg
+from arkouda import Categorical, Strings
 from arkouda.dtypes import bool as akbool
 from arkouda.dtypes import float64 as akfloat64
 from arkouda.dtypes import int64 as akint64
@@ -22,7 +19,9 @@ from arkouda.util import convert_if_categorical, generic_concat, get_callback, r
 class Index:
     @typechecked
     def __init__(
-        self, values: Union[List, pdarray, Strings, pd.Index, "Index"], name: Optional[str] = None
+        self,
+        values: Union[List, pdarray, Strings, Categorical, pd.Index, "Index"],
+        name: Optional[str] = None,
     ):
         if isinstance(values, Index):
             self.values = values.values
@@ -101,8 +100,8 @@ class Index:
             return MultiIndex(index)
 
     def to_pandas(self):
-        val = convert_if_categorical(self.values)
-        return pd.Index(data=val.to_ndarray(), dtype=self.dtype, name=self.name)
+        val = convert_if_categorical(self.values).to_ndarray()
+        return pd.Index(data=val, dtype=val.dtype, name=self.name)
 
     def to_ndarray(self):
         val = convert_if_categorical(self.values)
@@ -205,29 +204,9 @@ class Index:
         mode: str = "truncate",
         file_type: str = "distribute",
     ) -> str:
-        return self.values.to_hdf(prefix_path, dataset=dataset, mode=mode, file_type=file_type)
-
-    def to_parquet(
-        self, prefix_path: str, dataset: str = "index", mode: str = "truncate", compressed: bool = False
-    ):
-        return self.values.to_parquet(prefix_path, dataset=dataset, mode=mode, compressed=compressed)
-
-    def save(
-        self,
-        prefix_path: str,
-        dataset: str = "index",
-        mode: str = "truncate",
-        compressed: bool = False,
-        file_format: str = "HDF5",
-        file_type: str = "distribute",
-    ) -> str:
         """
-        DEPRECATED
-        Save the index to HDF5 or Parquet. The result is a collection of files,
-        one file per locale of the arkouda server, where each filename starts
-        with prefix_path. Each locale saves its chunk of the array to its
-        corresponding file.
-
+        Save the Index to HDF5.
+        The object can be saved to a collection of files or single file.
         Parameters
         ----------
         prefix_path : str
@@ -237,10 +216,108 @@ class Index:
         mode : str {'truncate' | 'append'}
             By default, truncate (overwrite) output files, if they exist.
             If 'append', attempt to create new dataset in existing files.
-        compressed : bool
-            Defaults to False. When True, files will be written with Snappy compression
-            and RLE bit packing. This is currently only supported on Parquet files and will
-            not impact the generated files when writing HDF5 files.
+        file_type: str ("single" | "distribute")
+            Default: "distribute"
+            When set to single, dataset is written to a single file.
+            When distribute, dataset is written on a file per locale.
+            This is only supported by HDF5 files and will have no impact of Parquet Files.
+        Returns
+        -------
+        string message indicating result of save operation
+        Raises
+        -------
+        RuntimeError
+            Raised if a server-side error is thrown saving the pdarray
+        Notes
+        -----
+        - The prefix_path must be visible to the arkouda server and the user must
+        have write permission.
+        - Output files have names of the form ``<prefix_path>_LOCALE<i>``, where ``<i>``
+        ranges from 0 to ``numLocales`` for `file_type='distribute'`. Otherwise,
+        the file name will be `prefix_path`.
+        - If any of the output files already exist and
+        the mode is 'truncate', they will be overwritten. If the mode is 'append'
+        and the number of output files is less than the number of locales or a
+        dataset with the same name already exists, a ``RuntimeError`` will result.
+        - Any file extension can be used.The file I/O does not rely on the extension to
+        determine the file format.
+        """
+        return self.values.to_hdf(prefix_path, dataset=dataset, mode=mode, file_type=file_type)
+
+    def to_parquet(
+        self,
+        prefix_path: str,
+        dataset: str = "index",
+        mode: str = "truncate",
+        compression: Optional[str] = None,
+    ):
+        """
+        Save the Index to Parquet. The result is a collection of files,
+        one file per locale of the arkouda server, where each filename starts
+        with prefix_path. Each locale saves its chunk of the array to its
+        corresponding file.
+        Parameters
+        ----------
+        prefix_path : str
+            Directory and filename prefix that all output files share
+        dataset : str
+            Name of the dataset to create in files (must not already exist)
+        mode : str {'truncate' | 'append'}
+            By default, truncate (overwrite) output files, if they exist.
+            If 'append', attempt to create new dataset in existing files.
+        compression : str (Optional)
+            (None | "snappy" | "gzip" | "brotli" | "zstd" | "lz4")
+            Sets the compression type used with Parquet files
+        Returns
+        -------
+        string message indicating result of save operation
+        Raises
+        ------
+        RuntimeError
+            Raised if a server-side error is thrown saving the pdarray
+        Notes
+        -----
+        - The prefix_path must be visible to the arkouda server and the user must
+        have write permission.
+        - Output files have names of the form ``<prefix_path>_LOCALE<i>``, where ``<i>``
+        ranges from 0 to ``numLocales`` for `file_type='distribute'`.
+        - 'append' write mode is supported, but is not efficient.
+        - If any of the output files already exist and
+        the mode is 'truncate', they will be overwritten. If the mode is 'append'
+        and the number of output files is less than the number of locales or a
+        dataset with the same name already exists, a ``RuntimeError`` will result.
+        - Any file extension can be used.The file I/O does not rely on the extension to
+        determine the file format.
+        """
+        return self.values.to_parquet(prefix_path, dataset=dataset, mode=mode, compression=compression)
+
+    def save(
+        self,
+        prefix_path: str,
+        dataset: str = "index",
+        mode: str = "truncate",
+        compression: Optional[str] = None,
+        file_format: str = "HDF5",
+        file_type: str = "distribute",
+    ) -> str:
+        """
+        DEPRECATED
+        Save the index to HDF5 or Parquet. The result is a collection of files,
+        one file per locale of the arkouda server, where each filename starts
+        with prefix_path. Each locale saves its chunk of the array to its
+        corresponding file.
+        Parameters
+        ----------
+        prefix_path : str
+            Directory and filename prefix that all output files share
+        dataset : str
+            Name of the dataset to create in files (must not already exist)
+        mode : str {'truncate' | 'append'}
+            By default, truncate (overwrite) output files, if they exist.
+            If 'append', attempt to create new dataset in existing files.
+        compression : str (Optional)
+            (None | "snappy" | "gzip" | "brotli" | "zstd" | "lz4")
+            Sets the compression type used with Parquet files
         file_format : str {'HDF5', 'Parquet'}
             By default, saved files will be written to the HDF5 file format. If
             'Parquet', the files will be written to the Parquet file format. This
@@ -250,11 +327,9 @@ class Index:
             When set to single, dataset is written to a single file.
             When distribute, dataset is written on a file per locale.
             This is only supported by HDF5 files and will have no impact of Parquet Files.
-
         Returns
         -------
         string message indicating result of save operation
-
         Raises
         ------
         RuntimeError
@@ -266,69 +341,39 @@ class Index:
         TypeError
             Raised if any one of the prefix_path, dataset, or mode parameters
             is not a string
-
         See Also
         --------
-        save_all, load, read
-
+        save_all, load, read, to_parquet, to_hdf
         Notes
         -----
         The prefix_path must be visible to the arkouda server and the user must
         have write permission.
-
         Output files have names of the form ``<prefix_path>_LOCALE<i>``, where ``<i>``
         ranges from 0 to ``numLocales``. If any of the output files already exist and
         the mode is 'truncate', they will be overwritten. If the mode is 'append'
         and the number of output files is less than the number of locales or a
         dataset with the same name already exists, a ``RuntimeError`` will result.
-
         Previously all files saved in Parquet format were saved with a ``.parquet`` file extension.
         This will require you to use load as if you saved the file with the extension. Try this if
         an older file is not being found.
-
         Any file extension can be used. The file I/O does not rely on the extension to determine the
         file format.
         """
+        from warnings import warn
+
         warn(
             "ak.Index.save has been deprecated. Please use ak.Index.to_parquet or ak.Index.to_hdf",
             DeprecationWarning,
         )
-        from arkouda.io import file_type_to_int, mode_str_to_int
+        if mode.lower() not in ["append", "truncate"]:
+            raise ValueError("Allowed modes are 'truncate' and 'append'")
 
         if file_format.lower() == "hdf5":
-            return typecast(
-                str,
-                generic_msg(
-                    cmd="tohdf",
-                    args={
-                        "values": self.values,
-                        "dset": dataset,
-                        "write_mode": mode_str_to_int(mode),
-                        "filename": prefix_path,
-                        "dtype": self.dtype,
-                        "objType": "pdarray",
-                        "file_format": file_type_to_int(file_type),
-                    },
-                ),
-            )
+            return self.to_hdf(prefix_path, dataset=dataset, mode=mode, file_type=file_type)
         elif file_format.lower() == "parquet":
-            return typecast(
-                str,
-                generic_msg(
-                    cmd="writeParquet",
-                    args={
-                        "values": self.values,
-                        "dset": dataset,
-                        "mode": mode_str_to_int(mode),
-                        "prefix": prefix_path,
-                        "dtype": self.dtype,
-                        "save_offsets": False,  # only used by strings
-                        "compressed": compressed,
-                    },
-                ),
-            )
+            return self.to_parquet(prefix_path, dataset=dataset, mode=mode, compression=compression)
         else:
-            raise ValueError("Supported file formats are 'HDF5' and 'Parquet'")
+            raise ValueError("Valid file types are HDF5 or Parquet")
 
 
 class MultiIndex(Index):

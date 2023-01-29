@@ -10,16 +10,20 @@ DeviceBuffers<T>* createDeviceBuffers(const size_t num_elements, const int *gpus
   size_t buffer_size = (num_elements + num_fillers) / nGPUs;
   DeviceBuffers<T>* device_buffers = new DeviceBuffers<T>(devices, buffer_size, 2);
 
-  int lastDevice = gpus[nGPUs - 1];
-  thrust::fill(thrust::cuda::par(*device_buffers->GetDeviceAllocator(lastDevice))
-                    .on(*device_buffers->GetPrimaryStream(lastDevice)),
-                device_buffers->AtPrimary(lastDevice)->end() - num_fillers, device_buffers->AtPrimary(lastDevice)->end(),
-                std::numeric_limits<T>::max());
+  if (num_fillers > 0) {
+    int lastDevice = gpus[nGPUs - 1];
+    thrust::fill(thrust::cuda::par(*device_buffers->GetDeviceAllocator(lastDevice))
+                      .on(*device_buffers->GetPrimaryStream(lastDevice)),
+                  device_buffers->AtPrimary(lastDevice)->end() - num_fillers, device_buffers->AtPrimary(lastDevice)->end(),
+                  std::numeric_limits<T>::max());
+    CheckCudaError(cudaStreamSynchronize(*device_buffers->GetPrimaryStream(lastDevice)));
+  }
+
   return device_buffers;
 }
 
 template <typename T>
-T *destroyDeviceBuffers(void *device_buffers_ptr) {
+void destroyDeviceBuffers(void *device_buffers_ptr) {
   DeviceBuffers<T>* device_buffers = (DeviceBuffers<T>*)device_buffers_ptr;
   delete device_buffers;
 }
@@ -37,7 +41,7 @@ void copyDeviceBufferToHost(void *device_buffers_ptr, T *hostArray, const size_t
   int deviceId;
   CheckCudaError(cudaGetDevice(&deviceId));
   DeviceBuffers<T>* device_buffers = (DeviceBuffers<T>*)device_buffers_ptr;
-  CheckCudaError(cudaStreamSynchronize(*device_buffers->GetPrimaryStream(deviceId)));
+  //CheckCudaError(cudaStreamSynchronize(*device_buffers->GetPrimaryStream(deviceId)));
   CheckCudaError(cudaMemcpy(hostArray,
                             thrust::raw_pointer_cast(device_buffers->AtPrimary(deviceId)->data()),
                             sizeof(T) * N,
@@ -133,7 +137,7 @@ void sortToDeviceBuffer(const T *d_keys_in, void *device_buffers_ptr, size_t N) 
   cudaStream_t primaryStream = *device_buffers->GetPrimaryStream(deviceId);
   T *d_keys_out = (T*)(device_buffers->AtPrimary(deviceId)->data().get());
   cubSortKeysOnStream(d_keys_in, d_keys_out, N, primaryStream);
-  CheckCudaError(cudaStreamSynchronize(primaryStream));
+  //CheckCudaError(cudaStreamSynchronize(primaryStream));
   device_buffers->GetDeviceAllocator(deviceId)->SetOffset(N * sizeof(T));
 }
 
@@ -155,19 +159,19 @@ void *createDeviceBuffers_double(const size_t num_elements, const int *devices, 
   return createDeviceBuffers<double>(num_elements, devices, nGPUs);
 }
 
-void *destroyDeviceBuffers_int32(void *device_buffers_ptr) {
-  return destroyDeviceBuffers<int32_t>(device_buffers_ptr);
+void destroyDeviceBuffers_int32(void *device_buffers_ptr) {
+  destroyDeviceBuffers<int32_t>(device_buffers_ptr);
 }
 
-void *destroyDeviceBuffers_int64(void *device_buffers_ptr) {
-  return destroyDeviceBuffers<int64_t>(device_buffers_ptr);
+void destroyDeviceBuffers_int64(void *device_buffers_ptr) {
+  destroyDeviceBuffers<int64_t>(device_buffers_ptr);
 }
 
-void *destroyDeviceBuffers_float(void *device_buffers_ptr) {
-  return destroyDeviceBuffers<float>(device_buffers_ptr);
+void destroyDeviceBuffers_float(void *device_buffers_ptr) {
+  destroyDeviceBuffers<float>(device_buffers_ptr);
 }
-void *destroyDeviceBuffers_double(void *device_buffers_ptr) {
-  return destroyDeviceBuffers<double>(device_buffers_ptr);
+void destroyDeviceBuffers_double(void *device_buffers_ptr) {
+  destroyDeviceBuffers<double>(device_buffers_ptr);
 }
 
 int32_t *getDeviceBufferData_int32(void *device_buffers_ptr) {

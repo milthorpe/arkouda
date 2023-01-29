@@ -26,7 +26,8 @@ copyright = '2020, Michael Merrill and William Reus'
 author = 'Michael Merrill and William Reus'
 
 # The full version, including alpha/beta/rc tags
-release = _version.get_versions()["version"]
+# release = _version.get_versions()["version"]
+release = ""
 
 
 # -- General configuration ---------------------------------------------------
@@ -38,8 +39,12 @@ master_doc = 'index'
 extensions = ['sphinx.ext.autodoc', 'sphinx.ext.napoleon', 
               'sphinxarg.ext', 'sphinx.ext.githubpages',
               'sphinx.ext.coverage', 'autoapi.extension',
-              'ak_sphinx_extensions'
+              'ak_sphinx_extensions', 'myst_parser'
              ]
+
+source_suffix = ['.rst', '.md']
+
+myst_enable_extensions = ["deflist", "linkify"]
 
 # path to directory containing files to autogenerate docs from comments
 autoapi_dirs = ['../arkouda']
@@ -58,7 +63,8 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-html_theme = 'alabaster'
+
+html_theme = 'furo'
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,

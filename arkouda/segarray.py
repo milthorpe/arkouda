@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from typing import cast as type_cast
-from warnings import warn
 
 import numpy as np  # type: ignore
 
@@ -13,11 +12,11 @@ from arkouda.dtypes import int64 as akint64
 from arkouda.dtypes import isSupportedInt, str_, translate_np_dtype
 from arkouda.groupbyclass import GroupBy, broadcast
 from arkouda.infoclass import list_registry
+from arkouda.io import load
 from arkouda.logger import getArkoudaLogger
 from arkouda.numeric import cumsum
 from arkouda.pdarrayclass import RegistrationError, create_pdarray, is_sorted, pdarray
 from arkouda.pdarraycreation import arange, array, ones, zeros
-from arkouda.io import load
 from arkouda.pdarraysetops import concatenate
 
 
@@ -970,13 +969,13 @@ class SegArray:
         return SegArray.from_parts(g.segments, uval, grouping=g, lengths=lengths)
 
     def to_hdf(
-            self,
-            prefix_path,
-            dataset="segarray",
-            segment_suffix="_segments",
-            value_suffix="_values",
-            mode="truncate",
-            file_type="distribute",
+        self,
+        prefix_path,
+        dataset="segarray",
+        segment_suffix="_segments",
+        value_suffix="_values",
+        mode="truncate",
+        file_type="distribute",
     ):
         """
         Save the SegArray to HDF5. The result is a collection of HDF5 files, one file
@@ -1011,9 +1010,17 @@ class SegArray:
         the HDF5 file, not nested under a group.
 
         SegArray is not currently supported by Parquet
+
+        See Also
+        ---------
+        load
         """
-        self.segments.to_hdf(prefix_path, dataset=dataset+segment_suffix, mode=mode, file_type=file_type)
-        self.values.to_hdf(prefix_path, dataset=dataset+value_suffix, mode="append", file_type=file_type)
+        self.segments.to_hdf(
+            prefix_path, dataset=dataset + segment_suffix, mode=mode, file_type=file_type
+        )
+        self.values.to_hdf(
+            prefix_path, dataset=dataset + value_suffix, mode="append", file_type=file_type
+        )
 
     def save(
         self,
@@ -1022,62 +1029,61 @@ class SegArray:
         segment_suffix="_segments",
         value_suffix="_values",
         mode="truncate",
-        file_format="HDF5",
         file_type="distribute",
     ):
         """
         DEPRECATED
-        Save the SegArray to HDF5. The result is a collection of HDF5 files, one file
-        per locale of the arkouda server, where each filename starts with prefix_path.
-
+        Save the SegArray to HDF5.
+        The object can be saved to a collection of files or single file.
         Parameters
         ----------
         prefix_path : str
-            Directory and filename prefix that all output files will share
+            Directory and filename prefix that all output files share
         dataset : str
-            Name prefix for saved data within the HDF5 file
-        segment_suffix : str
-            Suffix to append to dataset name for segments array
-        value_suffix : str
-            Suffix to append to dataset name for values array
+            Name of the dataset to create in files (must not already exist)
         mode : str {'truncate' | 'append'}
             By default, truncate (overwrite) output files, if they exist.
-            If 'append', add data as a new column to existing files.
-        file_format : str {'HDF5' | 'Parquet'}
-            Defaults to `'HDF5'`. Indicates the file format to use to store data.
+            If 'append', attempt to create new dataset in existing files.
         file_type: str ("single" | "distribute")
             Default: "distribute"
             When set to single, dataset is written to a single file.
             When distribute, dataset is written on a file per locale.
             This is only supported by HDF5 files and will have no impact of Parquet Files.
-
         Returns
         -------
-        None
-
+        string message indicating result of save operation
+        Raises
+        -------
+        RuntimeError
+            Raised if a server-side error is thrown saving the pdarray
         Notes
         -----
-        Unlike for ak.Strings, SegArray is saved as two datasets in the top level of
-        the HDF5 file, not nested under a group.
+        - The prefix_path must be visible to the arkouda server and the user must
+        have write permission.
+        - Output files have names of the form ``<prefix_path>_LOCALE<i>``, where ``<i>``
+        ranges from 0 to ``numLocales`` for `file_type='distribute'`. Otherwise,
+        the file name will be `prefix_path`.
+        - If any of the output files already exist and
+        the mode is 'truncate', they will be overwritten. If the mode is 'append'
+        and the number of output files is less than the number of locales or a
+        dataset with the same name already exists, a ``RuntimeError`` will result.
+        - Any file extension can be used.The file I/O does not rely on the extension to
+        determine the file format.
+        See Also
+        --------
+        to_hdf, load
         """
+        from warnings import warn
         warn(
             "ak.SegArray.save has been deprecated. Please use ak.SegArray.to_hdf",
             DeprecationWarning,
         )
-        if segment_suffix == value_suffix:
-            raise ValueError("Segment suffix and value suffix must be different")
-        self.segments.save(
+        return self.to_hdf(
             prefix_path,
-            dataset=dataset + segment_suffix,
+            dataset,
+            segment_suffix=segment_suffix,
+            value_suffix=value_suffix,
             mode=mode,
-            file_format=file_format,
-            file_type=file_type,
-        )
-        self.values.save(
-            prefix_path,
-            dataset=dataset + value_suffix,
-            mode="append",
-            file_format=file_format,
             file_type=file_type,
         )
 

@@ -9,6 +9,7 @@ module OperatorMsg
     use Reflection;
     use ServerErrors;
     use BinOp;
+    use BigInteger;
 
     use MultiTypeSymbolTable;
     use MultiTypeSymEntry;
@@ -18,7 +19,8 @@ module OperatorMsg
     use Message;
     
     private config const logLevel = ServerConfig.logLevel;
-    const omLogger = new Logger(logLevel);
+    private config const logChannel = ServerConfig.logChannel;
+    const omLogger = new Logger(logLevel, logChannel);
     
     /*
       Parse and respond to binopvv message.
@@ -243,6 +245,111 @@ module OperatorMsg
               return doBinOpvv(l, r, e, op, rname, pn, st);
             }
           }
+          when (DType.BigInt, DType.BigInt) {
+            var l = toSymEntry(left,bigint);
+            var r = toSymEntry(right,bigint);
+            if boolOps.contains(op) {
+              // call bigint specific func which returns distr bool array
+              var e = st.addEntry(rname, new shared SymEntry(doBigIntBinOpvvBoolReturn(l, r, op)));
+              var repMsg = "created %s".format(st.attrib(rname));
+              return new MsgTuple(repMsg, MsgType.NORMAL);
+            }
+            // call bigint specific func which returns dist bigint array
+            var (tmp, max_bits) = doBigIntBinOpvv(l, r, op);
+            var e = st.addEntry(rname, new shared SymEntry(tmp, max_bits));
+            var repMsg = "created %s".format(st.attrib(rname));
+            return new MsgTuple(repMsg, MsgType.NORMAL);
+          }
+          when (DType.BigInt, DType.Int64) {
+            var l = toSymEntry(left,bigint);
+            var r = toSymEntry(right,int);
+            if boolOps.contains(op) {
+              // call bigint specific func which returns distr bool array
+              var e = st.addEntry(rname, new shared SymEntry(doBigIntBinOpvvBoolReturn(l, r, op)));
+              var repMsg = "created %s".format(st.attrib(rname));
+              return new MsgTuple(repMsg, MsgType.NORMAL);
+            }
+            // call bigint specific func which returns dist bigint array
+            var (tmp, max_bits) = doBigIntBinOpvv(l, r, op);
+            var e = st.addEntry(rname, new shared SymEntry(tmp, max_bits));
+            var repMsg = "created %s".format(st.attrib(rname));
+            return new MsgTuple(repMsg, MsgType.NORMAL);
+          }
+          when (DType.BigInt, DType.UInt64) {
+            var l = toSymEntry(left,bigint);
+            var r = toSymEntry(right,uint);
+            if boolOps.contains(op) {
+              // call bigint specific func which returns distr bool array
+              var e = st.addEntry(rname, new shared SymEntry(doBigIntBinOpvvBoolReturn(l, r, op)));
+              var repMsg = "created %s".format(st.attrib(rname));
+              return new MsgTuple(repMsg, MsgType.NORMAL);
+            }
+            // call bigint specific func which returns dist bigint array
+            var (tmp, max_bits) = doBigIntBinOpvv(l, r, op);
+            var e = st.addEntry(rname, new shared SymEntry(tmp, max_bits));
+            var repMsg = "created %s".format(st.attrib(rname));
+            return new MsgTuple(repMsg, MsgType.NORMAL);
+          }
+          when (DType.BigInt, DType.Bool) {
+            var l = toSymEntry(left,bigint);
+            var r = toSymEntry(right,bool);
+            if boolOps.contains(op) {
+              // call bigint specific func which returns distr bool array
+              var e = st.addEntry(rname, new shared SymEntry(doBigIntBinOpvvBoolReturn(l, r, op)));
+              var repMsg = "created %s".format(st.attrib(rname));
+              return new MsgTuple(repMsg, MsgType.NORMAL);
+            }
+            // call bigint specific func which returns dist bigint array
+            var (tmp, max_bits) = doBigIntBinOpvv(l, r, op);
+            var e = st.addEntry(rname, new shared SymEntry(tmp, max_bits));
+            var repMsg = "created %s".format(st.attrib(rname));
+            return new MsgTuple(repMsg, MsgType.NORMAL);
+          }
+          when (DType.Int64, DType.BigInt) {
+            var l = toSymEntry(left,int);
+            var r = toSymEntry(right,bigint);
+            if boolOps.contains(op) {
+              // call bigint specific func which returns distr bool array
+              var e = st.addEntry(rname, new shared SymEntry(doBigIntBinOpvvBoolReturn(l, r, op)));
+              var repMsg = "created %s".format(st.attrib(rname));
+              return new MsgTuple(repMsg, MsgType.NORMAL);
+            }
+            // call bigint specific func which returns dist bigint array
+            var (tmp, max_bits) = doBigIntBinOpvv(l, r, op);
+            var e = st.addEntry(rname, new shared SymEntry(tmp, max_bits));
+            var repMsg = "created %s".format(st.attrib(rname));
+            return new MsgTuple(repMsg, MsgType.NORMAL);
+          }
+          when (DType.UInt64, DType.BigInt) {
+            var l = toSymEntry(left,uint);
+            var r = toSymEntry(right,bigint);
+            if boolOps.contains(op) {
+              // call bigint specific func which returns distr bool array
+              var e = st.addEntry(rname, new shared SymEntry(doBigIntBinOpvvBoolReturn(l, r, op)));
+              var repMsg = "created %s".format(st.attrib(rname));
+              return new MsgTuple(repMsg, MsgType.NORMAL);
+            }
+            // call bigint specific func which returns dist bigint array
+            var (tmp, max_bits) = doBigIntBinOpvv(l, r, op);
+            var e = st.addEntry(rname, new shared SymEntry(tmp, max_bits));
+            var repMsg = "created %s".format(st.attrib(rname));
+            return new MsgTuple(repMsg, MsgType.NORMAL);
+          }
+          when (DType.Bool, DType.BigInt) {
+            var l = toSymEntry(left,bool);
+            var r = toSymEntry(right,bigint);
+            if boolOps.contains(op) {
+              // call bigint specific func which returns distr bool array
+              var e = st.addEntry(rname, new shared SymEntry(doBigIntBinOpvvBoolReturn(l, r, op)));
+              var repMsg = "created %s".format(st.attrib(rname));
+              return new MsgTuple(repMsg, MsgType.NORMAL);
+            }
+            // call bigint specific func which returns dist bigint array
+            var (tmp, max_bits) = doBigIntBinOpvv(l, r, op);
+            var e = st.addEntry(rname, new shared SymEntry(tmp, max_bits));
+            var repMsg = "created %s".format(st.attrib(rname));
+            return new MsgTuple(repMsg, MsgType.NORMAL);
+          }
         }
         var errorMsg = unrecognizedTypeError(pn, "("+dtype2str(left.dtype)+","+dtype2str(right.dtype)+")");
         omLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
@@ -254,12 +361,12 @@ module OperatorMsg
       vs == vector op scalar
 
       :arg reqMsg: request containing (cmd,op,aname,dtype,value)
-      :type reqMsg: string 
+      :type reqMsg: string
 
       :arg st: SymTab to act on
-      :type st: borrowed SymTab 
+      :type st: borrowed SymTab
 
-      :returns: (MsgTuple) 
+      :returns: (MsgTuple)
       :throws: `UndefinedSymbolError(name)`
     */
     proc binopvsMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
@@ -459,6 +566,111 @@ module OperatorMsg
             }
             var e = st.addEntry(rname, l.size, int);
             return doBinOpvs(l, val, e, op, dtype, rname, pn, st); 
+          }
+          when (DType.BigInt, DType.BigInt) {
+            var l = toSymEntry(left,bigint);
+            var val = value.getBigIntValue();
+            if boolOps.contains(op) {
+              // call bigint specific func which returns distr bool array
+              var e = st.addEntry(rname, new shared SymEntry(doBigIntBinOpvsBoolReturn(l, val, op)));
+              var repMsg = "created %s".format(st.attrib(rname));
+              return new MsgTuple(repMsg, MsgType.NORMAL);
+            }
+            // call bigint specific func which returns dist bigint array
+            var (tmp, max_bits) = doBigIntBinOpvs(l, val, op);
+            var e = st.addEntry(rname, new shared SymEntry(tmp, max_bits));
+            var repMsg = "created %s".format(st.attrib(rname));
+            return new MsgTuple(repMsg, MsgType.NORMAL);
+          }
+          when (DType.BigInt, DType.Int64) {
+            var l = toSymEntry(left,bigint);
+            var val = value.getIntValue();
+            if boolOps.contains(op) {
+              // call bigint specific func which returns distr bool array
+              var e = st.addEntry(rname, new shared SymEntry(doBigIntBinOpvsBoolReturn(l, val, op)));
+              var repMsg = "created %s".format(st.attrib(rname));
+              return new MsgTuple(repMsg, MsgType.NORMAL);
+            }
+            // call bigint specific func which returns dist bigint array
+            var (tmp, max_bits) = doBigIntBinOpvs(l, val, op);
+            var e = st.addEntry(rname, new shared SymEntry(tmp, max_bits));
+            var repMsg = "created %s".format(st.attrib(rname));
+            return new MsgTuple(repMsg, MsgType.NORMAL);
+          }
+          when (DType.BigInt, DType.UInt64) {
+            var l = toSymEntry(left,bigint);
+            var val = value.getUIntValue();
+            if boolOps.contains(op) {
+              // call bigint specific func which returns distr bool array
+              var e = st.addEntry(rname, new shared SymEntry(doBigIntBinOpvsBoolReturn(l, val, op)));
+              var repMsg = "created %s".format(st.attrib(rname));
+              return new MsgTuple(repMsg, MsgType.NORMAL);
+            }
+            // call bigint specific func which returns dist bigint array
+            var (tmp, max_bits) = doBigIntBinOpvs(l, val, op);
+            var e = st.addEntry(rname, new shared SymEntry(tmp, max_bits));
+            var repMsg = "created %s".format(st.attrib(rname));
+            return new MsgTuple(repMsg, MsgType.NORMAL);
+          }
+          when (DType.BigInt, DType.Bool) {
+            var l = toSymEntry(left,bigint);
+            var val = value.getBoolValue();
+            if boolOps.contains(op) {
+              // call bigint specific func which returns distr bool array
+              var e = st.addEntry(rname, new shared SymEntry(doBigIntBinOpvsBoolReturn(l, val, op)));
+              var repMsg = "created %s".format(st.attrib(rname));
+              return new MsgTuple(repMsg, MsgType.NORMAL);
+            }
+            // call bigint specific func which returns dist bigint array
+            var (tmp, max_bits) = doBigIntBinOpvs(l, val, op);
+            var e = st.addEntry(rname, new shared SymEntry(tmp, max_bits));
+            var repMsg = "created %s".format(st.attrib(rname));
+            return new MsgTuple(repMsg, MsgType.NORMAL);
+          }
+          when (DType.Int64, DType.BigInt) {
+            var l = toSymEntry(left,int);
+            var val = value.getBigIntValue();
+            if boolOps.contains(op) {
+              // call bigint specific func which returns distr bool array
+              var e = st.addEntry(rname, new shared SymEntry(doBigIntBinOpvsBoolReturn(l, val, op)));
+              var repMsg = "created %s".format(st.attrib(rname));
+              return new MsgTuple(repMsg, MsgType.NORMAL);
+            }
+            // call bigint specific func which returns dist bigint array
+            var (tmp, max_bits) = doBigIntBinOpvs(l, val, op);
+            var e = st.addEntry(rname, new shared SymEntry(tmp, max_bits));
+            var repMsg = "created %s".format(st.attrib(rname));
+            return new MsgTuple(repMsg, MsgType.NORMAL);
+          }
+          when (DType.UInt64, DType.BigInt) {
+            var l = toSymEntry(left,uint);
+            var val = value.getBigIntValue();
+            if boolOps.contains(op) {
+              // call bigint specific func which returns distr bool array
+              var e = st.addEntry(rname, new shared SymEntry(doBigIntBinOpvsBoolReturn(l, val, op)));
+              var repMsg = "created %s".format(st.attrib(rname));
+              return new MsgTuple(repMsg, MsgType.NORMAL);
+            }
+            // call bigint specific func which returns dist bigint array
+            var (tmp, max_bits) = doBigIntBinOpvs(l, val, op);
+            var e = st.addEntry(rname, new shared SymEntry(tmp, max_bits));
+            var repMsg = "created %s".format(st.attrib(rname));
+            return new MsgTuple(repMsg, MsgType.NORMAL);
+          }
+          when (DType.Bool, DType.BigInt) {
+            var l = toSymEntry(left,bool);
+            var val = value.getBigIntValue();
+            if boolOps.contains(op) {
+              // call bigint specific func which returns distr bool array
+              var e = st.addEntry(rname, new shared SymEntry(doBigIntBinOpvsBoolReturn(l, val, op)));
+              var repMsg = "created %s".format(st.attrib(rname));
+              return new MsgTuple(repMsg, MsgType.NORMAL);
+            }
+            // call bigint specific func which returns dist bigint array
+            var (tmp, max_bits) = doBigIntBinOpvs(l, val, op);
+            var e = st.addEntry(rname, new shared SymEntry(tmp, max_bits));
+            var repMsg = "created %s".format(st.attrib(rname));
+            return new MsgTuple(repMsg, MsgType.NORMAL);
           }
         }
         var errorMsg = unrecognizedTypeError(pn, "("+dtype2str(left.dtype)+","+dtype2str(dtype)+")");
@@ -683,6 +895,111 @@ module OperatorMsg
             var e = st.addEntry(rname, r.size, uint);
             return doBinOpsv(val, r, e, op, dtype, rname, pn, st);
           }
+          when (DType.BigInt, DType.BigInt) {
+            var val = value.getBigIntValue();
+            var r = toSymEntry(right,bigint);
+            if boolOps.contains(op) {
+              // call bigint specific func which returns distr bool array
+              var e = st.addEntry(rname, new shared SymEntry(doBigIntBinOpsvBoolReturn(val, r, op)));
+              var repMsg = "created %s".format(st.attrib(rname));
+              return new MsgTuple(repMsg, MsgType.NORMAL);
+            }
+            // call bigint specific func which returns dist bigint array
+            var (tmp, max_bits) = doBigIntBinOpsv(val, r, op);
+            var e = st.addEntry(rname, new shared SymEntry(tmp, max_bits));
+            var repMsg = "created %s".format(st.attrib(rname));
+            return new MsgTuple(repMsg, MsgType.NORMAL);
+          }
+          when (DType.BigInt, DType.Int64) {
+            var val = value.getBigIntValue();
+            var r = toSymEntry(right,int);
+            if boolOps.contains(op) {
+              // call bigint specific func which returns distr bool array
+              var e = st.addEntry(rname, new shared SymEntry(doBigIntBinOpsvBoolReturn(val, r, op)));
+              var repMsg = "created %s".format(st.attrib(rname));
+              return new MsgTuple(repMsg, MsgType.NORMAL);
+            }
+            // call bigint specific func which returns dist bigint array
+            var (tmp, max_bits) = doBigIntBinOpsv(val, r, op);
+            var e = st.addEntry(rname, new shared SymEntry(tmp, max_bits));
+            var repMsg = "created %s".format(st.attrib(rname));
+            return new MsgTuple(repMsg, MsgType.NORMAL);
+          }
+          when (DType.BigInt, DType.UInt64) {
+            var val = value.getBigIntValue();
+            var r = toSymEntry(right,uint);
+            if boolOps.contains(op) {
+              // call bigint specific func which returns distr bool array
+              var e = st.addEntry(rname, new shared SymEntry(doBigIntBinOpsvBoolReturn(val, r, op)));
+              var repMsg = "created %s".format(st.attrib(rname));
+              return new MsgTuple(repMsg, MsgType.NORMAL);
+            }
+            // call bigint specific func which returns dist bigint array
+            var (tmp, max_bits) = doBigIntBinOpsv(val, r, op);
+            var e = st.addEntry(rname, new shared SymEntry(tmp, max_bits));
+            var repMsg = "created %s".format(st.attrib(rname));
+            return new MsgTuple(repMsg, MsgType.NORMAL);
+          }
+          when (DType.BigInt, DType.Bool) {
+            var val = value.getBigIntValue();
+            var r = toSymEntry(right,bool);
+            if boolOps.contains(op) {
+              // call bigint specific func which returns distr bool array
+              var e = st.addEntry(rname, new shared SymEntry(doBigIntBinOpsvBoolReturn(val, r, op)));
+              var repMsg = "created %s".format(st.attrib(rname));
+              return new MsgTuple(repMsg, MsgType.NORMAL);
+            }
+            // call bigint specific func which returns dist bigint array
+            var (tmp, max_bits) = doBigIntBinOpsv(val, r, op);
+            var e = st.addEntry(rname, new shared SymEntry(tmp, max_bits));
+            var repMsg = "created %s".format(st.attrib(rname));
+            return new MsgTuple(repMsg, MsgType.NORMAL);
+          }
+          when (DType.Int64, DType.BigInt) {
+            var val = value.getIntValue();
+            var r = toSymEntry(right,bigint);
+            if boolOps.contains(op) {
+              // call bigint specific func which returns distr bool array
+              var e = st.addEntry(rname, new shared SymEntry(doBigIntBinOpsvBoolReturn(val, r, op)));
+              var repMsg = "created %s".format(st.attrib(rname));
+              return new MsgTuple(repMsg, MsgType.NORMAL);
+            }
+            // call bigint specific func which returns dist bigint array
+            var (tmp, max_bits) = doBigIntBinOpsv(val, r, op);
+            var e = st.addEntry(rname, new shared SymEntry(tmp, max_bits));
+            var repMsg = "created %s".format(st.attrib(rname));
+            return new MsgTuple(repMsg, MsgType.NORMAL);
+          }
+          when (DType.UInt64, DType.BigInt) {
+            var val = value.getUIntValue();
+            var r = toSymEntry(right,bigint);
+            if boolOps.contains(op) {
+              // call bigint specific func which returns distr bool array
+              var e = st.addEntry(rname, new shared SymEntry(doBigIntBinOpsvBoolReturn(val, r, op)));
+              var repMsg = "created %s".format(st.attrib(rname));
+              return new MsgTuple(repMsg, MsgType.NORMAL);
+            }
+            // call bigint specific func which returns dist bigint array
+            var (tmp, max_bits) = doBigIntBinOpsv(val, r, op);
+            var e = st.addEntry(rname, new shared SymEntry(tmp, max_bits));
+            var repMsg = "created %s".format(st.attrib(rname));
+            return new MsgTuple(repMsg, MsgType.NORMAL);
+          }
+          when (DType.Bool, DType.BigInt) {
+            var val = value.getBoolValue();
+            var r = toSymEntry(right,bigint);
+            if boolOps.contains(op) {
+              // call bigint specific func which returns distr bool array
+              var e = st.addEntry(rname, new shared SymEntry(doBigIntBinOpsvBoolReturn(val, r, op)));
+              var repMsg = "created %s".format(st.attrib(rname));
+              return new MsgTuple(repMsg, MsgType.NORMAL);
+            }
+            // call bigint specific func which returns dist bigint array
+            var (tmp, max_bits) = doBigIntBinOpsv(val, r, op);
+            var e = st.addEntry(rname, new shared SymEntry(tmp, max_bits));
+            var repMsg = "created %s".format(st.attrib(rname));
+            return new MsgTuple(repMsg, MsgType.NORMAL);
+          }
         }
         var errorMsg = unrecognizedTypeError(pn, "("+dtype2str(dtype)+","+dtype2str(right.dtype)+")");
         omLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
@@ -690,17 +1007,17 @@ module OperatorMsg
     }
 
     /*
-    Parse and respond to opeqvv message.
-    vector op= vector
+      Parse and respond to opeqvv message.
+      vector op= vector
 
-    :arg reqMsg: request containing (cmd,op,aname,bname)
-    :type reqMsg: string 
+      :arg reqMsg: request containing (cmd,op,aname,bname)
+      :type reqMsg: string
 
-    :arg st: SymTab to act on
-    :type st: borrowed SymTab 
+      :arg st: SymTab to act on
+      :type st: borrowed SymTab
 
-    :returns: (MsgTuple) 
-    :throws: `UndefinedSymbolError(name)`
+      :returns: (MsgTuple)
+      :throws: `UndefinedSymbolError(name)`
     */
     proc opeqvvMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
         param pn = Reflection.getRoutineName();
@@ -777,6 +1094,11 @@ module OperatorMsg
                     }
                 }
             }
+            when (DType.Int64, DType.BigInt) {
+                var errorMsg = notImplementedError(pn,left.dtype,op,right.dtype);
+                omLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
+                return new MsgTuple(errorMsg, MsgType.ERROR);
+            }
             when (DType.UInt64, DType.Int64) {
                 // The result of operations between int and uint are float by default which doesn't fit in either type
                 var errorMsg = notImplementedError(pn,left.dtype,op,right.dtype);
@@ -832,6 +1154,11 @@ module OperatorMsg
                         return new MsgTuple(errorMsg, MsgType.ERROR);
                     }
                 }
+            }
+            when (DType.UInt64, DType.BigInt) {
+                var errorMsg = notImplementedError(pn,left.dtype,op,right.dtype);
+                omLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
+                return new MsgTuple(errorMsg, MsgType.ERROR);
             }
             when (DType.Float64, DType.Int64) {
                 var l = toSymEntry(left,real);
@@ -912,6 +1239,11 @@ module OperatorMsg
                     }
                 }
             }
+            when (DType.Float64, DType.BigInt) {
+                var errorMsg = notImplementedError(pn,left.dtype,op,right.dtype);
+                omLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
+                return new MsgTuple(errorMsg, MsgType.ERROR);
+            }
             when (DType.Bool, DType.Bool) {
                 var l = toSymEntry(left, bool);
                 var r = toSymEntry(right, bool);
@@ -924,6 +1256,170 @@ module OperatorMsg
                         omLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
                         return new MsgTuple(errorMsg, MsgType.ERROR);
                     }
+                }
+            }
+            when (DType.BigInt, DType.Int64) {
+                var l = toSymEntry(left,bigint);
+                var r = toSymEntry(right,int);
+                ref la = l.a;
+                ref ra = r.a;
+                var max_bits = l.max_bits;
+                var max_size = 1:bigint;
+                var has_max_bits = max_bits != -1;
+                if has_max_bits {
+                    max_size <<= max_bits;
+                }
+                select op {
+                    when "+=" { la += ra; }
+                    when "-=" { la -= ra; }
+                    when "*=" { la *= ra; }
+                    when "//=" {
+                        [(li,ri) in zip(la,ra)] li = if ri != 0 then li/ri else 0:bigint;
+                    }
+                    when "%=" {
+                        // we can't use li %= ri because this can result in negatives
+                        [(li,ri) in zip(la,ra)] if ri != 0 then li.mod(li, ri);
+                        [(li,ri) in zip(la,ra)] if ri == 0 then li = 0:bigint;
+                    }
+                    when "**=" {
+                        if || reduce (ra<0) {
+                            throw new Error("Attempt to exponentiate base of type BigInt to negative exponent");
+                        }
+                        if has_max_bits {
+                            [(li,ri) in zip(la,ra)] li.powMod(li, ri, max_size);
+                        }
+                        else {
+                            la **= ra;
+                        }
+                      }
+                    otherwise {
+                        var errorMsg = notImplementedError(pn,left.dtype,op,right.dtype);
+                        omLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
+                        return new MsgTuple(errorMsg, MsgType.ERROR);
+                    }
+                }
+                if has_max_bits {
+                    la.mod(la, max_size);
+                }
+            }
+            when (DType.BigInt, DType.UInt64) {
+                var l = toSymEntry(left,bigint);
+                var r = toSymEntry(right,uint);
+                ref la = l.a;
+                ref ra = r.a;
+                var max_bits = l.max_bits;
+                var max_size = 1:bigint;
+                var has_max_bits = max_bits != -1;
+                if has_max_bits {
+                    max_size <<= max_bits;
+                }
+                select op {
+                    when "+=" { la += ra; }
+                    when "-=" { la -= ra; }
+                    when "*=" { la *= ra; }
+                    when "//=" {
+                        [(li,ri) in zip(la,ra)] li = if ri != 0 then li/ri else 0:bigint;
+                    }
+                    when "%=" {
+                        // we can't use li %= ri because this can result in negatives
+                        [(li,ri) in zip(la,ra)] if ri != 0 then li.mod(li, ri);
+                        [(li,ri) in zip(la,ra)] if ri == 0 then li = 0:bigint;
+                    }
+                    when "**=" {
+                        if || reduce (ra<0) {
+                            throw new Error("Attempt to exponentiate base of type BigInt to negative exponent");
+                        }
+                        if has_max_bits {
+                            [(li,ri) in zip(la,ra)] li.powMod(li, ri, max_size);
+                        }
+                        else {
+                            la **= ra;
+                        }
+                    }
+                    otherwise {
+                        var errorMsg = notImplementedError(pn,left.dtype,op,right.dtype);
+                        omLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
+                        return new MsgTuple(errorMsg, MsgType.ERROR);
+                    }
+                }
+                if has_max_bits {
+                    la.mod(la, max_size);
+                }
+            }
+            when (DType.BigInt, DType.Float64) {
+                var errorMsg = notImplementedError(pn,left.dtype,op,right.dtype);
+                omLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
+                return new MsgTuple(errorMsg, MsgType.ERROR);
+            }
+            when (DType.BigInt, DType.Bool) {
+                var l = toSymEntry(left,bigint);
+                var r = toSymEntry(right,bool);
+                ref la = l.a;
+                ref ra = r.a;
+                var max_bits = l.max_bits;
+                var max_size = 1:bigint;
+                var has_max_bits = max_bits != -1;
+                if has_max_bits {
+                    max_size <<= max_bits;
+                }
+                select op {
+                    // TODO change once we can cast directly from bool to bigint
+                    when "+=" {la += ra:int:bigint;}
+                    when "-=" {la -= ra:int:bigint;}
+                    when "*=" {la *= ra:int:bigint;}
+                    otherwise {
+                        var errorMsg = notImplementedError(pn,left.dtype,op,right.dtype);
+                        omLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
+                        return new MsgTuple(errorMsg, MsgType.ERROR);
+                    }
+                }
+                if has_max_bits {
+                    la.mod(la, max_size);
+                }
+            }
+            when (DType.BigInt, DType.BigInt) {
+                var l = toSymEntry(left,bigint);
+                var r = toSymEntry(right,bigint);
+                ref la = l.a;
+                ref ra = r.a;
+                var max_bits = l.max_bits;
+                var max_size = 1:bigint;
+                var has_max_bits = max_bits != -1;
+                if has_max_bits {
+                    max_size <<= max_bits;
+                }
+                select op {
+                    when "+=" { la += ra; }
+                    when "-=" { la -= ra; }
+                    when "*=" { la *= ra; }
+                    when "//=" {
+                        [(li,ri) in zip(la,ra)] li = if ri != 0 then li/ri else 0:bigint;
+                    }
+                    when "%=" {
+                        // we can't use li %= ri because this can result in negatives
+                        [(li,ri) in zip(la,ra)] if ri != 0 then li.mod(li, ri);
+                        [(li,ri) in zip(la,ra)] if ri == 0 then li = 0:bigint;
+                    }
+                    when "**=" {
+                        if || reduce (ra<0) {
+                            throw new Error("Attempt to exponentiate base of type BigInt to negative exponent");
+                        }
+                        if has_max_bits {
+                            [(li,ri) in zip(la,ra)] li.powMod(li, ri, max_size);
+                        }
+                        else {
+                            // TODO cast to uint for now until chapel issue #21194
+                            la **= ra:uint;
+                        }
+                    }
+                    otherwise {
+                        var errorMsg = notImplementedError(pn,left.dtype,op,right.dtype);
+                        omLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
+                        return new MsgTuple(errorMsg, MsgType.ERROR);
+                    }
+                }
+                if has_max_bits {
+                    la.mod(la, max_size);
                 }
             }
             otherwise {
@@ -939,17 +1435,17 @@ module OperatorMsg
     }
 
     /*
-    Parse and respond to opeqvs message.
-    vector op= scalar
+      Parse and respond to opeqvs message.
+      vector op= scalar
 
-    :arg reqMsg: request containing (cmd,op,aname,bname,rname)
-    :type reqMsg: string 
+      :arg reqMsg: request containing (cmd,op,aname,bname,rname)
+      :type reqMsg: string
 
-    :arg st: SymTab to act on
-    :type st: borrowed SymTab 
+      :arg st: SymTab to act on
+      :type st: borrowed SymTab
 
-    :returns: (MsgTuple)
-    :throws: `UndefinedSymbolError(name)`
+      :returns: (MsgTuple)
+      :throws: `UndefinedSymbolError(name)`
     */
     proc opeqvsMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
         param pn = Reflection.getRoutineName();
@@ -1024,6 +1520,11 @@ module OperatorMsg
                     }
                 }
             }
+            when (DType.Int64, DType.BigInt) {
+                var errorMsg = notImplementedError(pn,left.dtype,op,dtype);
+                omLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
+                return new MsgTuple(errorMsg, MsgType.ERROR);
+            }
             when (DType.UInt64, DType.Int64) {
                 // The result of operations between int and uint are float by default which doesn't fit in either type
                 var errorMsg = notImplementedError(pn,left.dtype,op,dtype);
@@ -1073,6 +1574,11 @@ module OperatorMsg
                         return new MsgTuple(errorMsg, MsgType.ERROR);
                     }
                 }
+            }
+            when (DType.UInt64, DType.BigInt) {
+                var errorMsg = notImplementedError(pn,left.dtype,op,dtype);
+                omLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
+                return new MsgTuple(errorMsg, MsgType.ERROR);
             }
             when (DType.Float64, DType.Int64) {
                 var l = toSymEntry(left,real);
@@ -1147,6 +1653,171 @@ module OperatorMsg
                         omLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
                         return new MsgTuple(errorMsg, MsgType.ERROR);
                     }
+                }
+            }
+            when (DType.Float64, DType.BigInt) {
+                var errorMsg = notImplementedError(pn,left.dtype,op,dtype);
+                omLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
+                return new MsgTuple(errorMsg, MsgType.ERROR);
+            }
+            when (DType.BigInt, DType.Int64) {
+                var l = toSymEntry(left,bigint);
+                var val = value.getIntValue();
+                ref la = l.a;
+                var max_bits = l.max_bits;
+                var max_size = 1:bigint;
+                var has_max_bits = max_bits != -1;
+                if has_max_bits {
+                    max_size <<= max_bits;
+                }
+                select op {
+                    when "+=" { la += val; }
+                    when "-=" { la -= val; }
+                    when "*=" { la *= val; }
+                    when "//=" {
+                        [li in la] li = if val != 0 then li/val else 0:bigint;
+                    }
+                    when "%=" {
+                        // we can't use li %= val because this can result in negatives
+                        [li in la] if val != 0 then li.mod(li, val);
+                        [li in la] if val == 0 then li = 0:bigint;
+                    }
+                    when "**=" {
+                        if val<0 {
+                            throw new Error("Attempt to exponentiate base of type BigInt to negative exponent");
+                        }
+                        if has_max_bits {
+                            [li in la] li.powMod(li, val, max_size);
+                        }
+                        else {
+                            la **= val;
+                        }
+                    }
+                    otherwise {
+                        var errorMsg = notImplementedError(pn,left.dtype,op,dtype);
+                        omLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
+                        return new MsgTuple(errorMsg, MsgType.ERROR);
+                    }
+                }
+                if has_max_bits {
+                    la.mod(la, max_size);
+                }
+            }
+            when (DType.BigInt, DType.UInt64) {
+                var l = toSymEntry(left,bigint);
+                var val = value.getUIntValue();
+                ref la = l.a;
+                var max_bits = l.max_bits;
+                var max_size = 1:bigint;
+                var has_max_bits = max_bits != -1;
+                if has_max_bits {
+                    max_size <<= max_bits;
+                }
+                select op {
+                    when "+=" { la += val; }
+                    when "-=" { la -= val; }
+                    when "*=" { la *= val; }
+                    when "//=" {
+                        [li in la] li = if val != 0 then li/val else 0:bigint;
+                    }
+                    when "%=" {
+                        // we can't use li %= val because this can result in negatives
+                        [li in la] if val != 0 then li.mod(li, val);
+                        [li in la] if val == 0 then li = 0:bigint;
+                    }
+                    when "**=" {
+                        if val<0 {
+                            throw new Error("Attempt to exponentiate base of type BigInt to negative exponent");
+                        }
+                        if has_max_bits {
+                            [li in la] li.powMod(li, val, max_size);
+                        }
+                        else {
+                            la **= val;
+                        }
+                    }
+                    otherwise {
+                        var errorMsg = notImplementedError(pn,left.dtype,op,dtype);
+                        omLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
+                        return new MsgTuple(errorMsg, MsgType.ERROR);
+                    }
+                }
+                if has_max_bits {
+                    la.mod(la, max_size);
+                }
+            }
+            when (DType.BigInt, DType.Float64) {
+                var errorMsg = notImplementedError(pn,left.dtype,op,dtype);
+                omLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
+                return new MsgTuple(errorMsg, MsgType.ERROR);
+            }
+            when (DType.BigInt, DType.Bool) {
+                var l = toSymEntry(left, bigint);
+                var val = value.getBoolValue();
+                ref la = l.a;
+                var max_bits = l.max_bits;
+                var max_size = 1:bigint;
+                var has_max_bits = max_bits != -1;
+                if has_max_bits {
+                    max_size <<= max_bits;
+                }
+                select op {
+                    // TODO change once we can cast directly from bool to bigint
+                    when "+=" {la += val:int:bigint;}
+                    when "-=" {la -= val:int:bigint;}
+                    when "*=" {la *= val:int:bigint;}
+                    otherwise {
+                        var errorMsg = notImplementedError(pn,left.dtype,op,dtype);
+                        omLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
+                        return new MsgTuple(errorMsg, MsgType.ERROR);
+                    }
+                }
+                if has_max_bits {
+                    la.mod(la, max_size);
+                }
+            }
+            when (DType.BigInt, DType.BigInt) {
+                var l = toSymEntry(left,bigint);
+                var val = value.getBigIntValue();
+                ref la = l.a;
+                var max_bits = l.max_bits;
+                var max_size = 1:bigint;
+                var has_max_bits = max_bits != -1;
+                if has_max_bits {
+                    max_size <<= max_bits;
+                }
+                select op {
+                    when "+=" { la += val; }
+                    when "-=" { la -= val; }
+                    when "*=" { la *= val; }
+                    when "//=" {
+                        [li in la] li = if val != 0 then li/val else 0:bigint;
+                    }
+                    when "%=" {
+                        // we can't use li %= val because this can result in negatives
+                        [li in la] if val != 0 then li.mod(li, val);
+                        [li in la] if val == 0 then li = 0:bigint;
+                    }
+                    when "**=" {
+                        if val<0 {
+                            throw new Error("Attempt to exponentiate base of type BigInt to negative exponent");
+                        }
+                        if has_max_bits {
+                            [li in la] li.powMod(li, val, max_size);
+                        }
+                        else {
+                            // TODO cast to uint for now until chapel issue #21194
+                            la **= val:uint;
+                        }
+                    }
+                    otherwise {
+                        var errorMsg = notImplementedError(pn,left.dtype,op,dtype);
+                        omLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
+                        return new MsgTuple(errorMsg, MsgType.ERROR);
+                    }
+                }
+                if has_max_bits {
+                    la.mod(la, max_size);
                 }
             }
             otherwise {
