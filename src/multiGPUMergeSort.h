@@ -2,6 +2,7 @@
 #define _MULTI_GPU_MERGE_SORT_H_
 #include <stddef.h>
 #include <stdint.h>
+void enablePeerAccess(const int *devices, const int nGPUs);
 void *createDeviceBuffers_int32(const size_t num_elements, const int *devices, const int nGPUs);
 void *createDeviceBuffers_int64(const size_t num_elements, const int *devices, const int nGPUs);
 void *createDeviceBuffers_float(const size_t num_elements, const int *devices, const int nGPUs);
@@ -10,18 +11,10 @@ void destroyDeviceBuffers_int32(const size_t num_elements, const int *devices, c
 void destroyDeviceBuffers_int64(const size_t num_elements, const int *devices, const int nGPUs);
 void destroyDeviceBuffers_float(const size_t num_elements, const int *devices, const int nGPUs);
 void destroyDeviceBuffers_double(const size_t num_elements, const int *devices, const int nGPUs);
-int32_t *getDeviceBufferData_int32(void *device_buffers_ptr);
-int64_t *getDeviceBufferData_int64(void *device_buffers_ptr);
-float *getDeviceBufferData_float(void *device_buffers_ptr);
-double *getDeviceBufferData_double(void *device_buffers_ptr);
 void copyDeviceBufferToHost_int32(void *device_buffers_ptr, int32_t *hostArray, const size_t N);
 void copyDeviceBufferToHost_int64(void *device_buffers_ptr, int64_t *hostArray, const size_t N);
 void copyDeviceBufferToHost_float(void *device_buffers_ptr, float *hostArray, const size_t N);
 void copyDeviceBufferToHost_double(void *device_buffers_ptr, double *hostArray, const size_t N);
-void updateDeviceBufferOffset_int32(void *device_buffers_ptr, const size_t N);
-void updateDeviceBufferOffset_int64(void *device_buffers_ptr, const size_t N);
-void updateDeviceBufferOffset_float(void *device_buffers_ptr, const size_t N);
-void updateDeviceBufferOffset_double(void *device_buffers_ptr, const size_t N);
 size_t findPivot_int32(void *device_buffers_ptr, const int *gpus, const int nGPUs);
 size_t findPivot_int64(void *device_buffers_ptr, const int *gpus, const int nGPUs);
 size_t findPivot_float(void *device_buffers_ptr, const int *gpus, const int nGPUs);

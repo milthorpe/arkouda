@@ -235,6 +235,7 @@ module MultiTypeSymEntry
                         var deviceId: int(32);
                         GetDevice(deviceId);
                         tmpDeviceArrays[deviceId] = new shared GPUArray(a.localSlice(lo .. hi));
+                        tmpDeviceArrays[deviceId]!.toDevice();
                     }
                 }
                 var createDeviceArrayCallback = new Lambda();
@@ -250,6 +251,7 @@ module MultiTypeSymEntry
             proc toDevice(deviceId: int(32)) {
                 if (!isCurrent) {
                     deviceArrays[deviceId]!.toDevice();
+                    isCurrent = true;
                 }
             }
 

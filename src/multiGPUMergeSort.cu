@@ -2,6 +2,7 @@
 #include <cub/cub.cuh>
 #include <stdio.h>
 
+/** Create temporary devices buffers to be used in merge and swap steps */
 template <typename T>
 DeviceBuffers<T>* createDeviceBuffers(const size_t num_elements, const int *gpus, const int nGPUs) {
   //printf("createDeviceBuffers nGPUs %d\n", nGPUs);
@@ -29,14 +30,6 @@ void destroyDeviceBuffers(void *device_buffers_ptr) {
 }
 
 template <typename T>
-T *getDeviceBufferData(void *device_buffers_ptr) {
-  int deviceId;
-  CheckCudaError(cudaGetDevice(&deviceId));
-  DeviceBuffers<T>* device_buffers = (DeviceBuffers<T>*)device_buffers_ptr;
-  return (T*)(device_buffers->AtPrimary(deviceId)->data().get());
-}
-
-template <typename T>
 void copyDeviceBufferToHost(void *device_buffers_ptr, T *hostArray, const size_t N) {
   int deviceId;
   CheckCudaError(cudaGetDevice(&deviceId));
@@ -46,15 +39,6 @@ void copyDeviceBufferToHost(void *device_buffers_ptr, T *hostArray, const size_t
                             thrust::raw_pointer_cast(device_buffers->AtPrimary(deviceId)->data()),
                             sizeof(T) * N,
                             cudaMemcpyDeviceToHost));
-}
-
-template <typename T>
-void updateDeviceBufferOffset(void *device_buffers_ptr, const size_t N) {
-  DeviceBuffers<T>* device_buffers = (DeviceBuffers<T>*)device_buffers_ptr;
-  int deviceId;
-  CheckCudaError(cudaGetDevice(&deviceId));
-  //CheckCudaError(cudaStreamSynchronize(*device_buffers->GetPrimaryStream(deviceId)));
-  device_buffers->GetDeviceAllocator(deviceId)->SetOffset(N * sizeof(T));
 }
 
 template <typename T>
@@ -137,11 +121,22 @@ void sortToDeviceBuffer(const T *d_keys_in, void *device_buffers_ptr, size_t N) 
   cudaStream_t primaryStream = *device_buffers->GetPrimaryStream(deviceId);
   T *d_keys_out = (T*)(device_buffers->AtPrimary(deviceId)->data().get());
   cubSortKeysOnStream(d_keys_in, d_keys_out, N, primaryStream);
-  //CheckCudaError(cudaStreamSynchronize(primaryStream));
+  CheckCudaError(cudaStreamSynchronize(primaryStream));
   device_buffers->GetDeviceAllocator(deviceId)->SetOffset(N * sizeof(T));
 }
 
 extern "C" {
+/** Enable peer access to the memory of all other devices */
+void enablePeerAccess(const int *devices, const int nGPUs) {
+  int deviceId;
+  CheckCudaError(cudaGetDevice(&deviceId));
+
+  for (size_t i = 0; i < nGPUs; ++i) {
+    if (devices[i] != deviceId) {
+      CheckCudaError(cudaDeviceEnablePeerAccess(devices[i], 0));
+    }
+  }
+}
 
 void *createDeviceBuffers_int32(const size_t num_elements, const int *devices, const int nGPUs) {
   return createDeviceBuffers<int32_t>(num_elements, devices, nGPUs);
@@ -174,22 +169,6 @@ void destroyDeviceBuffers_double(void *device_buffers_ptr) {
   destroyDeviceBuffers<double>(device_buffers_ptr);
 }
 
-int32_t *getDeviceBufferData_int32(void *device_buffers_ptr) {
-  return getDeviceBufferData<int32_t>(device_buffers_ptr);
-}
-
-int64_t *getDeviceBufferData_int64(void *device_buffers_ptr) {
-  return getDeviceBufferData<int64_t>(device_buffers_ptr);
-}
-
-float *getDeviceBufferData_float(void *device_buffers_ptr) {
-  return getDeviceBufferData<float>(device_buffers_ptr);
-}
-
-double *getDeviceBufferData_double(void *device_buffers_ptr) {
-  return getDeviceBufferData<double>(device_buffers_ptr);
-}
-
 void copyDeviceBufferToHost_int32(void *device_buffers_ptr, int32_t *hostArray, const size_t N) {
   copyDeviceBufferToHost<int32_t>(device_buffers_ptr, hostArray, N);
 }
@@ -204,22 +183,6 @@ void copyDeviceBufferToHost_float(void *device_buffers_ptr, float *hostArray, co
 
 void copyDeviceBufferToHost_double(void *device_buffers_ptr, double *hostArray, const size_t N) {
   copyDeviceBufferToHost<double>(device_buffers_ptr, hostArray, N);
-}
-
-void updateDeviceBufferOffset_int32(void *device_buffers_ptr, const size_t N) {
-  updateDeviceBufferOffset<int32_t>(device_buffers_ptr, N);
-}
-
-void updateDeviceBufferOffset_int64(void *device_buffers_ptr, const size_t N) {
-  updateDeviceBufferOffset<int64_t>(device_buffers_ptr, N);
-}
-
-void updateDeviceBufferOffset_float(void *device_buffers_ptr, const size_t N) {
-  updateDeviceBufferOffset<float>(device_buffers_ptr, N);
-}
-
-void updateDeviceBufferOffset_double(void *device_buffers_ptr, const size_t N) {
-  updateDeviceBufferOffset<double>(device_buffers_ptr, N);
 }
 
 size_t findPivot_int32(void *device_buffers_ptr, const int *gpus, const int nGPUs) {
