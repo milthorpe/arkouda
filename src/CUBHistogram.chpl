@@ -89,7 +89,7 @@ module CUBHistogram {
     }
 
     // TODO update HistogramMsg to call the SymEntry version of this proc
-    proc cubHistogramUnified(a: GPUUnifiedArray, aMin: ?t, aMax: t, bins: int, binWidth: real) {
+    proc cubHistogramUnified(arr: GPUUnifiedArray, aMin: ?t, aMax: t, bins: int, binWidth: real) {
         // each device computes its histogram in a separate array
         var deviceHistograms: [0..#nGPUs][0..#bins] int;
 
@@ -98,11 +98,11 @@ module CUBHistogram {
             proc this(lo: int, hi: int, N: int) {
                 var deviceId: int(32);
                 GetDevice(deviceId);
-                a.prefetchToDevice(lo, hi, deviceId);
-                cubHistogram(t, a.dPtr(lo), deviceHistograms[deviceId], aMin, aMax, N, deviceId);
+                arr.prefetchToDevice(lo, hi, deviceId);
+                cubHistogram(t, arr.dPtr(lo), deviceHistograms[deviceId], aMin, aMax, N, deviceId);
             }
         }
-        var tD = {0..#a.size};
+        var tD = {0..#arr.a.size};
         var cubHistogramCallback = new Lambda();
         forall i in GPU(tD, cubHistogramCallback) {
             writeln("Should not reach this point!");
