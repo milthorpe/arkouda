@@ -1,6 +1,6 @@
 # dependencies
 python>=3.8
-numpy>=1.22.2
+numpy>=1.24.1
 pandas>=1.4.0
 pyzmq>=20.0.0
 typeguard==2.10.0
@@ -8,7 +8,7 @@ tabulate
 pyfiglet
 versioneer
 matplotlib>=3.3.2
-h5py
+h5py>=3.7.0
 pip
 types-tabulate
 tables>=3.7.0
@@ -23,6 +23,9 @@ pytest-env
 Sphinx>=5.1.1
 sphinx-argparse
 sphinx-autoapi
+myst-parser
+furo # sphinx theme
+linkify-it-py
 typed-ast
 mypy>=0.931,0.990
 flake8

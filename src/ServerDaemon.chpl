@@ -4,7 +4,7 @@ module ServerDaemon {
     use Security;
     use ServerConfig;
     use ServerErrors;
-    use Time only;
+    use Time;
     use ZMQ only;
     use Memory;
     use FileSystem;
@@ -24,12 +24,15 @@ module ServerDaemon {
     use List;
     use ExternalIntegration;
     use MetricsMsg;
+    use BigIntMsg;
+    use NumPyDType;
 
     enum ServerDaemonType {DEFAULT,INTEGRATION,METRICS}
 
     private config const logLevel = ServerConfig.logLevel;
-    const sdLogger = new Logger(logLevel);
-
+    private config const logChannel = ServerConfig.logChannel;
+    const sdLogger = new Logger(logLevel,logChannel);
+    
     private config const daemonTypes = 'ServerDaemonType.DEFAULT';
     
     var serverDaemonTypes = try! getDaemonTypes();
@@ -353,10 +356,10 @@ module ServerDaemon {
             registerFunction("repr", reprMsg);
             registerFunction("getconfig", getconfigMsg);
             registerFunction("getmemused", getmemusedMsg);
+            registerFunction("getavailmem", getmemavailMsg);
             registerFunction("getCmdMap", getCommandMapMsg);
             registerFunction("clear", clearMsg);
             registerFunction("lsany", lsAnyMsg);
-            registerFunction("readany", readAnyMsg);
             registerFunction("getfiletype", getFileTypeMsg);
 
             // For a few specialized cmds we're going to add dummy functions, so they
@@ -376,7 +379,6 @@ module ServerDaemon {
             return arkDirectory;
         }
 
-
         /**
          * The overridden shutdown function calls exit(0) if there are multiple 
          * ServerDaemons configured for this Arkouda instance.
@@ -388,6 +390,62 @@ module ServerDaemon {
                 exit(0);
             }
         }
+
+        proc processMetrics(user: string, cmd: string, args: MessageArgs, elapsedTime: real) throws {
+            proc getArrayParameterObj(args: MessageArgs) throws {
+                var obj : ParameterObj;
+
+                for item in args.items() {
+                    if item.key == 'a' || item.key == 'array' { 
+                        obj = item;
+                    }
+                }
+                
+                return obj;
+            }
+          
+            proc computeArrayMetrics(obj: ParameterObj): bool {
+               return !obj.key.isEmpty();
+            }
+          
+            // Update Request Metrics
+            requestMetrics.increment(cmd);
+            
+            // Update User-Scoped Request Metrics
+            userMetrics.incrementPerUserRequestMetrics(user,cmd);
+
+            var apo = getArrayParameterObj(args);
+
+            // Check to see if the incoming request corresponds to a pdarray operation
+            if computeArrayMetrics(apo) {
+                var name = apo.val;
+                var value = elapsedTime;
+                
+                // Add the response time to the avg response time for the corresponding cmd
+                avgResponseTimeMetrics.add(cmd,value);
+            
+                /*
+                 * Create the ArrayMetric object and output the individual response time
+                 * as JSON to the console or arkouda.log for now. In the future, individual  
+                 * values will be output to external channels such as Prometheus, Kafka, etc...
+                 * to enable downstream metrics processing and presentation.
+                 */
+                var metric = new ArrayMetric(name=name,
+                                             category=MetricCategory.RESPONSE_TIME,
+                                             scope=MetricScope.REQUEST,
+                                             value=value,
+                                             cmd=cmd,
+                                             dType=str2dtype(apo.dtype),
+                                             size=getGenericTypedArrayEntry(apo.val, st).size
+                                            );
+                
+                // Log to the console or arkouda.log file
+                sdLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
+                              "%jt".format(metric)); 
+            }
+            
+        }
+
 
         override proc run() throws {
             this.arkDirectory = this.initArkoudaDirectory();
@@ -409,9 +467,7 @@ module ServerDaemon {
             }
             this.registerServerCommands();
                     
-            var t1 = new Time.Timer();
-            t1.clear();
-            t1.start();            
+            var startTime = getCurrentTime();
         
             while !this.shutdownDaemon {
                 // receive message on the zmq socket
@@ -419,7 +475,7 @@ module ServerDaemon {
 
                 this.reqCount += 1;
 
-                var s0 = t1.elapsed();
+                var s0 = getCurrentTime();
         
                 /*
                  * Separate the first tuple, which is a string binary containing the JSON binary
@@ -475,6 +531,11 @@ module ServerDaemon {
                         msgArgs = new owned MessageArgs();
                     }
 
+                    sdLogger.info(getModuleName(),
+                                  getRoutineName(),
+                                  getLineNumber(),
+                                  "MessageArgs: %t".format(msgArgs));                    
+
                     /*
                      * If authentication is enabled with the --authenticate flag, authenticate
                      * the user which for now consists of matching the submitted token
@@ -503,7 +564,7 @@ module ServerDaemon {
                     if (trace) {
                         sdLogger.info(getModuleName(),getRoutineName(),getLineNumber(),
                                         "<<< shutdown initiated by %s took %.17r sec".format(user, 
-                                                t1.elapsed() - s0));
+                                                getCurrentTime() - s0));
                     }
                 }
 
@@ -573,21 +634,22 @@ module ServerDaemon {
                                                               msgFormat=MsgFormat.STRING, user=user));
                 }
 
+                var elapsedTime = getCurrentTime() - s0;
+
                 /*
                  * log that the request message has been handled and reply message has been sent 
                  * along with the time to do so
                  */
                 if trace {
                     sdLogger.info(getModuleName(),getRoutineName(),getLineNumber(), 
-                                              "<<< %s took %.17r sec".format(cmd, t1.elapsed() - s0));
+                                              "<<< %s took %.17r sec".format(cmd, elapsedTime));
                 }
                 if (trace && memTrack) {
                     sdLogger.info(getModuleName(),getRoutineName(),getLineNumber(),
                         "bytes of memory used after command %t".format(getMemUsed():uint * numLocales:uint));
                 }
                 if metricsEnabled() {
-                    userMetrics.incrementPerUserRequestMetrics(user,cmd);
-                    requestMetrics.increment(cmd);
+                    processMetrics(user, cmd, msgArgs, elapsedTime);
                 }
             } catch (e: ErrorWithMsg) {
                 // Generate a ReplyMsg of type ERROR and serialize to a JSON-formatted string
@@ -595,7 +657,7 @@ module ServerDaemon {
                                                         user=user));
                 if trace {
                     sdLogger.error(getModuleName(),getRoutineName(),getLineNumber(),
-                        "<<< %s resulted in error %s in  %.17r sec".format(cmd, e.msg, t1.elapsed() - s0));
+                        "<<< %s resulted in error %s in  %.17r sec".format(cmd, e.msg, getCurrentTime() - s0));
                 }
             } catch (e: Error) {
                 // Generate a ReplyMsg of type ERROR and serialize to a JSON-formatted string
@@ -610,19 +672,19 @@ module ServerDaemon {
                 if trace {
                     sdLogger.error(getModuleName(), getRoutineName(), getLineNumber(), 
                     "<<< %s resulted in error: %s in %.17r sec".format(cmd, e.message(),
-                                                                                 t1.elapsed() - s0));
+                                                                                 getCurrentTime() - s0));
                 }
             }
         }
 
-        t1.stop();
+        var elapsed = getCurrentTime() - startTime;
 
         deleteServerConnectionInfo();
 
         sdLogger.info(getModuleName(), getRoutineName(), getLineNumber(),
             "requests = %i responseCount = %i elapsed sec = %i".format(reqCount,
                                                                        repCount,
-                                                                       t1.elapsed()));
+                                                                       elapsed));
         this.shutdown(); 
         }
     }

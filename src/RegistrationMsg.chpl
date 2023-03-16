@@ -11,6 +11,7 @@ module RegistrationMsg
     use List;
     use Map;
     use Set;
+    use Sort;
 
     use MultiTypeSymbolTable;
     use MultiTypeSymEntry;
@@ -20,7 +21,9 @@ module RegistrationMsg
     use SegmentedMsg;
 
     private config const logLevel = ServerConfig.logLevel;
-    const regLogger = new Logger(logLevel);
+    private config const logChannel = ServerConfig.logChannel;
+    const regLogger = new Logger(logLevel, logChannel);
+
     private var simpleTypes: list(string) = ["pdarray","int64", "uint8", "uint64", "float64", "bool", "strings", "string", "str"];
 
     /* 
@@ -241,7 +244,7 @@ module RegistrationMsg
         // if Series matches MultiIndex format
         if st.contains("%s_key_0".format(name)) {
             var nameList = st.findAll("%s_key_\\d".format(name));
-            nameList = nameList.sorted();  // Sort the list to return the indexes in order from 0 to N
+            sort(nameList);
             for regName in nameList {
                 var entry = st.attrib(regName);
                 if (regName.startsWith("Error:")) { 
@@ -301,14 +304,14 @@ module RegistrationMsg
                             "%s: Collecting DataFrame components for '%s'".format(cmd, name));
 
         var jsonParam = new ParameterObj("name", colName, ObjectType.VALUE, "str");
-        var subArgs1 = new MessageArgs(new list([jsonParam]));
+        var subArgs1 = new MessageArgs(new list([jsonParam, ]));
         // Add columns as a json list
         var cols = stringsToJSONMsg(cmd, subArgs1, st).msg;
         repMsg += "+json %s".format(cols);
 
         // Get index 
         var indParam = new ParameterObj("name", "df_index_%s_key".format(name), ObjectType.VALUE, "");
-        var subArgs2 = new MessageArgs(new list([indParam]));
+        var subArgs2 = new MessageArgs(new list([indParam, ]));
         var ind = attachMsg(cmd, subArgs2, st).msg;
         if ind.startsWith("Error:") { 
             var errorMsg = ind;
@@ -340,12 +343,12 @@ module RegistrationMsg
             select (objtype){
                 when ("pdarray") {
                     var attParam = new ParameterObj("name", regName, ObjectType.VALUE, "");
-                    var subArgs = new MessageArgs(new list([attParam]));
+                    var subArgs = new MessageArgs(new list([attParam, ]));
                     msg = attachMsg(cmd, subArgs, st).msg;
                 }
                 when ("str") {
                     var attParam = new ParameterObj("name", regName, ObjectType.VALUE, "");
-                    var subArgs = new MessageArgs(new list([attParam]));
+                    var subArgs = new MessageArgs(new list([attParam, ]));
                     msg = attachMsg(cmd, subArgs, st).msg;
                 }
                 when ("SegArray") {
@@ -561,7 +564,7 @@ module RegistrationMsg
         select (dtype.toLower()) {
             when ("simple") {
                 // pdarray and strings can use the unregisterMsg method without any other processing
-                var subArgs = new MessageArgs(new list([msgArgs.get("name")]));
+                var subArgs = new MessageArgs(new list([msgArgs.get("name"), ]));
                 return unregisterMsg(cmd, subArgs, st);
             }
             when ("categorical") {
@@ -584,7 +587,7 @@ module RegistrationMsg
                     // Check for "" in case optional components aren't found
                     if n != "" {
                         base_json.setVal(n);
-                        var subArgs = new MessageArgs(new list([base_json]));
+                        var subArgs = new MessageArgs(new list([base_json, ]));
                         var resp = unregisterMsg(cmd, subArgs, st);
                         status += " %s: %s ".format(n, resp.msg);
                     }
@@ -613,7 +616,7 @@ module RegistrationMsg
                 var base_json = msgArgs.get("name");
                 forall n in nameList with (in base_json, + reduce status) {
                     base_json.setVal(n);
-                    var subArgs = new MessageArgs(new list([base_json]));
+                    var subArgs = new MessageArgs(new list([base_json, ]));
                     var resp = unregisterMsg(cmd, subArgs, st);
                     status += " %s: %s ".format(n, resp.msg);
                 }

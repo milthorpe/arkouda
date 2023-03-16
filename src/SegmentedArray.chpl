@@ -8,11 +8,12 @@ module SegmentedArray {
     use Logging;
     use ServerErrors;
     use CommAggregation;
-    use Time only Timer, getCurrentTime;
+    use Time only getCurrentTime;
     use Map;
 
     private config const logLevel = ServerConfig.logLevel;
-    const saLogger = new Logger(logLevel);
+    private config const logChannel = ServerConfig.logChannel;
+    const saLogger = new Logger(logLevel, logChannel);
 
     proc getSegArray(name: string, st: borrowed SymTab, type eltType): owned SegArray throws {
         var abstractEntry = st.lookup(name);

@@ -15,20 +15,17 @@ module FileIO {
 
     use ServerConfig, Logging, CommandMap;
     private config const logLevel = ServerConfig.logLevel;
-    const fioLogger = new Logger(logLevel);
+    private config const logChannel = ServerConfig.logChannel;
+    const fioLogger = new Logger(logLevel, logChannel);
     
     enum FileType {HDF5, ARROW, PARQUET, UNKNOWN};
 
     proc appendFile(filePath : string, line : string) throws {
-        var writer : channel;
+        var writer;
         if exists(filePath) {
-            use Version;
+            use ArkoudaFileCompat;
             var aFile = open(filePath, iomode.rw);
-            if chplVersion >= createVersion(1,28) {
-              writer = aFile.writer(region=aFile.size..);
-            } else {
-              writer = aFile.writer(start=aFile.size);
-            }
+            writer = aFile.appendWriter();
         } else {
             var aFile = open(filePath, iomode.cwr);
             writer = aFile.writer();
@@ -40,9 +37,8 @@ module FileIO {
     }
 
     proc writeToFile(filePath : string, line : string) throws {
-        var writer : channel;
         var aFile = open(filePath, iomode.cwr);
-        writer = aFile.writer();
+        var writer = aFile.writer();
 
         writer.writeln(line);
         writer.flush();
@@ -50,9 +46,8 @@ module FileIO {
     }
     
     proc writeLinesToFile(filePath : string, lines : string) throws {
-        var writer : channel;
         var aFile = open(filePath, iomode.cwr);
-        writer = aFile.writer();
+        var writer = aFile.writer();
 
         for line in lines {
             writer.writeln(line);
@@ -82,7 +77,7 @@ module FileIO {
     
     proc getLineFromFile(path: string, match: string) throws {
         var aFile = open(path, iomode.r);
-        var reader: channel = aFile.reader();
+        var reader = aFile.reader();
         var returnLine: string;
 
         for line in reader.lines() {
@@ -332,60 +327,6 @@ module FileIO {
         }
         when FileType.PARQUET {
           return executeCommand("lspq", msgArgs, st);
-        } otherwise {
-          var errorMsg = "Unsupported file type; Parquet and HDF5 are only supported formats";
-          return new MsgTuple(errorMsg, MsgType.ERROR);
-        }
-      }
-    }
-
-    proc readAnyMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
-      var nfiles = msgArgs.get("filename_size").getIntValue();
-      var filelist: [0..#nfiles] string;
-      
-      try {
-        filelist = msgArgs.get("filenames").getList(nfiles);
-      } catch {
-        // limit length of file names to 2000 chars
-        var n: int = 1000;
-        var jsonfiles = msgArgs.getValueOf("filenames");
-        var files: string = if jsonfiles.size > 2*n then jsonfiles[0..#n]+'...'+jsonfiles[jsonfiles.size-n..#n] else jsonfiles;
-        var errorMsg = "Could not decode json filenames via tempfile (%i files: %s)".format(nfiles, files);
-        return new MsgTuple(errorMsg, MsgType.ERROR);
-      }
-      
-      var filedom = filelist.domain;
-      var filenames: [filedom] string;
-
-      if filelist.size == 1 {
-        if filelist[0].strip().size == 0 {
-          var errorMsg = "filelist was empty.";
-          return new MsgTuple(errorMsg, MsgType.ERROR);
-        }
-        var tmp = glob(filelist[0]);
-        if tmp.size == 0 {
-          var errorMsg = "The wildcarded filename %s either corresponds to files inaccessible to Arkouda or files of an invalid format".format(filelist[0]);
-          return new MsgTuple(errorMsg, MsgType.ERROR);
-        }
-        // Glob returns filenames in weird order. Sort for consistency
-        sort(tmp);
-        filedom = tmp.domain;
-        filenames = tmp;
-      } else {
-        filenames = filelist;
-      }
-
-      if !exists(filenames[0]) {
-        var errorMsg = "File %s does not exist in a location accessible to Arkouda".format(filenames[0]);
-        return new MsgTuple(errorMsg,MsgType.ERROR);
-      } 
-
-      select getFileType(filenames[0]) {
-        when FileType.HDF5 {
-          return executeCommand("readAllHdf", msgArgs, st);
-        }
-        when FileType.PARQUET {
-          return executeCommand("readAllParquet", msgArgs, st);
         } otherwise {
           var errorMsg = "Unsupported file type; Parquet and HDF5 are only supported formats";
           return new MsgTuple(errorMsg, MsgType.ERROR);

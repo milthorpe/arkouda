@@ -1,7 +1,6 @@
 import glob
 import json
 import os
-import warnings
 from typing import Dict, List, Mapping, Optional, Union, cast
 from warnings import warn
 
@@ -21,16 +20,14 @@ __all__ = [
     "get_datasets",
     "read_hdf",
     "read_parquet",
+    "read",
     "import_data",
     "export",
     "to_hdf",
     "to_parquet",
+    "save_all",
     "load",
     "load_all",
-    "read",
-    "read_hdf5_multi_dim",
-    "write_hdf5_multi_dim",
-    "save_all",
     "file_type_to_int",
     "mode_str_to_int",
 ]
@@ -334,7 +331,7 @@ def _parse_errors(rep_msg, allow_errors: bool = False):
     file_errors = rep_msg["file_errors"] if "file_errors" in rep_msg else []
     if allow_errors and file_errors:
         file_error_count = rep_msg["file_error_count"] if "file_error_count" in rep_msg else -1
-        warnings.warn(
+        warn(
             f"There were {file_error_count} errors reading files on the server. "
             + f"Sample error messages {file_errors}",
             RuntimeWarning,
@@ -493,7 +490,7 @@ def read_hdf(
     """
     if isinstance(filenames, str):
         filenames = [filenames]
-    datasets = _prep_datasets(filenames, datasets)
+    datasets = _prep_datasets(filenames, datasets, allow_errors)
 
     if iterative:
         return {
@@ -701,7 +698,9 @@ def import_data(read_path: str, write_file: str = None, return_obj: bool = True,
     df = DataFrame(df_def)
 
     if write_file:
-        df.save(write_file, index=index, file_format=filetype)
+        df.to_hdf(write_file, index=index) if filetype == "HDF5" else df.to_parquet(
+            write_file, index=index
+        )
 
     if return_obj:
         return df
@@ -806,7 +805,7 @@ def to_parquet(
     prefix_path: str,
     names: List[str] = None,
     mode: str = "truncate",
-    compressed: bool = False,
+    compression: Optional[str] = None,
 ) -> None:
     """
     Save multiple named pdarrays to Parquet files.
@@ -822,10 +821,12 @@ def to_parquet(
     mode : {'truncate' | 'append'}
         By default, truncate (overwrite) the output files if they exist.
         If 'append', attempt to create new dataset in existing files.
-    file_type : str ("single" | "distribute")
-            Default: distribute
-            Single writes the dataset to a single file
-            Distribute writes the dataset to a file per locale
+        'append' is deprecated, please use the multi-column write
+    compression : str (Optional)
+            Default None
+            Provide the compression type to use when writing the file.
+            Supported values: snappy, gzip, brotli, zstd, lz4
+
 
     Returns
     -------
@@ -836,10 +837,12 @@ def to_parquet(
     ValueError
         Raised if (1) the lengths of columns and values differ or (2) the mode
         is not 'truncate' or 'append'
+    RuntimeError
+            Raised if a server-side error is thrown saving the pdarray
 
     See Also
     --------
-    save, load_all
+    to_hdf, load, load_all, read
 
     Notes
     -----
@@ -865,12 +868,34 @@ def to_parquet(
     if mode.lower() not in ["append", "truncate"]:
         raise ValueError("Allowed modes are 'truncate' and 'append'")
 
-    datasetNames, pdarrays = _bulk_write_prep(columns, names)
+    if mode.lower() == "append":
+        warn(
+            "Append has been deprecated when writing Parquet files. "
+            "Please write all columns to the file at once.",
+            DeprecationWarning,
+        )
 
-    for arr, name in zip(pdarrays, cast(List[str], datasetNames)):
-        arr.to_parquet(prefix_path=prefix_path, dataset=name, mode=mode, compressed=compressed)
-        if mode.lower() == "truncate":
-            mode = "append"
+    datasetNames, pdarrays = _bulk_write_prep(columns, names)
+    # append or single column use the old logic
+    if mode.lower() == "append" or len(pdarrays) == 1:
+        for arr, name in zip(pdarrays, cast(List[str], datasetNames)):
+            arr.to_parquet(prefix_path=prefix_path, dataset=name, mode=mode, compression=compression)
+    else:
+        print(
+            cast(
+                str,
+                generic_msg(
+                    cmd="toParquet_multi",
+                    args={
+                        "columns": pdarrays,
+                        "col_names": datasetNames,
+                        "filename": prefix_path,
+                        "num_cols": len(pdarrays),
+                        "compression": compression,
+                    },
+                ),
+            )
+        )
 
 
 def to_hdf(
@@ -908,10 +933,12 @@ def to_hdf(
     ValueError
         Raised if (1) the lengths of columns and values differ or (2) the mode
         is not 'truncate' or 'append'
+    RuntimeError
+            Raised if a server-side error is thrown saving the pdarray
 
     See Also
     --------
-    save, load_all
+    to_parquet, load, load_all, read
 
     Notes
     -----
@@ -948,6 +975,82 @@ def to_hdf(
         )
         if mode.lower() == "truncate":
             mode = "append"
+
+
+def save_all(
+    columns: Union[Mapping[str, pdarray], List[pdarray]],
+    prefix_path: str,
+    names: List[str] = None,
+    file_format="HDF5",
+    mode: str = "truncate",
+    file_type: str = "distribute",
+    compression: Optional[str] = None,
+) -> None:
+    """
+    DEPRECATED
+    Save multiple named pdarrays to HDF5/Parquet files.
+    Parameters
+    ----------
+    columns : dict or list of pdarrays
+        Collection of arrays to save
+    prefix_path : str
+        Directory and filename prefix for output files
+    names : list of str
+        Dataset names for the pdarrays
+    file_format : str
+        'HDF5' or 'Parquet'. Defaults to hdf5
+    mode : {'truncate' | 'append'}
+        By default, truncate (overwrite) the output files if they exist.
+        If 'append', attempt to create new dataset in existing files.
+    file_type : str ("single" | "distribute")
+        Default: distribute
+        Single writes the dataset to a single file
+        Distribute writes the dataset to a file per locale
+        Only used with HDF5
+    compression: str (None | "snappy" | "gzip" | "brotli" | "zstd" | "lz4")
+        Optional
+        Select the compression to use with Parquet files.
+        Only used with Parquet.
+
+    Returns
+    -------
+    None
+    Raises
+    ------
+    ValueError
+        Raised if (1) the lengths of columns and values differ or (2) the mode
+        is not 'truncate' or 'append'
+    See Also
+    --------
+    save, load_all, to_parquet, to_hdf
+    Notes
+    -----
+    Creates one file per locale containing that locale's chunk of each pdarray.
+    If columns is a dictionary, the keys are used as the HDF5 dataset names.
+    Otherwise, if no names are supplied, 0-up integers are used. By default,
+    any existing files at path_prefix will be overwritten, unless the user
+    specifies the 'append' mode, in which case arkouda will attempt to add
+    <columns> as new datasets to existing files. If the wrong number of files
+    is present or dataset names already exist, a RuntimeError is raised.
+    Examples
+    --------
+    >>> a = ak.arange(25)
+    >>> b = ak.arange(25)
+    >>> # Save with mapping defining dataset names
+    >>> ak.save_all({'a': a, 'b': b}, 'path/name_prefix', file_format='Parquet')
+    >>> # Save using names instead of mapping
+    >>> ak.save_all([a, b], 'path/name_prefix', names=['a', 'b'], file_format='Parquet')
+    """
+    warn(
+        "ak.save_all has been deprecated. Please use ak.to_hdf or ak.to_parquet",
+        DeprecationWarning,
+    )
+    if file_format.lower() == "hdf5":
+        to_hdf(columns, prefix_path, names=names, mode=mode, file_type=file_type)
+    elif file_format.lower() == "parquet":
+        to_parquet(columns, prefix_path, names=names, mode=mode, compression=compression)
+    else:
+        raise ValueError("Arkouda only supports HDF5 and Parquet files.")
 
 
 @typechecked
@@ -996,7 +1099,7 @@ def load(
 
     See Also
     --------
-    save, load_all, read
+    to_parquet, to_hdf, load_all, read
 
     Notes
     -----
@@ -1073,7 +1176,7 @@ def load_all(
 
     See Also
     --------
-    save_all, load, read
+    to_parquet, to_hdf, load, read
 
     Notes
     _____
@@ -1119,11 +1222,6 @@ def load_all(
             )
 
 
-"""
-    The following functionality will be deprecated in a later release
-"""
-
-
 def read(
     filenames: Union[str, List[str]],
     datasets: Optional[Union[str, List[str]]] = None,
@@ -1131,7 +1229,6 @@ def read(
     strictTypes: bool = True,
     allow_errors: bool = False,
     calc_string_offsets=False,
-    file_format: str = "infer",
 ) -> Union[
     pdarray,
     Strings,
@@ -1139,8 +1236,8 @@ def read(
     Mapping[str, Union[pdarray, Strings, arkouda.array_view.ArrayView]],
 ]:
     """
-    DEPRECATED
-    Read datasets from HDF5 or Parquet files.
+    Read datasets from files.
+    File Type is determined automatically.
 
     Parameters
     ----------
@@ -1165,11 +1262,6 @@ def read(
         Default False, if True this will tell the server to calculate the
         offsets/segments array on the server versus loading them from HDF5 files.
         In the future this option may be set to True as the default.
-    file_format: str
-        Default 'infer', if 'HDF5' or 'Parquet' (case insensitive), the file
-        type checking will be skipped and will execute expecting all files in
-        filenames to be of the specified type. Otherwise, will infer filetype
-        based off of first file in filenames, expanded if a glob expression.
 
     Returns
     -------
@@ -1180,19 +1272,12 @@ def read(
 
     Raises
     ------
-    ValueError
-        Raised if all datasets are not present in all hdf5/parquet files or if one or
-        more of the specified files do not exist
     RuntimeError
-        Raised if one or more of the specified files cannot be opened.
-        If `allow_errors` is true this may be raised if no values are returned
-        from the server.
-    TypeError
-        Raised if we receive an unknown arkouda_type returned from the server
+        If invalid filetype is detected
 
     See Also
     --------
-    read, get_datasets, ls
+    get_datasets, ls, read_parquet, read_hdf
 
     Notes
     -----
@@ -1214,310 +1299,30 @@ def read(
     Read with file Extension
     >>> x = ak.read('path/name_prefix.h5') # load HDF5 - processing determines file type not extension
     Read without file Extension
-    >>> x = ak.read('path/name_prefix.parquet', file_format='Parquet') # load Parquet
+    >>> x = ak.read('path/name_prefix.parquet') # load Parquet
     Read Glob Expression
     >>> x = ak.read('path/name_prefix*') # Reads HDF5
     """
-    warn(
-        "ak.pdarrayIO.read has been deprecated. Please use ak.IO.read_parquet or ak.IO.read_hdf",
-        DeprecationWarning,
-    )
     if isinstance(filenames, str):
         filenames = [filenames]
-    datasets = _prep_datasets(filenames, datasets, allow_errors)
 
-    file_format = file_format.lower()
-    if file_format == "infer":
-        cmd = "readany"
-    elif file_format == "hdf5":
-        cmd = "readAllHdf"
-    elif file_format == "parquet":
-        cmd = "readAllParquet"
-    else:
-        warnings.warn(f"Unrecognized file format string: {file_format}. Inferring file type")
-        cmd = "readany"
-    if iterative:  # iterative calls to server readhdf
-        return {
-            dset: read(
-                filenames,
-                dset,
-                strictTypes=strictTypes,
-                allow_errors=allow_errors,
-                iterative=False,
-                calc_string_offsets=calc_string_offsets,
-            )[dset]
-            for dset in datasets
-        }
-    else:
-        rep_msg = generic_msg(
-            cmd=cmd,
-            args={
-                "strict_types": strictTypes,
-                "dset_size": len(datasets),
-                "filename_size": len(filenames),
-                "allow_errors": allow_errors,
-                "calc_string_offsets": calc_string_offsets,
-                "dsets": datasets,
-                "filenames": filenames,
-            },
+    ftype = get_filetype(filenames)
+    if ftype.lower() == "hdf5":
+        return read_hdf(
+            filenames,
+            datasets=datasets,
+            iterative=iterative,
+            strict_types=strictTypes,
+            allow_errors=allow_errors,
+            calc_string_offsets=calc_string_offsets,
         )
-        rep = json.loads(rep_msg)  # See GenSymIO._buildReadAllHdfMsgJson for json structure
-        items = rep["items"] if "items" in rep else []
-        file_errors = rep["file_errors"] if "file_errors" in rep else []
-        if allow_errors and file_errors:
-            file_error_count = rep["file_error_count"] if "file_error_count" in rep else -1
-            warnings.warn(
-                f"There were {file_error_count} errors reading files on the server. "
-                + f"Sample error messages {file_errors}",
-                RuntimeWarning,
-            )
-
-        # We have a couple possible return conditions
-        # 1. We have multiple items returned i.e. multi pdarrays, multi strings, multi pdarrays & strings
-        # 2. We have a single pdarray
-        # 3. We have a single strings object
-        if len(items) > 1:  # DataSets condition
-            d: Dict[str, Union[pdarray, Strings, arkouda.array_view.ArrayView]] = {}
-            for item in items:
-                if "seg_string" == item["arkouda_type"]:
-                    d[item["dataset_name"]] = Strings.from_return_msg(item["created"])
-                elif "pdarray" == item["arkouda_type"]:
-                    d[item["dataset_name"]] = create_pdarray(item["created"])
-                elif "ArrayView" == item["arkouda_type"]:
-                    objs = item["created"].split("+")
-                    flat = create_pdarray(objs[0])
-                    shape = create_pdarray(objs[1])
-
-                    d[item["dataset_name"]] = arkouda.array_view.ArrayView(flat, shape)
-                else:
-                    raise TypeError(f"Unknown arkouda type:{item['arkouda_type']}")
-            return d
-        elif len(items) == 1:
-            item = items[0]
-            if "pdarray" == item["arkouda_type"]:
-                return create_pdarray(item["created"])
-            elif "seg_string" == item["arkouda_type"]:
-                return Strings.from_return_msg(item["created"])
-            elif "ArrayView" == item["arkouda_type"]:
-                objs = item["created"].split("+")
-                flat = create_pdarray(objs[0])
-                shape = create_pdarray(objs[1])
-
-                return arkouda.array_view.ArrayView(flat, shape)
-            else:
-                raise TypeError(f"Unknown arkouda type:{item['arkouda_type']}")
-        else:
-            raise RuntimeError("No items were returned")
-
-
-@typechecked
-def read_hdf5_multi_dim(file_path: str, dset: str) -> arkouda.array_view.ArrayView:
-    """
-    DEPRECATED
-    This function is being mantained to allow reading from files written in Arkouda v2022.10.13
-    or earlier. If used, save the object to update formatting.
-    Read a multi-dimensional object from an HDF5 file
-
-    Parameters
-    ----------
-    file_path: str
-        path to the file to read from
-    dset: str
-        name of the dataset to read
-
-    Returns
-    -------
-    ArrayView object representing the data read from file
-
-    See Also
-    --------
-    ak.write_hdf5_multi_dim
-
-    Notes
-    -----
-        - Error handling done on server to prevent multiple server calls
-        - This is an initial implementation and updates will be coming soon
-        - dset currently only reading a single dataset is supported
-        - file_path will need to support list[str] and str for glob
-        - Currently, order is always assumed to be row major
-    """
-    warn(
-        "ak.pdarrayIO.read_hdf5_multi_dim has been deprecated. Please use ak.pdarrayIO.read",
-        DeprecationWarning,
-    )
-    args = {"filename": file_path, "dset": dset}
-    rep_msg = cast(
-        str,
-        generic_msg(
-            cmd="readhdf_multi",
-            args=args,
-        ),
-    )
-
-    objs = rep_msg.split("+")
-
-    shape = create_pdarray(objs[0])
-    flat = create_pdarray(objs[1])
-
-    arr = arkouda.array_view.ArrayView(flat, shape)
-    return arr
-
-
-@typechecked
-def write_hdf5_multi_dim(
-    obj: arkouda.array_view.ArrayView,
-    file_path: str,
-    dset: str,
-    mode: str = "truncate",
-    file_type: str = "distribute",
-):
-    """
-    DEPRECATED
-    Write a multi-dimensional ArrayView object to an HDF5 file
-
-    Parameters
-    ----------
-    obj: ArrayView
-        The object that will be written to the file
-    file_path: str
-        Path to the file to write the dataset to
-    dset: str
-        Name of the dataset to write
-    mode: str (truncate | append)
-        Default: truncate
-        Mode to write the dataset in. Truncate will overwrite any existing files.
-        Append will add the dataset to an existing file.
-    file_type: str (single|distribute)
-        Default: distribute
-        Indicates the format to save the file. Single will store in a single file.
-        Distribute will store the date in a file per locale.
-
-    See Also
-    --------
-    ak.read_hdf5_multi_dim
-
-    Notes
-    -----
-    - All ArrayView/Multi-Dimensional objects are stored as flattened arrays
-    - If a file does not exist, it will be created regardless of the mode value
-    - This function is currently standalone functionality for multi-dimensional datasets
-    - Error handling done on server to prevent multiple server calls
-    """
-    from arkouda.io import file_type_to_int, mode_str_to_int
-
-    warn(
-        "ak.write_hdf5_multi_dim has been deprecated. Please use ak.ArrayView.to_hdf",
-        DeprecationWarning,
-    )
-    args = {
-        "values": obj.base,
-        "shape": obj.shape,
-        "order": obj.order,
-        "filename": file_path,
-        "file_format": file_type_to_int(file_type),
-        "dset": dset,
-        "write_mode": mode_str_to_int(mode),
-        "objType": "ArrayView",
-    }
-
-    generic_msg(
-        cmd="tohdf",
-        args=args,
-    )
-
-
-def save_all(
-    columns: Union[Mapping[str, pdarray], List[pdarray]],
-    prefix_path: str,
-    names: List[str] = None,
-    file_format="HDF5",
-    mode: str = "truncate",
-    file_type: str = "distribute",
-) -> None:
-    """
-    DEPRECATED
-    Save multiple named pdarrays to HDF5 files.
-
-    Parameters
-    ----------
-    columns : dict or list of pdarrays
-        Collection of arrays to save
-    prefix_path : str
-        Directory and filename prefix for output files
-    names : list of str
-        Dataset names for the pdarrays
-    file_format : str
-        'HDF5' or 'Parquet'. Defaults to hdf5
-    mode : {'truncate' | 'append'}
-        By default, truncate (overwrite) the output files if they exist.
-        If 'append', attempt to create new dataset in existing files.
-    file_type : str ("single" | "distribute")
-            Default: distribute
-            Single writes the dataset to a single file
-            Distribute writes the dataset to a file per locale
-
-    Returns
-    -------
-    None
-
-    Raises
-    ------
-    ValueError
-        Raised if (1) the lengths of columns and values differ or (2) the mode
-        is not 'truncate' or 'append'
-
-    See Also
-    --------
-    save, load_all
-
-    Notes
-    -----
-    Creates one file per locale containing that locale's chunk of each pdarray.
-    If columns is a dictionary, the keys are used as the HDF5 dataset names.
-    Otherwise, if no names are supplied, 0-up integers are used. By default,
-    any existing files at path_prefix will be overwritten, unless the user
-    specifies the 'append' mode, in which case arkouda will attempt to add
-    <columns> as new datasets to existing files. If the wrong number of files
-    is present or dataset names already exist, a RuntimeError is raised.
-
-    Examples
-    --------
-    >>> a = ak.arange(25)
-    >>> b = ak.arange(25)
-
-    >>> # Save with mapping defining dataset names
-    >>> ak.save_all({'a': a, 'b': b}, 'path/name_prefix', file_format='Parquet')
-
-    >>> # Save using names instead of mapping
-    >>> ak.save_all([a, b], 'path/name_prefix', names=['a', 'b'], file_format='Parquet')
-    """
-    warn(
-        "ak.save_all has been deprecated. Please use ak.to_hdf or ak.to_parquet",
-        DeprecationWarning,
-    )
-    if names is not None:
-        if len(names) != len(columns):
-            raise ValueError("Number of names does not match number of columns")
-        else:
-            datasetNames = names
-    if isinstance(columns, dict):
-        pdarrays = list(columns.values())
-        if names is None:
-            datasetNames = list(columns.keys())
-    elif isinstance(columns, list):
-        pdarrays = cast(List[pdarray], columns)
-        if names is None:
-            datasetNames = [str(column) for column in range(len(columns))]
-    if mode.lower() not in ["append", "truncate"]:
-        raise ValueError("Allowed modes are 'truncate' and 'append'")
-
-    for arr, name in zip(pdarrays, cast(List[str], datasetNames)):
-        arr.save(
-            prefix_path=prefix_path,
-            dataset=name,
-            file_format=file_format,
-            mode=mode,
-            file_type=file_type,
+    elif ftype.lower() == "parquet":
+        return read_parquet(
+            filenames,
+            datasets=datasets,
+            iterative=iterative,
+            strict_types=strictTypes,
+            allow_errors=allow_errors,
         )
-        if mode.lower() == "truncate":
-            mode = "append"
+    else:
+        raise RuntimeError(f"Invalid File Type detected, {ftype}")

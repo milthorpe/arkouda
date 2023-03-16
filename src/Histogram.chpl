@@ -13,7 +13,8 @@ module Histogram
     use CUBHistogram;
 
     private config const logLevel = ServerConfig.logLevel;
-    const hgLogger = new Logger(logLevel);
+    private config const logChannel = ServerConfig.logChannel;
+    const hgLogger = new Logger(logLevel, logChannel);
 
     /*
     Takes the data in array a, creates an atomic histogram in parallel, 

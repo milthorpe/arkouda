@@ -51,6 +51,51 @@ class PdarrayCreationTest(ArkoudaTest):
         with self.assertRaises(TypeError):
             ak.array(list(list(0)))
 
+    def test_bigint_creation(self):
+        bi = 2**200
+
+        pda_from_str = ak.array([f"{i}" for i in range(bi, bi + 10)], dtype=ak.bigint)
+        pda_from_int = ak.array([i for i in range(bi, bi + 10)])
+        cast_from_segstr = ak.cast(ak.array([f"{i}" for i in range(bi, bi + 10)]), ak.bigint)
+        for pda in [pda_from_str, pda_from_int, cast_from_segstr]:
+            self.assertIsInstance(pda, ak.pdarray)
+            self.assertEqual(10, len(pda))
+            self.assertEqual(ak.bigint, pda.dtype)
+            self.assertEqual(pda[-1], bi + 9)
+
+        # test array and arange infer dtype
+        self.assertListEqual(
+            ak.array([bi, bi + 1, bi + 2, bi + 3, bi + 4]).to_list(), ak.arange(bi, bi + 5).to_list()
+        )
+
+        # test that max_bits being set results in a mod
+        self.assertListEqual(
+            ak.array([bi, bi + 1, bi + 2, bi + 3, bi + 4], max_bits=200).to_list(),
+            ak.arange(5).to_list(),
+        )
+
+        # test ak.bigint_from_uint_arrays
+        # top bits are all 1 which should be 2**64
+        top_bits = ak.ones(5, ak.uint64)
+        bot_bits = ak.arange(5, dtype=ak.uint64)
+        two_arrays = ak.bigint_from_uint_arrays([top_bits, bot_bits])
+        self.assertEqual(ak.bigint, two_arrays.dtype)
+        self.assertListEqual(two_arrays.to_list(), [2**64 + i for i in range(5)])
+        # top bits should represent 2**128
+        mid_bits = ak.zeros(5, ak.uint64)
+        three_arrays = ak.bigint_from_uint_arrays([top_bits, mid_bits, bot_bits])
+        self.assertListEqual(three_arrays.to_list(), [2**128 + i for i in range(5)])
+
+        # test round_trip of ak.bigint_to/from_uint_arrays
+        t = ak.arange(bi - 1, bi + 9)
+        t_dup = ak.bigint_from_uint_arrays(t.bigint_to_uint_arrays())
+        self.assertListEqual(t.to_list(), t_dup.to_list())
+
+        # test slice_bits along 64 bit boundaries matches return from bigint_to_uint_arrays
+        for i, uint_bits in enumerate(t.bigint_to_uint_arrays()):
+            slice_bits = t.slice_bits(64 * (4 - (i + 1)), 64 * (4 - i) - 1)
+            self.assertListEqual(uint_bits.to_list(), slice_bits.to_list())
+
     def test_arange(self):
         self.assertListEqual([0, 1, 2, 3, 4], ak.arange(0, 5, 1).to_list())
         self.assertListEqual([5, 4, 3, 2, 1], ak.arange(5, 0, -1).to_list())
@@ -259,6 +304,10 @@ class PdarrayCreationTest(ArkoudaTest):
         boolZeros = ak.zeros(5, dtype=ak.bool)
         self.assertEqual(ak.bool, boolZeros.dtype)
 
+        bigintZeros = ak.zeros(5, dtype=ak.bigint)
+        self.assertEqual(ak.bigint, bigintZeros.dtype)
+        self.assertEqual(0, bigintZeros[0])
+
         zeros = ak.zeros("5")
         self.assertEqual(5, len(zeros))
 
@@ -293,6 +342,10 @@ class PdarrayCreationTest(ArkoudaTest):
         boolOnes = ak.ones(5, dtype=ak.bool)
         self.assertEqual(ak.bool, boolOnes.dtype)
 
+        bigintOnes = ak.ones(5, dtype=ak.bigint)
+        self.assertEqual(ak.bigint, bigintOnes.dtype)
+        self.assertEqual(1, bigintOnes[0])
+
         ones = ak.ones("5")
         self.assertEqual(5, len(ones))
 
@@ -323,6 +376,11 @@ class PdarrayCreationTest(ArkoudaTest):
         boolOnesLike = ak.ones_like(boolOnes)
 
         self.assertEqual(ak.bool, boolOnesLike.dtype)
+
+        bigintOnes = ak.ones(5, dtype=ak.bigint)
+        bigintOnesLike = ak.ones_like(bigintOnes)
+
+        self.assertEqual(ak.bigint, bigintOnesLike.dtype)
 
     def test_full(self):
         int_full = ak.full(5, 5, dtype=int)
@@ -814,6 +872,12 @@ class PdarrayCreationTest(ArkoudaTest):
             self.assertTrue(np.all(a == i + 1))
             self.assertTrue(np.all(npa == i + 1))
 
+    def test_uint_greediness(self):
+        # default to uint when all supportedInt and any value > 2**63
+        # to avoid loss of precision see (#1297)
+        self.assertEqual(ak.array([2**63, 6, 2**63 - 1, 2**63 + 1]).dtype, ak.uint64)
+        self.assertEqual(ak.array([2**64 - 1, 0, -1]).dtype, ak.uint64)
+
     def randint_randomness(self):
         # THIS TEST DOES NOT RUN, see Issue #1672
         # To run rename to `test_randint_randomness`
@@ -843,7 +907,9 @@ class PdarrayCreationTest(ArkoudaTest):
                     n2 += 1
 
             runs_exp = ((2 * n1 * n2) / (n1 + n2)) + 1
-            stan_dev = math.sqrt((2 * n1 * n2 * (2 * n1 * n2 - n1 - n2)) / (((n1 + n2) ** 2) * (n1 + n2 - 1)))
+            stan_dev = math.sqrt(
+                (2 * n1 * n2 * (2 * n1 * n2 - n1 - n2)) / (((n1 + n2) ** 2) * (n1 + n2 - 1))
+            )
 
             if abs((runs - runs_exp) / stan_dev) < 1.9:
                 passed += 1

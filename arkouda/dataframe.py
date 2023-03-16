@@ -30,7 +30,7 @@ from arkouda.pdarrayclass import RegistrationError
 from arkouda.pdarrayclass import attach as pd_attach
 from arkouda.pdarrayclass import pdarray, unregister_pdarray_by_name
 from arkouda.pdarraycreation import arange, array, create_pdarray, zeros
-from arkouda.io import get_filetype, load_all, save_all
+from arkouda.io import get_filetype, load_all
 from arkouda.pdarraysetops import concatenate, in1d, intersect1d
 from arkouda.row import Row
 from arkouda.segarray import SegArray
@@ -1457,7 +1457,7 @@ class DataFrame(UserDict):
             data = {c: self.data[c] for c in columns}
 
         if index:
-            data["Index"] = self.index
+            data["Index"] = self.index.values
         return data
 
     def to_hdf(self, path, index=False, columns=None, file_type="distribute"):
@@ -1475,18 +1475,28 @@ class DataFrame(UserDict):
         file_type: str (single | distribute)
             Default: distribute
             Whether to save to a single file or distribute across Locales
-
+        Returns
+        -------
+        None
+        Raises
+        ------
+        RuntimeError
+            Raised if a server-side error is thrown saving the pdarray
         Notes
         -----
         This method saves one file per locale of the arkouda server. All
         files are prefixed by the path argument and suffixed by their
         locale number.
+        See Also
+        ---------
+        to_parquet, load
         """
         from arkouda.io import to_hdf
+
         data = self._prep_data(index=index, columns=columns)
         to_hdf(data, prefix_path=path, file_type=file_type)
 
-    def to_parquet(self, path, index=False, columns=None):
+    def to_parquet(self, path, index=False, columns=None, compression: Optional[str] = None):
         """
         Save DataFrame to disk as parquet, preserving column names.
 
@@ -1498,25 +1508,43 @@ class DataFrame(UserDict):
             If True, save the index column. By default, do not save the index.
         columns: List
             List of columns to include in the file. If None, writes out all columns
-        file_type: str (single | distribute)
-            Default: distribute
-            Whether to save to a single file or distribute across Locales
-
+        compression : str (Optional)
+            Default None
+            Provide the compression type to use when writing the file.
+            Supported values: snappy, gzip, brotli, zstd, lz4
+        Returns
+        -------
+        None
+        Raises
+        ------
+        RuntimeError
+            Raised if a server-side error is thrown saving the pdarray
         Notes
         -----
         This method saves one file per locale of the arkouda server. All
         files are prefixed by the path argument and suffixed by their
         locale number.
+        See Also
+        ---------
+        to_hdf, load
         """
         from arkouda.io import to_parquet
-        data = self._prep_data(index=index, columns=columns)
-        to_parquet(data, prefix_path=path)
 
-    def save(self, path, index=False, columns=None, file_format="HDF5"):
+        data = self._prep_data(index=index, columns=columns)
+        to_parquet(data, prefix_path=path, compression=compression)
+
+    def save(
+        self,
+        path,
+        index=False,
+        columns=None,
+        file_format="HDF5",
+        file_type="distribute",
+        compression: Optional[str] = None,
+    ):
         """
         DEPRECATED
         Save DataFrame to disk, preserving column names.
-
         Parameters
         ----------
         path : str
@@ -1527,27 +1555,34 @@ class DataFrame(UserDict):
             List of columns to include in the file. If None, writes out all columns
         file_format: str
             'HDF5' or 'Parquet'. Defaults to 'HDF5'
-
+        file_type: str
+            ("single" | "distribute")
+            Defaults to distribute.
+            If single, will right a single file to locale 0
+        compression: str (Optional)
+            (None | "snappy" | "gzip" | "brotli" | "zstd" | "lz4")
+            Compression type. Only used for Parquet
         Notes
         -----
         This method saves one file per locale of the arkouda server. All
         files are prefixed by the path argument and suffixed by their
         locale number.
+        See Also
+        --------
+        to_parquet, to_hdf
         """
         warn(
             "ak.DataFrame.save has been deprecated. "
             "Please use ak.DataFrame.to_hdf or ak.DataFrame.to_parquet",
             DeprecationWarning,
         )
-        # if no columns are stored, we will save all columns
-        if columns is None:
-            data = self.data
-        else:
-            data = {c: self.data[c] for c in columns}
 
-        if index:
-            data["Index"] = self.index
-        save_all(data, prefix_path=path, file_format=file_format)
+        if file_format.lower() == "hdf5":
+            return self.to_hdf(path, index=index, columns=columns, file_type=file_type)
+        elif file_format.lower() == "parquet":
+            return self.to_parquet(path, index=index, columns=columns, compression=compression)
+        else:
+            raise ValueError("Valid file types are HDF5 or Parquet")
 
     @classmethod
     def load(cls, prefix_path, file_format="INFER"):

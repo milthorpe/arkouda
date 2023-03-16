@@ -22,7 +22,8 @@ module ReductionMsg
     private config const lBins = 2**25 * numLocales;
 
     private config const logLevel = ServerConfig.logLevel;
-    const rmLogger = new Logger(logLevel);
+    private config const logChannel = ServerConfig.logChannel;
+    const rmLogger = new Logger(logLevel, logChannel);
 
     // these functions take an array and produce a scalar
     // parse and respond to reduction message
@@ -776,16 +777,21 @@ module ReductionMsg
     proc segMean(values:[] ?t, segments:[?D] int, skipNan=false): [D] real throws {
       var res: [D] real;
       if (D.size == 0) { return res; }
+      // convert to real early to avoid int overflow
+      overMemLimit(numBytes(real) * values.size);
+      var real_values = values: real;
       var sums;
       var counts;
-      if isRealType(t) && skipNan {
-        // calculate sum and counts with nan values replaced with 0.0
-        var arrCopy = [elem in values] if isnan(elem) then 0.0 else elem;
+      if skipNan {
+        // first verify that we can make a copy of real_values
+        overMemLimit(numBytes(real) * real_values.size);
+        // calculate sum and counts with nan real_values replaced with 0.0
+        var arrCopy = [elem in real_values] if isnan(elem) then 0.0 else elem;
         sums = segSum(arrCopy, segments);
-        counts = segCount(segments, values.size) - nanCounts(values, segments);
+        counts = segCount(segments, real_values.size) - nanCounts(real_values, segments);
       } else {
-        sums = segSum(values, segments);
-        counts = segCount(segments, values.size);
+        sums = segSum(real_values, segments);
+        counts = segCount(segments, real_values.size);
       }
       forall (r, s, c) in zip(res, sums, counts) {
         if (c > 0) {

@@ -1,5 +1,6 @@
 import glob
 import os
+import pandas as pd
 import tempfile
 
 import numpy as np
@@ -9,6 +10,7 @@ from context import arkouda as ak
 from arkouda import io_util
 
 TYPES = ("int64", "uint64", "bool", "float64", "str")
+COMPRESSIONS = ["snappy", "gzip", "brotli", "zstd", "lz4"]
 SIZE = 100
 NUMFILES = 5
 verbose = True
@@ -37,6 +39,12 @@ class ParquetTest(ArkoudaTest):
             with tempfile.TemporaryDirectory(dir=ParquetTest.par_test_base_tmp) as tmp_dirname:
                 ak_arr.to_parquet(f"{tmp_dirname}/pq_testcorrect", "my-dset")
                 pq_arr = ak.read_parquet(f"{tmp_dirname}/pq_testcorrect*", "my-dset")
+                self.assertListEqual(ak_arr.to_list(), pq_arr.to_list())
+
+            # verify generic read
+            with tempfile.TemporaryDirectory(dir=ParquetTest.par_test_base_tmp) as tmp_dirname:
+                ak_arr.to_parquet(f"{tmp_dirname}/pq_testcorrect", "my-dset")
+                pq_arr = ak.read(f"{tmp_dirname}/pq_testcorrect*", "my-dset")
                 self.assertListEqual(ak_arr.to_list(), pq_arr.to_list())
 
     def test_multi_file(self):
@@ -169,6 +177,34 @@ class ParquetTest(ArkoudaTest):
                 pq_arr = ak.read_parquet(f"{tmp_dirname}/pq_testcorrect*", "my-dset")
 
                 self.assertListEqual(ak_arr.to_list(), pq_arr.to_list())
+
+    def test_compression(self):
+        a = ak.arange(150)
+
+        for comp in COMPRESSIONS:
+            with tempfile.TemporaryDirectory(dir=ParquetTest.par_test_base_tmp) as tmp_dirname:
+                # write with the selected compression
+                a.to_parquet(f"{tmp_dirname}/compress_test", compression=comp)
+
+                # ensure read functions
+                rd_arr = ak.read_parquet(f"{tmp_dirname}/compress_test*", "array")
+
+                # validate the list read out matches the array used to write
+                self.assertListEqual(rd_arr.to_list(), a.to_list())
+
+    def test_gzip_nan_rd(self):
+        # create pandas dataframe
+        pdf = pd.DataFrame({
+            'all_nan': np.array([np.nan, np.nan, np.nan, np.nan]),
+            'some_nan': np.array([3.14, np.nan, 7.12, 4.44])
+        })
+
+        with tempfile.TemporaryDirectory(dir=ParquetTest.par_test_base_tmp) as tmp_dirname:
+            pdf.to_parquet(f"{tmp_dirname}/gzip_pq", engine="pyarrow", compression="gzip")
+
+            ak_data = ak.read_parquet(f"{tmp_dirname}/gzip_pq")
+            rd_df = ak.DataFrame(ak_data)
+            self.assertTrue(pdf.equals(rd_df.to_pandas()))
 
     @pytest.mark.optional_parquet
     def test_against_standard_files(self):

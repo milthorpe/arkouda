@@ -9,9 +9,11 @@ module CastMsg {
   use ServerErrorStrings;
   use ServerConfig;
   use Cast;
+  use BigInteger;
 
   private config const logLevel = ServerConfig.logLevel;
-  const castLogger = new Logger(logLevel);
+  private config const logChannel = ServerConfig.logChannel;
+  const castLogger = new Logger(logLevel, logChannel);
 
   proc castMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
     param pn = Reflection.getRoutineName();
@@ -43,6 +45,9 @@ module CastMsg {
             }
             when (DType.Int64, "uint64") {
               return new MsgTuple(castGenSymEntry(gse, st, int, uint), MsgType.NORMAL);
+            }
+            when (DType.Int64, "bigint") {
+                return new MsgTuple(castGenSymEntryToBigInt(gse, st, int), MsgType.NORMAL);
             }
             when (DType.UInt8, "int64") {
                 return new MsgTuple(castGenSymEntry(gse, st, uint(8), int), MsgType.NORMAL);        
@@ -80,6 +85,9 @@ module CastMsg {
             when (DType.UInt64, "string") {
                 return new MsgTuple(castGenSymEntryToString(gse, st, uint), MsgType.NORMAL);
             }
+            when (DType.UInt64, "bigint") {
+                return new MsgTuple(castGenSymEntryToBigInt(gse, st, uint), MsgType.NORMAL);
+            }
             when (DType.Float64, "int64") {
                 return new MsgTuple(castGenSymEntry(gse, st, real, int), MsgType.NORMAL);                  
             }
@@ -109,12 +117,27 @@ module CastMsg {
             }
             when (DType.Bool, "float64") {
                 return new MsgTuple(castGenSymEntry(gse, st, bool, real), MsgType.NORMAL);
-            } 
+            }
             when (DType.Bool, "bool") {
                 return new MsgTuple(castGenSymEntry(gse, st, bool, bool), MsgType.NORMAL);
             }
             when (DType.Bool, "str") {
                 return new MsgTuple(castGenSymEntryToString(gse, st, bool), MsgType.NORMAL);
+            }
+            when (DType.Bool, "bigint") {
+                return new MsgTuple(castGenSymEntryToBigInt(gse, st, bool), MsgType.NORMAL);
+            }
+            when (DType.BigInt, "bigint") {
+                return new MsgTuple(castGenSymEntryToBigInt(gse, st, bigint), MsgType.NORMAL);
+            }
+            when (DType.BigInt, "uint64") {
+                return new MsgTuple(castGenSymEntry(gse, st, bigint, uint), MsgType.NORMAL);
+            }
+            when (DType.BigInt, "int64") {
+                return new MsgTuple(castGenSymEntry(gse, st, bigint, int), MsgType.NORMAL);
+            }
+            when (DType.BigInt, "str") {
+                return new MsgTuple(castGenSymEntryToString(gse, st, bigint), MsgType.NORMAL);
             }
             otherwise {
                 var errorMsg = notImplementedError(pn,gse.dtype:string,":",targetDtype);
@@ -141,6 +164,9 @@ module CastMsg {
               }
               when "bool" {
                   return new MsgTuple(castStringToSymEntry(strings, st, bool, errors), MsgType.NORMAL);
+              }
+              when "bigint" {
+                  return new MsgTuple(castStringToBigInt(strings, st, errors), MsgType.NORMAL);
               }
               otherwise {
                  var errorMsg = notImplementedError(pn,"str",":",targetDtype);

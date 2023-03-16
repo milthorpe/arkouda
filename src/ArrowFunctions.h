@@ -10,6 +10,8 @@
 #include <parquet/arrow/writer.h>
 #include <parquet/column_reader.h>
 #include <parquet/api/writer.h>
+#include <cmath>
+#include <queue>
 extern "C" {
 #endif
 
@@ -23,6 +25,13 @@ extern "C" {
 #define ARROWTIMESTAMP ARROWINT64
 #define ARROWSTRING 6
 #define ARROWERROR -1
+
+// compression mappings
+#define SNAPPY_COMP 1
+#define GZIP_COMP 2
+#define BROTLI_COMP 3
+#define ZSTD_COMP 4
+#define LZ4_COMP 5
 
   // Each C++ function contains the actual implementation of the
   // functionality, and there is a corresponding C function that
@@ -51,34 +60,44 @@ extern "C" {
 
   int cpp_writeColumnToParquet(const char* filename, void* chpl_arr,
                                int64_t colnum, const char* dsetname, int64_t numelems,
-                               int64_t rowGroupSize, int64_t dtype, bool compressed,
+                               int64_t rowGroupSize, int64_t dtype, int64_t compression,
                                char** errMsg);
   int c_writeColumnToParquet(const char* filename, void* chpl_arr,
                              int64_t colnum, const char* dsetname, int64_t numelems,
-                             int64_t rowGroupSize, int64_t dtype, bool compressed, char** errMsg);
+                             int64_t rowGroupSize, int64_t dtype, int64_t compression, char** errMsg);
 
   int c_writeStrColumnToParquet(const char* filename, void* chpl_arr, void* chpl_offsets,
                                 const char* dsetname, int64_t numelems,
-                                int64_t rowGroupSize, int64_t dtype, bool compressed,
+                                int64_t rowGroupSize, int64_t dtype, int64_t compression,
                                 char** errMsg);
   int cpp_writeStrColumnToParquet(const char* filename, void* chpl_arr, void* chpl_offsets,
                                   const char* dsetname, int64_t numelems,
-                                  int64_t rowGroupSize, int64_t dtype, bool compressed,
+                                  int64_t rowGroupSize, int64_t dtype, int64_t compression,
                                   char** errMsg);
   
   int c_createEmptyParquetFile(const char* filename, const char* dsetname, int64_t dtype,
-                               bool compressed, char** errMsg);
+                               int64_t compression, char** errMsg);
   int cpp_createEmptyParquetFile(const char* filename, const char* dsetname, int64_t dtype,
-                                 bool compressed, char** errMsg);
+                                 int64_t compression, char** errMsg);
   
   int c_appendColumnToParquet(const char* filename, void* chpl_arr,
                               const char* dsetname, int64_t numelems,
-                              int64_t dtype, bool compressed,
+                              int64_t dtype, int64_t compression,
                               char** errMsg);
   int cpp_appendColumnToParquet(const char* filename, void* chpl_arr,
                                 const char* dsetname, int64_t numelems,
-                                int64_t dtype, bool compressed,
+                                int64_t dtype, int64_t compression,
                                 char** errMsg);
+  
+  int c_writeMultiColToParquet(const char* filename, void* column_names, 
+                                void** ptr_arr, void* datatypes,
+                                int64_t colnum, int64_t numelems, int64_t rowGroupSize,
+                                int64_t compression, char** errMsg);
+
+  int cpp_writeMultiColToParquet(const char* filename, void* column_names, 
+                                  void** ptr_arr, void* datatypes,
+                                  int64_t colnum, int64_t numelems, int64_t rowGroupSize,
+                                  int64_t compression, char** errMsg);
     
   const char* c_getVersionInfo(void);
   const char* cpp_getVersionInfo(void);

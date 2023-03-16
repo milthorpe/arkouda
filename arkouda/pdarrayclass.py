@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import builtins
-from typing import List, Sequence, Union, cast
-from warnings import warn
+import json
+from typing import List, Optional, Sequence, Union, cast
 
 import numpy as np  # type: ignore
 from typeguard import typechecked
 
 from arkouda.client import generic_msg
-from arkouda.dtypes import NUMBER_FORMAT_STRINGS, DTypes
+from arkouda.dtypes import NUMBER_FORMAT_STRINGS, DTypes, bigint
 from arkouda.dtypes import bool as akbool
 from arkouda.dtypes import bool as npbool
 from arkouda.dtypes import dtype, get_server_byteorder
@@ -95,6 +95,9 @@ def parse_single_value(msg: str) -> object:
 
     dtname, value = msg.split(maxsplit=1)
     mydtype = dtype(dtname)
+    if mydtype == bigint:
+        # we have to strip off quotes
+        return int(value[1:-1])
     if mydtype == npbool:
         if value == "True":
             return mydtype.type(True)
@@ -161,7 +164,7 @@ class pdarray:
             "**",
         ]
     )
-    OpEqOps = frozenset(["+=", "-=", "*=", "/=", "//=", "&=", "|=", "^=", "<<=", ">>=", "**="])
+    OpEqOps = frozenset(["+=", "-=", "*=", "/=", "%=", "//=", "&=", "|=", "^=", "<<=", ">>=", "**="])
     objtype = "pdarray"
 
     __array_priority__ = 1000
@@ -169,7 +172,7 @@ class pdarray:
     def __init__(
         self,
         name: str,
-        mydtype: np.dtype,
+        mydtype: Union[np.dtype, str],
         size: int_scalars,
         ndim: int_scalars,
         shape: Sequence[int],
@@ -280,19 +283,22 @@ class pdarray:
             repMsg = generic_msg(cmd="binopvv", args={"op": op, "a": self, "b": other})
             return create_pdarray(repMsg)
         # pdarray binop scalar
-        if np.can_cast(other, self.dtype):
+        # If scalar cannot be safely cast, server will infer the return dtype
+        dt = resolve_scalar_dtype(other)
+        if self.dtype != bigint and np.can_cast(other, self.dtype):
             # If scalar can be losslessly cast to array dtype,
             # do the cast so that return array will have same dtype
             dt = self.dtype.name
             other = self.dtype.type(other)
         else:
-            # If scalar cannot be safely cast, server will infer the return dtype
-            dt = resolve_scalar_dtype(other)
+            # see if other is a bigint
+            if isSupportedInt(other) and other >= 2**64:
+                dt = bigint.name
         if dt not in DTypes:
             raise TypeError(f"Unhandled scalar type: {other} ({type(other)})")
         repMsg = generic_msg(
             cmd="binopvs",
-            args={"op": op, "a": self, "dtype": dt, "value": NUMBER_FORMAT_STRINGS[dt].format(other)},
+            args={"op": op, "a": self, "dtype": dt, "value": other},
         )
         return create_pdarray(repMsg)
 
@@ -326,19 +332,22 @@ class pdarray:
         if op not in self.BinOps:
             raise ValueError(f"bad operator {op}")
         # pdarray binop scalar
-        if np.can_cast(other, self.dtype):
+        # If scalar cannot be safely cast, server will infer the return dtype
+        dt = resolve_scalar_dtype(other)
+        if self.dtype != bigint and np.can_cast(other, self.dtype):
             # If scalar can be losslessly cast to array dtype,
             # do the cast so that return array will have same dtype
             dt = self.dtype.name
             other = self.dtype.type(other)
         else:
-            # If scalar cannot be safely cast, server will infer the return dtype
-            dt = resolve_scalar_dtype(other)
+            # see if other is a bigint
+            if isSupportedInt(other) and other >= 2**64:
+                dt = bigint.name
         if dt not in DTypes:
             raise TypeError(f"Unhandled scalar type: {other} ({type(other)})")
         repMsg = generic_msg(
             cmd="binopsv",
-            args={"op": op, "dtype": dt, "value": NUMBER_FORMAT_STRINGS[dt].format(other), "a": self},
+            args={"op": op, "dtype": dt, "value": other, "a": self},
         )
         return create_pdarray(repMsg)
 
@@ -502,6 +511,10 @@ class pdarray:
     # overload /= pdarray, other can be {pdarray, int, float}
     def __itruediv__(self, other):
         return self.opeq(other, "/=")
+
+    # overload %= pdarray, other can be {pdarray, int, float}
+    def __imod__(self, other):
+        return self.opeq(other, "%=")
 
     # overload //= pdarray, other can be {pdarray, int, float}
     def __ifloordiv__(self, other):
@@ -1042,6 +1055,80 @@ class pdarray:
 
         return akcast(self, dtype)
 
+    def slice_bits(self, low, high) -> pdarray:
+        """
+        Returns a pdarray containing only bits from low to high of self.
+
+        This is zero indexed and inclusive on both ends, so slicing the bottom 64 bits is
+        pda.slice_bits(0, 63)
+
+        Parameters
+        __________
+        low: int
+            The lowest bit included in the slice (inclusive)
+            zero indexed, so the first bit is 0
+        high: int
+            The highest bit included in the slice (inclusive)
+
+        Returns
+        -------
+        pdarray
+            A new pdarray containing the bits of self from low to high
+
+        Raises
+        ------
+        RuntimeError
+            Raised if there is a server-side error thrown
+
+        Examples
+        --------
+        >>> p = ak.array([2**65 + (2**64 - 1)])
+        >>> bin(p[0])
+        '0b101111111111111111111111111111111111111111111111111111111111111111'
+
+        >>> bin(p.slice_bits(64, 65)[0])
+        '0b10'
+        """
+        if low > high:
+            raise ValueError("low must not exceed high")
+        return (self >> low) % 2 ** (high - low + 1)
+
+    @typechecked()
+    def bigint_to_uint_arrays(self) -> List[pdarray]:
+        """
+        Creates a list of uint pdarrays from a bigint pdarray.
+        The first item in return will be the highest 64 bits of the
+        bigint pdarray and the last item will be the lowest 64 bits.
+
+        Returns
+        -------
+        List[pdarrays]
+            A list of uint pdarrays where:
+            The first item in return will be the highest 64 bits of the
+            bigint pdarray and the last item will be the lowest 64 bits.
+
+        Raises
+        ------
+        RuntimeError
+            Raised if there is a server-side error thrown
+
+        See Also
+        --------
+        pdarraycreation.bigint_from_uint_arrays
+
+        Examples
+        --------
+        >>> a = ak.arange(2**64, 2**64 + 5)
+        >>> a
+        array(["18446744073709551616" "18446744073709551617" "18446744073709551618"
+        "18446744073709551619" "18446744073709551620"])
+
+        >>> a.bigint_to_uint_arrays()
+        [array([1 1 1 1 1]), array([0 1 2 3 4])]
+        """
+        ret_list = json.loads(generic_msg(cmd="bigint_to_uint_list", args={"array": self}))
+        return list(reversed([create_pdarray(a) for a in ret_list]))
+
     def reshape(self, *shape, order="row_major"):
         """
         Gives a new shape to an array without changing its data.
@@ -1115,6 +1202,13 @@ class pdarray:
         """
         from arkouda.client import maxTransferBytes
 
+        dt = dtype(self.dtype)
+
+        if dt == bigint:
+            # convert uint pdarrays into object ndarrays and recombine
+            arrs = [n.to_ndarray().astype("O") for n in self.bigint_to_uint_arrays()]
+            return builtins.sum(n << (64 * (len(arrs) - i - 1)) for i, n in enumerate(arrs))
+
         # Total number of bytes in the array data
         arraybytes = self.size * self.dtype.itemsize
         # Guard against overflowing client memory
@@ -1134,7 +1228,6 @@ class pdarray:
             )
         # The server sends us native-endian data so we need to account for
         # that. If the view is readonly, copy so the np array is mutable
-        dt = np.dtype(self.dtype)
         if get_server_byteorder() == "big":
             dt = dt.newbyteorder(">")
         else:
@@ -1247,22 +1340,18 @@ class pdarray:
         return cuda.to_device(self.to_ndarray())
 
     @typechecked
-    def save(
+    def to_parquet(
         self,
         prefix_path: str,
         dataset: str = "array",
         mode: str = "truncate",
-        compressed: bool = False,
-        file_format: str = "HDF5",
-        file_type: str = "distribute",
+        compression: Optional[str] = None,
     ) -> str:
         """
-        DEPRECATED
-        Save the pdarray to HDF5 or Parquet. The result is a collection of files,
+        Save the pdarray to Parquet. The result is a collection of files,
         one file per locale of the arkouda server, where each filename starts
         with prefix_path. Each locale saves its chunk of the array to its
         corresponding file.
-
         Parameters
         ----------
         prefix_path : str
@@ -1272,121 +1361,40 @@ class pdarray:
         mode : str {'truncate' | 'append'}
             By default, truncate (overwrite) output files, if they exist.
             If 'append', attempt to create new dataset in existing files.
-        compressed : bool
-            Defaults to False. When True, files will be written with Snappy compression
-            and RLE bit packing. This is currently only supported on Parquet files and will
-            not impact the generated files when writing HDF5 files.
-        file_format : str {'HDF5', 'Parquet'}
-            By default, saved files will be written to the HDF5 file format. If
-            'Parquet', the files will be written to the Parquet file format. This
-            is case insensitive.
-        file_type: str ("single" | "distribute")
-            Default: "distribute"
-            When set to single, dataset is written to a single file.
-            When distribute, dataset is written on a file per locale.
-            This is only supported by HDF5 files and will have no impact of Parquet Files.
-
+        compression : str (Optional)
+            (None | "snappy" | "gzip" | "brotli" | "zstd" | "lz4")
+            Sets the compression type used with Parquet files
         Returns
         -------
         string message indicating result of save operation
-
         Raises
         ------
         RuntimeError
             Raised if a server-side error is thrown saving the pdarray
-        ValueError
-            Raised if there is an error in parsing the prefix path pointing to
-            file write location or if the mode parameter is neither truncate
-            nor append
-        TypeError
-            Raised if any one of the prefix_path, dataset, or mode parameters
-            is not a string
-
-        See Also
-        --------
-        save_all, load, read
-
         Notes
         -----
-        The prefix_path must be visible to the arkouda server and the user must
+        - The prefix_path must be visible to the arkouda server and the user must
         have write permission.
-
-        Output files have names of the form ``<prefix_path>_LOCALE<i>``, where ``<i>``
-        ranges from 0 to ``numLocales``. If any of the output files already exist and
+        - Output files have names of the form ``<prefix_path>_LOCALE<i>``, where ``<i>``
+        ranges from 0 to ``numLocales`` for `file_type='distribute'`.
+        - 'append' write mode is supported, but is not efficient.
+        - If any of the output files already exist and
         the mode is 'truncate', they will be overwritten. If the mode is 'append'
         and the number of output files is less than the number of locales or a
         dataset with the same name already exists, a ``RuntimeError`` will result.
-
-        Previously all files saved in Parquet format were saved with a ``.parquet`` file extension.
-        This will require you to use load as if you saved the file with the extension. Try this if
-        an older file is not being found.
-
-        Any file extension can be used.The file I/O does not rely on the extension to
+        - Any file extension can be used.The file I/O does not rely on the extension to
         determine the file format.
-
         Examples
         --------
         >>> a = ak.arange(25)
-
         >>> # Saving without an extension
-        >>> a.save('path/prefix', dataset='array')
+        >>> a.to_parquet('path/prefix', dataset='array')
         Saves the array to numLocales HDF5 files with the name ``cwd/path/name_prefix_LOCALE####``
-
         >>> # Saving with an extension (HDF5)
-        >>> a.save('path/prefix.h5', dataset='array')
+        >>> a.to_parqet('path/prefix.parquet', dataset='array')
         Saves the array to numLocales HDF5 files with the name
-        ``cwd/path/name_prefix_LOCALE####.h5`` where #### is replaced by each locale number
-
-        >>> # Saving with an extension (Parquet)
-        >>> a.save('path/prefix.parquet', dataset='array', file_format='Parquet')
-        Saves the array in numLocales Parquet files with the name
         ``cwd/path/name_prefix_LOCALE####.parquet`` where #### is replaced by each locale number
         """
-        warn(
-            "ak.pdarray.save has been deprecated. Please use ak.pdarray.to_parquet or ak.pdarray.to_hdf",
-            DeprecationWarning,
-        )
-        from arkouda.io import file_type_to_int, mode_str_to_int
-
-        if file_format.lower() == "hdf5":
-            return cast(
-                str,
-                generic_msg(
-                    cmd="tohdf",
-                    args={
-                        "values": self,
-                        "dset": dataset,
-                        "write_mode": mode_str_to_int(mode),
-                        "filename": prefix_path,
-                        "dtype": self.dtype,
-                        "objType": "pdarray",
-                        "file_format": file_type_to_int(file_type),
-                    },
-                ),
-            )
-        elif file_format.lower() == "parquet":
-            return cast(
-                str,
-                generic_msg(
-                    cmd="writeParquet",
-                    args={
-                        "values": self,
-                        "dset": dataset,
-                        "mode": mode_str_to_int(mode),
-                        "prefix": prefix_path,
-                        "dtype": self.dtype,
-                        "save_offsets": False,  # only used by strings
-                        "compressed": compressed,
-                    },
-                ),
-            )
-        else:
-            raise ValueError("Supported file formats are 'HDF5' and 'Parquet'")
-
-    @typechecked
-    def to_parquet(
-        self, prefix_path: str, dataset: str = "array", mode: str = "truncate", compressed: bool = False
-    ) -> str:
         from arkouda.io import mode_str_to_int
 
         return cast(
@@ -1399,7 +1407,7 @@ class pdarray:
                     "mode": mode_str_to_int(mode),
                     "prefix": prefix_path,
                     "dtype": self.dtype,
-                    "compressed": compressed,
+                    "compression": compression,
                 },
             ),
         )
@@ -1412,6 +1420,58 @@ class pdarray:
         mode: str = "truncate",
         file_type: str = "distribute",
     ) -> str:
+        """
+        Save the pdarray to HDF5.
+        The object can be saved to a collection of files or single file.
+        Parameters
+        ----------
+        prefix_path : str
+            Directory and filename prefix that all output files share
+        dataset : str
+            Name of the dataset to create in files (must not already exist)
+        mode : str {'truncate' | 'append'}
+            By default, truncate (overwrite) output files, if they exist.
+            If 'append', attempt to create new dataset in existing files.
+        file_type: str ("single" | "distribute")
+            Default: "distribute"
+            When set to single, dataset is written to a single file.
+            When distribute, dataset is written on a file per locale.
+            This is only supported by HDF5 files and will have no impact of Parquet Files.
+        Returns
+        -------
+        string message indicating result of save operation
+        Raises
+        -------
+        RuntimeError
+            Raised if a server-side error is thrown saving the pdarray
+        Notes
+        -----
+        - The prefix_path must be visible to the arkouda server and the user must
+        have write permission.
+        - Output files have names of the form ``<prefix_path>_LOCALE<i>``, where ``<i>``
+        ranges from 0 to ``numLocales`` for `file_type='distribute'`. Otherwise,
+        the file name will be `prefix_path`.
+        - If any of the output files already exist and
+        the mode is 'truncate', they will be overwritten. If the mode is 'append'
+        and the number of output files is less than the number of locales or a
+        dataset with the same name already exists, a ``RuntimeError`` will result.
+        - Any file extension can be used.The file I/O does not rely on the extension to
+        determine the file format.
+        Examples
+        --------
+        >>> a = ak.arange(25)
+        >>> # Saving without an extension
+        >>> a.to_hdf('path/prefix', dataset='array')
+        Saves the array to numLocales HDF5 files with the name ``cwd/path/name_prefix_LOCALE####``
+        >>> # Saving with an extension (HDF5)
+        >>> a.to_hdf('path/prefix.h5', dataset='array')
+        Saves the array to numLocales HDF5 files with the name
+        ``cwd/path/name_prefix_LOCALE####.h5`` where #### is replaced by each locale number
+        >>> # Saving to a single file
+        >>> a.to_hdf('path/prefix.hdf5', dataset='array', file_type='single')
+        Saves the array in to single hdf5 file on the root node.
+        ``cwd/path/name_prefix.hdf5``
+        """
         from arkouda.io import file_type_to_int, mode_str_to_int
 
         return cast(
@@ -1430,120 +1490,46 @@ class pdarray:
             ),
         )
 
-    @typechecked
-    def save_parquet(
+    def save(
         self,
         prefix_path: str,
         dataset: str = "array",
         mode: str = "truncate",
-        compressed: bool = False,
-    ) -> str:
-        """
-        DEPRECATED
-        Save the pdarray to Parquet. The result is a collection of Parquet files,
-        one file per locale of the arkouda server, where each filename starts
-        with prefix_path. Each locale saves its chunk of the array to its
-        corresponding file.
-
-        Parameters
-        ----------
-        prefix_path : str
-            Directory and filename prefix that all output files share
-        dataset : str
-            Name of the dataset to create in Parquet files (must not already exist)
-        mode : str {'truncate', 'append'}
-            By default, truncate (overwrite) output files, if they exist.
-        compressed : bool
-            By default, write without Snappy compression and RLE encoding.
-
-        Returns
-        -------
-        string message indicating result of save operation
-
-        Raises
-        ------
-        RuntimeError
-            Raised if a server-side error is thrown saving the pdarray
-        ValueError
-            Raised if there is an error in parsing the prefix path pointing to
-            file write location or if the mode parameter is neither truncate
-            nor append
-        TypeError
-            Raised if any one of the prefix_path, dataset, or mode parameters
-            is not a string
-
-        See Also
-        --------
-        save, save_all, load, read
-
-        Notes
-        -----
-        The prefix_path must be visible to the arkouda server and the user must
-        have write permission.
-
-        Output files have names of the form ``<prefix_path>_LOCALE<i>.parquet``, where ``<i>``
-        ranges from 0 to ``numLocales``. If any of the output files already exist and
-        the mode is 'truncate', they will be overwritten. If the mode is 'append'
-        and the number of output files is less than the number of locales or a
-        dataset with the same name already exists, a ``RuntimeError`` will result.
-
-        Examples
-        --------
-        >>> a = ak.arange(0, 100, 1)
-        >>> a.save_parquet('arkouda_range')
-
-        Array is saved in numLocales files with names like ``arkouda_range_LOCALE0000.parquet``
-
-        The array can be read back in as follows
-
-        >>> b = ak.read('arkouda_range')
-        >>> (a == b).all()
-        True
-        """
-        warn(
-            "ak.pdarray.save_parquet has been deprecated. Please use ak.pdarray.to_parquet",
-            DeprecationWarning,
-        )
-        return self.save(
-            prefix_path=prefix_path,
-            dataset=dataset,
-            mode=mode,
-            compressed=compressed,
-            file_format="Parquet",
-        )
-
-    @typechecked
-    def save_hdf(
-        self,
-        prefix_path: str,
-        dataset: str = "array",
-        mode: str = "truncate",
+        compression: Optional[str] = None,
+        file_format: str = "HDF5",
         file_type: str = "distribute",
     ) -> str:
         """
         DEPRECATED
-        Save the pdarray to HDF5. The result is a collection of HDF5 files,
+        Save the pdarray to HDF5 or Parquet. The result is a collection of files,
         one file per locale of the arkouda server, where each filename starts
-        with prefix_path. Each locale saves its chunk of the array to its
+        with prefix_path. HDF5 support single files, in which case the file name will
+        only be that provided. Each locale saves its chunk of the array to its
         corresponding file.
-
         Parameters
         ----------
         prefix_path : str
             Directory and filename prefix that all output files share
         dataset : str
-            Name of the dataset to create in HDF5 files (must not already exist)
-        mode : str {'truncate', 'append'}
+            Name of the dataset to create in files (must not already exist)
+        mode : str {'truncate' | 'append'}
             By default, truncate (overwrite) output files, if they exist.
-        file_type : str ("single" | "distribute")
-            Default: distribute
-            Single writes the dataset to a single file
-            Distribute writes the dataset to a file per locale
-
+            If 'append', attempt to create new dataset in existing files.
+        compression : str (Optional)
+            (None | "snappy" | "gzip" | "brotli" | "zstd" | "lz4")
+            Sets the compression type used with Parquet files
+        file_format : str {'HDF5', 'Parquet'}
+            By default, saved files will be written to the HDF5 file format. If
+            'Parquet', the files will be written to the Parquet file format. This
+            is case insensitive.
+        file_type: str ("single" | "distribute")
+            Default: "distribute"
+            When set to single, dataset is written to a single file.
+            When distribute, dataset is written on a file per locale.
+            This is only supported by HDF5 files and will have no impact of Parquet Files.
         Returns
         -------
         string message indicating result of save operation
-
         Raises
         ------
         RuntimeError
@@ -1555,47 +1541,52 @@ class pdarray:
         TypeError
             Raised if any one of the prefix_path, dataset, or mode parameters
             is not a string
-
         See Also
         --------
-        save, save_all, load, read
-
+        save_all, load, read, to_parquet, to_hdf
         Notes
         -----
         The prefix_path must be visible to the arkouda server and the user must
         have write permission.
-
         Output files have names of the form ``<prefix_path>_LOCALE<i>``, where ``<i>``
         ranges from 0 to ``numLocales``. If any of the output files already exist and
         the mode is 'truncate', they will be overwritten. If the mode is 'append'
         and the number of output files is less than the number of locales or a
         dataset with the same name already exists, a ``RuntimeError`` will result.
-
+        Previously all files saved in Parquet format were saved with a ``.parquet`` file extension.
+        This will require you to use load as if you saved the file with the extension. Try this if
+        an older file is not being found.
+        Any file extension can be used.The file I/O does not rely on the extension to
+        determine the file format.
         Examples
         --------
-        >>> a = ak.arange(0, 100, 1)
-        >>> a.save_hdf('arkouda_range')
-
-        Array is saved in numLocales files with names like ``arkouda_range_LOCALE0000``
-
-        The array can be read back in as follows
-
-        >>> b = ak.read('arkouda_range')
-        >>> (a == b).all()
-        True
+        >>> a = ak.arange(25)
+        >>> # Saving without an extension
+        >>> a.save('path/prefix', dataset='array')
+        Saves the array to numLocales HDF5 files with the name ``cwd/path/name_prefix_LOCALE####``
+        >>> # Saving with an extension (HDF5)
+        >>> a.save('path/prefix.h5', dataset='array')
+        Saves the array to numLocales HDF5 files with the name
+        ``cwd/path/name_prefix_LOCALE####.h5`` where #### is replaced by each locale number
+        >>> # Saving with an extension (Parquet)
+        >>> a.save('path/prefix.parquet', dataset='array', file_format='Parquet')
+        Saves the array in numLocales Parquet files with the name
+        ``cwd/path/name_prefix_LOCALE####.parquet`` where #### is replaced by each locale number
         """
+        from warnings import warn
         warn(
-            "ak.pdarray.save_hdf has been deprecated. Please use ak.pdarray.to_hdf",
+            "ak.pdarray.save has been deprecated. Please use ak.pdarray.to_parquet or ak.pdarray.to_hdf",
             DeprecationWarning,
         )
-        return self.save(
-            prefix_path=prefix_path,
-            dataset=dataset,
-            mode=mode,
-            compressed=False,
-            file_format="HDF5",
-            file_type=file_type,
-        )
+        if mode.lower() not in ["append", "truncate"]:
+            raise ValueError("Allowed modes are 'truncate' and 'append'")
+
+        if file_format.lower() == "hdf5":
+            return self.to_hdf(prefix_path, dataset=dataset, mode=mode, file_type=file_type)
+        elif file_format.lower() == "parquet":
+            return self.to_parquet(prefix_path, dataset=dataset, mode=mode, compression=compression)
+        else:
+            raise ValueError("Valid file types are HDF5 or Parquet")
 
     @typechecked
     def register(self, user_defined_name: str) -> pdarray:
@@ -1757,6 +1748,8 @@ class pdarray:
         elif self.dtype in (akint64, akuint64):
             # Integral pdarrays are their own grouping keys
             return [self]
+        elif self.dtype == bigint:
+            return self.bigint_to_uint_arrays()
         else:
             raise TypeError("Grouping is only supported on numeric data (integral types) and bools.")
 
@@ -1767,7 +1760,6 @@ class pdarray:
 #   only after:
 #       all values have been checked by python module and...
 #       server has created pdarray already before this is called
-#       server has created pdarray already befroe this is called
 @typechecked
 def create_pdarray(repMsg: str) -> pdarray:
     """
@@ -2659,7 +2651,7 @@ def rotl(x, rot) -> pdarray:
     >>> ak.rotl(A, A)
     array([0, 2, 8, 24, 64, 160, 384, 896, 2048, 4608])
     """
-    if isinstance(x, pdarray) and x.dtype in [akint64, akuint64]:
+    if isinstance(x, pdarray) and x.dtype in [akint64, akuint64, bigint]:
         if (isinstance(rot, pdarray) and rot.dtype in [akint64, akuint64]) or isSupportedInt(rot):
             return x._binop(rot, "<<<")
         else:
@@ -2697,7 +2689,7 @@ def rotr(x, rot) -> pdarray:
     >>> ak.rotr(1024 * A, A)
     array([0, 512, 512, 384, 256, 160, 96, 56, 32, 18])
     """
-    if isinstance(x, pdarray) and x.dtype in [akint64, akuint64]:
+    if isinstance(x, pdarray) and x.dtype in [akint64, akuint64, bigint]:
         if (isinstance(rot, pdarray) and rot.dtype in [akint64, akuint64]) or isSupportedInt(rot):
             return x._binop(rot, ">>>")
         else:
@@ -2753,7 +2745,7 @@ def power(pda: pdarray, pwr: Union[int, float, pdarray], where: Union[bool, pdar
         return pda
     else:
         exp = pda**pwr
-        return akwhere(where, exp, akcast(pda, dtype(exp)))
+        return akwhere(where, exp, akcast(pda, exp.dtype))
 
 
 @typechecked
