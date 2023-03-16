@@ -52,7 +52,6 @@ module CUBSum {
             proc this(lo: int, hi: int, N: int) {
                 var deviceId: int(32);
                 GetDevice(deviceId);
-                e.toDevice(deviceId);
                 var timer: Timer;
                 if logSumKernelTime {
                     timer.start();
