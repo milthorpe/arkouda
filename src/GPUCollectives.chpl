@@ -7,14 +7,14 @@ module GPUCollectives {
     extern proc gpuCommInitRank(numRanks: int(32), commId: c_void_ptr, rank: int(32)): c_void_ptr;
     extern proc gpuCommDestroy(comm: c_void_ptr);
 
-    extern proc gpuReduce_sum_int32(src: c_void_ptr, dst: c_void_ptr, N: c_size_t, root: c_int, comm: c_void_ptr);
-    extern proc gpuReduce_sum_int64(src: c_void_ptr, dst: c_void_ptr, N: c_size_t, root: c_int, comm: c_void_ptr);
-    extern proc gpuReduce_sum_float(src: c_void_ptr, dst: c_void_ptr, N: c_size_t, root: c_int, comm: c_void_ptr);
-    extern proc gpuReduce_sum_double(src: c_void_ptr, dst: c_void_ptr, N: c_size_t, root: c_int, comm: c_void_ptr);
-    extern proc gpuAllReduce_sum_int32(src: c_void_ptr, dst: c_void_ptr, N: c_size_t, comm: c_void_ptr);
-    extern proc gpuAllReduce_sum_int64(src: c_void_ptr, dst: c_void_ptr, N: c_size_t, comm: c_void_ptr);
-    extern proc gpuAllReduce_sum_float(src: c_void_ptr, dst: c_void_ptr, N: c_size_t, comm: c_void_ptr);
-    extern proc gpuAllReduce_sum_double(src: c_void_ptr, dst: c_void_ptr, N: c_size_t, comm: c_void_ptr);
+    extern proc gpuReduce_sum_int32(src: c_ptr(int(32)), dst: c_ptr(int(32)), N: c_size_t, root: c_int, comm: c_void_ptr);
+    extern proc gpuReduce_sum_int64(src: c_ptr(int(64)), dst: c_ptr(int(64)), N: c_size_t, root: c_int, comm: c_void_ptr);
+    extern proc gpuReduce_sum_float(src: c_ptr(real(32)), dst: c_ptr(real(32)), N: c_size_t, root: c_int, comm: c_void_ptr);
+    extern proc gpuReduce_sum_double(src: c_ptr(real(64)), dst: c_ptr(real(64)), N: c_size_t, root: c_int, comm: c_void_ptr);
+    extern proc gpuAllReduce_sum_int32(src: c_ptr(int(32)), dst: c_ptr(int(32)), N: c_size_t, comm: c_void_ptr);
+    extern proc gpuAllReduce_sum_int64(src: c_ptr(int(64)), dst: c_ptr(int(64)), N: c_size_t, comm: c_void_ptr);
+    extern proc gpuAllReduce_sum_float(src: c_ptr(real(32)), dst: c_ptr(real(32)), N: c_size_t, comm: c_void_ptr);
+    extern proc gpuAllReduce_sum_double(src: c_ptr(real(64)), dst: c_ptr(real(64)), N: c_size_t, comm: c_void_ptr);
 
     var comm: [0..#nGPUs] c_void_ptr;
 

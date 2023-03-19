@@ -27,22 +27,20 @@ module CUBHistogram {
         if t == int(32) {
             var upper = upper_bound + 1;
             cubHistogram_int32(devSamples, devHistogram.dPtr(), num_levels, lower_bound, upper, N);
-            if histogramReduceOnGPU && nGPUs > 1 then gpuAllReduce_sum_int32(devHistogram.dPtr(), devHistogram.dPtr(), num_levels: c_size_t, comm[deviceId]);
         } else if t == int(64) {
             var upper = upper_bound + 1;
             cubHistogram_int64(devSamples, devHistogram.dPtr(), num_levels, lower_bound, upper, N);
-            if histogramReduceOnGPU && nGPUs > 1 then gpuAllReduce_sum_int64(devHistogram.dPtr(), devHistogram.dPtr(), num_levels: c_size_t, comm[deviceId]);
         } else if t == real(32) {
             var upper = nextafterf(upper_bound, max(real(32)));
             cubHistogram_float(devSamples, devHistogram.dPtr(), num_levels, lower_bound, upper, N);
-            if histogramReduceOnGPU && nGPUs > 1 then gpuAllReduce_sum_float(devHistogram.dPtr(), devHistogram.dPtr(), num_levels: c_size_t, comm[deviceId]);
         } else if t == real(64) {
             var upper = nextafter(upper_bound, max(real(64)));
             cubHistogram_double(devSamples, devHistogram.dPtr(), num_levels, lower_bound, upper, N);
-            if histogramReduceOnGPU && nGPUs > 1 then gpuAllReduce_sum_double(devHistogram.dPtr(), devHistogram.dPtr(), num_levels: c_size_t, comm[deviceId]);
         }
         DeviceSynchronize();
         if histogramReduceOnGPU {
+            if histogramReduceOnGPU && nGPUs > 1 then gpuAllReduce_sum_int64(devHistogram.dPtr():c_ptr(int(64)), devHistogram.dPtr():c_ptr(int(64)), num_levels: c_size_t, comm[deviceId]);
+            DeviceSynchronize();
             if deviceId == 0 then devHistogram.fromDevice();
         } else {
             devHistogram.fromDevice();
@@ -102,7 +100,7 @@ module CUBHistogram {
                 cubHistogram(t, arr.dPtr(lo), deviceHistograms[deviceId], aMin, aMax, N, deviceId);
             }
         }
-        var tD = {0..#arr.a.size};
+        var tD = arr.a.domain.localSubdomain();
         var cubHistogramCallback = new Lambda();
         forall i in GPU(tD, cubHistogramCallback) {
             writeln("Should not reach this point!");

@@ -4,12 +4,12 @@
 void *gpuCommGetUniqueID(void);
 void *gpuCommInitRank(int num_ranks, void* comm_id, int rank);
 void gpuCommDestroy(void *comm_ptr);
-void gpuReduce_sum_int32(const void *sendbuff, void *recvbuff, size_t count, int root, void *comm_ptr);
-void gpuReduce_sum_int64(const void *sendbuff, void *recvbuff, size_t count, int root, void *comm_ptr);
-void gpuReduce_sum_float(const void *sendbuff, void *recvbuff, size_t count, int root, void *comm_ptr);
-void gpuReduce_sum_double(const void *sendbuff, void *recvbuff, size_t count, int root, void *comm_ptr);
-void gpuAllReduce_sum_int32(const void *sendbuff, void *recvbuff, size_t count, void *comm_ptr);
-void gpuAllReduce_sum_int64(const void *sendbuff, void *recvbuff, size_t count, void *comm_ptr);
-void gpuAllReduce_sum_float(const void *sendbuff, void *recvbuff, size_t count, void *comm_ptr);
-void gpuAllReduce_sum_double(const void *sendbuff, void *recvbuff, size_t count, void *comm_ptr);
+void gpuReduce_sum_int32(const int32_t *sendbuff, int32_t *recvbuff, size_t count, int root, void *comm_ptr);
+void gpuReduce_sum_int64(const int64_t *sendbuff, int64_t *recvbuff, size_t count, int root, void *comm_ptr);
+void gpuReduce_sum_float(const float *sendbuff, float *recvbuff, size_t count, int root, void *comm_ptr);
+void gpuReduce_sum_double(const double *sendbuff, double *recvbuff, size_t count, int root, void *comm_ptr);
+void gpuAllReduce_sum_int32(const int32_t *sendbuff, int32_t *recvbuff, size_t count, void *comm_ptr);
+void gpuAllReduce_sum_int64(const int64_t *sendbuff, int64_t *recvbuff, size_t count, void *comm_ptr);
+void gpuAllReduce_sum_float(const float *sendbuff, float *recvbuff, size_t count, void *comm_ptr);
+void gpuAllReduce_sum_double(const double *sendbuff, double *recvbuff, size_t count, void *comm_ptr);
 #endif

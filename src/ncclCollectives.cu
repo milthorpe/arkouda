@@ -30,35 +30,35 @@ void gpuCommDestroy(void *comm_ptr) {
   delete(comm);
 }
 
-void gpuReduce_sum_int32(const void *sendbuff, void *recvbuff, size_t count, int root, void *comm_ptr) {
+void gpuReduce_sum_int32(const int32_t *sendbuff, int32_t *recvbuff, size_t count, int root, void *comm_ptr) {
   NCCLCHECK(ncclReduce(sendbuff, recvbuff, count, ncclInt32, ncclSum, root, *(ncclComm_t*)comm_ptr, 0));
 }
 
-void gpuReduce_sum_in64(const void *sendbuff, void *recvbuff, size_t count, int root, void *comm_ptr) {
+void gpuReduce_sum_int64(const int64_t *sendbuff, int64_t *recvbuff, size_t count, int root, void *comm_ptr) {
   NCCLCHECK(ncclReduce(sendbuff, recvbuff, count, ncclInt64, ncclSum, root, *(ncclComm_t*)comm_ptr, 0));
 }
 
-void gpuReduce_sum_float(const void *sendbuff, void *recvbuff, size_t count, int root, void *comm_ptr) {
+void gpuReduce_sum_float(const float *sendbuff, float *recvbuff, size_t count, int root, void *comm_ptr) {
   NCCLCHECK(ncclReduce(sendbuff, recvbuff, count, ncclFloat, ncclSum, root, *(ncclComm_t*)comm_ptr, 0));
 }
 
-void gpuReduce_sum_double(const void *sendbuff, void *recvbuff, size_t count, int root, void *comm_ptr) {
+void gpuReduce_sum_double(const double *sendbuff, double *recvbuff, size_t count, int root, void *comm_ptr) {
   NCCLCHECK(ncclReduce(sendbuff, recvbuff, count, ncclDouble, ncclSum, root, *(ncclComm_t*)comm_ptr, 0));
 }
 
-void gpuAllReduce_sum_int32(const void *sendbuff, void *recvbuff, size_t count, void *comm_ptr) {
+void gpuAllReduce_sum_int32(const int32_t *sendbuff, int32_t *recvbuff, size_t count, void *comm_ptr) {
   NCCLCHECK(ncclAllReduce(sendbuff, recvbuff, count, ncclInt32, ncclSum, *(ncclComm_t*)comm_ptr, 0));
 }
 
-void gpuAllReduce_sum_in64(const void *sendbuff, void *recvbuff, size_t count, void *comm_ptr) {
+void gpuAllReduce_sum_int64(const int64_t *sendbuff, int64_t *recvbuff, size_t count, void *comm_ptr) {
   NCCLCHECK(ncclAllReduce(sendbuff, recvbuff, count, ncclInt64, ncclSum, *(ncclComm_t*)comm_ptr, 0));
 }
 
-void gpuAllReduce_sum_float(const void *sendbuff, void *recvbuff, size_t count, void *comm_ptr) {
+void gpuAllReduce_sum_float(const float *sendbuff, float *recvbuff, size_t count, void *comm_ptr) {
   NCCLCHECK(ncclAllReduce(sendbuff, recvbuff, count, ncclFloat, ncclSum, *(ncclComm_t*)comm_ptr, 0));
 }
 
-void gpuAllReduce_sum_double(const void *sendbuff, void *recvbuff, size_t count, void *comm_ptr) {
+void gpuAllReduce_sum_double(const double *sendbuff, double *recvbuff, size_t count, void *comm_ptr) {
   NCCLCHECK(ncclAllReduce(sendbuff, recvbuff, count, ncclDouble, ncclSum, *(ncclComm_t*)comm_ptr, 0));
 }
 }
