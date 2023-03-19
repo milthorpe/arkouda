@@ -14,7 +14,6 @@ module CUBHistogram {
     extern proc cubHistogram_float(samples: c_void_ptr, histogram: c_void_ptr, num_levels: int, lower_bound: real(32), upper_bound: real(32), N: int);
     extern proc cubHistogram_double(samples: c_void_ptr, histogram: c_void_ptr, num_levels: int, lower_bound: real(64), upper_bound: real(64), N: int);
 
-
     // Chapel doesn't seem to expose these common FP operations
     extern proc nextafterf(from: real(32), to: real(32)): real(32);
     extern proc nextafter(from: real(64), to: real(64)): real(64);
@@ -37,12 +36,12 @@ module CUBHistogram {
             var upper = nextafter(upper_bound, max(real(64)));
             cubHistogram_double(devSamples, devHistogram.dPtr(), num_levels, lower_bound, upper, N);
         }
-        DeviceSynchronize();
         if histogramReduceOnGPU {
             if histogramReduceOnGPU && nGPUs > 1 then gpuAllReduce_sum_int64(devHistogram.dPtr():c_ptr(int(64)), devHistogram.dPtr():c_ptr(int(64)), num_levels: c_size_t, comm[deviceId]);
             DeviceSynchronize();
             if deviceId == 0 then devHistogram.fromDevice();
         } else {
+            DeviceSynchronize();
             devHistogram.fromDevice();
         }
     }

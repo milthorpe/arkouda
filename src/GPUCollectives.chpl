@@ -11,6 +11,14 @@ module GPUCollectives {
     extern proc gpuReduce_sum_int64(src: c_ptr(int(64)), dst: c_ptr(int(64)), N: c_size_t, root: c_int, comm: c_void_ptr);
     extern proc gpuReduce_sum_float(src: c_ptr(real(32)), dst: c_ptr(real(32)), N: c_size_t, root: c_int, comm: c_void_ptr);
     extern proc gpuReduce_sum_double(src: c_ptr(real(64)), dst: c_ptr(real(64)), N: c_size_t, root: c_int, comm: c_void_ptr);
+    extern proc gpuReduce_min_int32(src: c_ptr(int(32)), dst: c_ptr(int(32)), N: c_size_t, root: c_int, comm: c_void_ptr);
+    extern proc gpuReduce_min_int64(src: c_ptr(int(64)), dst: c_ptr(int(64)), N: c_size_t, root: c_int, comm: c_void_ptr);
+    extern proc gpuReduce_min_float(src: c_ptr(real(32)), dst: c_ptr(real(32)), N: c_size_t, root: c_int, comm: c_void_ptr);
+    extern proc gpuReduce_min_double(src: c_ptr(real(64)), dst: c_ptr(real(64)), N: c_size_t, root: c_int, comm: c_void_ptr);
+    extern proc gpuReduce_max_int32(src: c_ptr(int(32)), dst: c_ptr(int(32)), N: c_size_t, root: c_int, comm: c_void_ptr);
+    extern proc gpuReduce_max_int64(src: c_ptr(int(64)), dst: c_ptr(int(64)), N: c_size_t, root: c_int, comm: c_void_ptr);
+    extern proc gpuReduce_max_float(src: c_ptr(real(32)), dst: c_ptr(real(32)), N: c_size_t, root: c_int, comm: c_void_ptr);
+    extern proc gpuReduce_max_double(src: c_ptr(real(64)), dst: c_ptr(real(64)), N: c_size_t, root: c_int, comm: c_void_ptr);
     extern proc gpuAllReduce_sum_int32(src: c_ptr(int(32)), dst: c_ptr(int(32)), N: c_size_t, comm: c_void_ptr);
     extern proc gpuAllReduce_sum_int64(src: c_ptr(int(64)), dst: c_ptr(int(64)), N: c_size_t, comm: c_void_ptr);
     extern proc gpuAllReduce_sum_float(src: c_ptr(real(32)), dst: c_ptr(real(32)), N: c_size_t, comm: c_void_ptr);
