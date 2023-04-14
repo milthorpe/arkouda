@@ -258,13 +258,13 @@ module CUBRadixSort {
         var devices = [deviceId in 0..#nGPUs] deviceId:int(32);
         var deviceBuffers: c_void_ptr;
         if t == int(32) {
-            deviceBuffers = cubSortCreateDeviceBuffers_int32(a.size, devices, devices.size: int(32));
+            deviceBuffers = createDeviceBuffers_int32(a.size, devices, devices.size: int(32));
         } else if t == int(64) {
-            deviceBuffers = cubSortCreateDeviceBuffers_int64(a.size, devices, devices.size: int(32));
+            deviceBuffers = createDeviceBuffers_int64(a.size, devices, devices.size: int(32));
         } else if t == real(32) {
-            deviceBuffers = cubSortCreateDeviceBuffers_float(a.size, devices, devices.size: int(32));
+            deviceBuffers = createDeviceBuffers_float(a.size, devices, devices.size: int(32));
         } else if t == real(64) {
-            deviceBuffers = cubSortCreateDeviceBuffers_double(a.size, devices, devices.size: int(32));
+            deviceBuffers = createDeviceBuffers_double(a.size, devices, devices.size: int(32));
         }
 
         //timer.stop();
