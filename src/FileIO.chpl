@@ -1,10 +1,8 @@
 
 
 module FileIO {
-    use IO;
     use GenSymIO;
     use FileSystem;
-    use Map;
     use Path;
     use Reflection;
     use Message;
@@ -13,21 +11,23 @@ module FileIO {
     use ServerErrors;
     use Sort;
 
+    use ArkoudaFileCompat;
+    use ArkoudaMapCompat;
+
     use ServerConfig, Logging, CommandMap;
     private config const logLevel = ServerConfig.logLevel;
     private config const logChannel = ServerConfig.logChannel;
     const fioLogger = new Logger(logLevel, logChannel);
     
-    enum FileType {HDF5, ARROW, PARQUET, UNKNOWN};
+    enum FileType {HDF5, ARROW, PARQUET, CSV, UNKNOWN};
 
     proc appendFile(filePath : string, line : string) throws {
         var writer;
         if exists(filePath) {
-            use ArkoudaFileCompat;
-            var aFile = open(filePath, iomode.rw);
-            writer = aFile.appendWriter();
+            var aFile = open(filePath, ioMode.rw);
+            writer = aFile.writer(region=aFile.size..);
         } else {
-            var aFile = open(filePath, iomode.cwr);
+            var aFile = open(filePath, ioMode.cwr);
             writer = aFile.writer();
         }
 
@@ -37,7 +37,7 @@ module FileIO {
     }
 
     proc writeToFile(filePath : string, line : string) throws {
-        var aFile = open(filePath, iomode.cwr);
+        var aFile = open(filePath, ioMode.cwr);
         var writer = aFile.writer();
 
         writer.writeln(line);
@@ -46,7 +46,7 @@ module FileIO {
     }
     
     proc writeLinesToFile(filePath : string, lines : string) throws {
-        var aFile = open(filePath, iomode.cwr);
+        var aFile = open(filePath, ioMode.cwr);
         var writer = aFile.writer();
 
         for line in lines {
@@ -57,8 +57,8 @@ module FileIO {
     }
 
     proc getLineFromFile(filePath : string, lineIndex : int=-1) : string throws {
-        var aFile = open(filePath, iomode.rw);
-        var lines = aFile.lines();
+        var aFile = open(filePath, ioMode.rw);
+        var lines = aFile.reader().lines();
         var line : string;
         var returnLine : string;
         var i = 1;
@@ -76,7 +76,7 @@ module FileIO {
     }
     
     proc getLineFromFile(path: string, match: string) throws {
-        var aFile = open(path, iomode.r);
+        var aFile = open(path, ioMode.r);
         var reader = aFile.reader();
         var returnLine: string;
 
@@ -87,16 +87,15 @@ module FileIO {
             }
         }
 
-        reader.flush();
         reader.close();
 
         return returnLine;
     }
 
     proc delimitedFileToMap(filePath : string, delimiter : string=',') : map {
-        var fileMap : map(keyType=string, valType=string, parSafe=false) = 
-                         new map(keyType=string,valType=string,parSafe=false);
-        var aFile = try! open(filePath, iomode.rw);
+        var fileMap : map(keyType=string, valType=string) = 
+                         new map(keyType=string,valType=string);
+        var aFile = try! open(filePath, ioMode.rw);
         var lines = try! aFile.lines();
         var line : string;
         for line in lines do {
@@ -191,6 +190,7 @@ module FileIO {
     const MAGIC_PARQUET:bytes = b"\x50\x41\x52\x31"; // 4 bytes "PAR1"
     const MAGIC_HDF5:bytes = b"\x89\x48\x44\x46\x0d\x0a\x1a\x0a"; // 8 bytes "\211HDF\r\n\032\n"
     const MAGIC_ARROW:bytes = b"\x41\x52\x52\x4F\x57\x31\x00\x00"; // 6 bytes "ARROW1" padded to 8 with nulls
+    const MAGIC_CSV:bytes = b"\x2a\x2a\x48\x45\x41\x44\x45\x52"; // 8 bytes "**HEADER"
 
     /* Determine FileType based on public File Magic for supported types
       :arg header: file header
@@ -207,6 +207,8 @@ module FileIO {
             t = FileType.HDF5;
         } else if (length >= 8 && MAGIC_ARROW == header.this(0..7)) {
             t = FileType.ARROW;
+        } else if (length >= 8 && MAGIC_CSV == header.this(0..7)) {
+          t = FileType.CSV;
         }
         return t;
     }
@@ -227,11 +229,11 @@ module FileIO {
     }
 
     proc getFirstEightBytesFromFile(path:string):bytes throws {
-        var f:file = open(path, iomode.r);
+        var f:file = open(path, ioMode.r);
         var reader = f.reader(kind=ionative);
         var header:bytes;
         if (reader.binary()) {
-          reader.readbytes(header, 8);
+          reader.bytesRead(header, 8);
         } else {
           throw getErrorWithContext(
                      msg="File reader was not in binary mode",
@@ -285,8 +287,11 @@ module FileIO {
         }
         when FileType.PARQUET {
           return new MsgTuple("Parquet", MsgType.NORMAL);
+        }
+        when FileType.CSV {
+          return new MsgTuple("CSV", MsgType.NORMAL);
         } otherwise {
-          var errorMsg = "Unsupported file type; Parquet and HDF5 are only supported formats";
+          var errorMsg = "Unsupported file type; Parquet, HDF5 and CSV are only supported formats";
           return new MsgTuple(errorMsg, MsgType.ERROR);
         }
       }
@@ -327,10 +332,57 @@ module FileIO {
         }
         when FileType.PARQUET {
           return executeCommand("lspq", msgArgs, st);
+        } when FileType.CSV {
+          return executeCommand("lscsv", msgArgs, st);
         } otherwise {
           var errorMsg = "Unsupported file type; Parquet and HDF5 are only supported formats";
           return new MsgTuple(errorMsg, MsgType.ERROR);
         }
       }
+    }
+
+    proc globExpansionMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
+      var nfiles = msgArgs.get("file_count").getIntValue();
+      var filelist: [0..#nfiles] string;
+      
+      // attempt to read file name list
+      try {
+          filelist = msgArgs.get("filenames").getList(nfiles);
+      } catch {
+          // limit length of file names to 2000 chars
+          var n: int = 1000;
+          var jsonfiles = msgArgs.getValueOf("filenames");
+          var files: string = if jsonfiles.size > 2*n then jsonfiles[0..#n]+'...'+jsonfiles[jsonfiles.size-n..#n] else jsonfiles;
+          var errorMsg = "Could not decode json filenames via tempfile (%i files: %s)".format(nfiles, files);
+          fioLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
+          return new MsgTuple(errorMsg, MsgType.ERROR);
+      }
+
+      var filedom = filelist.domain;
+      var filenames: [filedom] string;
+
+      if filelist.size == 1 {
+          if filelist[0].strip().size == 0 {
+              var errorMsg = "filelist was empty.";
+              fioLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
+              return new MsgTuple(errorMsg, MsgType.ERROR);
+          }
+          var tmp = glob(filelist[0]);
+          fioLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
+                                "glob expanded %s to %i files".format(filelist[0], tmp.size));
+          if tmp.size == 0 {
+              var errorMsg = "The wildcarded filename %s either corresponds to files inaccessible to Arkouda or files of an invalid format".format(filelist[0]);
+              fioLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
+              return new MsgTuple(errorMsg, MsgType.ERROR);
+          }
+          // Glob returns filenames in weird order. Sort for consistency
+          sort(tmp);
+          filedom = tmp.domain;
+          filenames = tmp;
+      } else {
+          // assumes that we are providing 
+          filenames = filelist;
+      }
+      return new MsgTuple("%jt".format(filenames), MsgType.NORMAL);
     }
 }

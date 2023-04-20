@@ -5,15 +5,17 @@ module MetricsMsg {
     use Logging;    
     use List;
     use IO;
-    use Map;
     use MultiTypeSymbolTable;
     use MultiTypeSymEntry;
     use Message;
     use Memory.Diagnostics;
-    use ArkoudaDateTimeCompat;
     use NumPyDType;
+    use ArkoudaTimeCompat as Time;
 
-    enum MetricCategory{ALL,NUM_REQUESTS,RESPONSE_TIME,AVG_RESPONSE_TIME,SYSTEM,SERVER,SERVER_INFO};
+    use ArkoudaMapCompat;
+
+    enum MetricCategory{ALL,NUM_REQUESTS,RESPONSE_TIME,AVG_RESPONSE_TIME,TOTAL_RESPONSE_TIME,
+                        TOTAL_MEMORY_USED,SYSTEM,SERVER,SERVER_INFO};
     enum MetricScope{GLOBAL,LOCALE,REQUEST,USER};
     enum MetricDataType{INT,REAL};
 
@@ -28,6 +30,12 @@ module MetricsMsg {
     var requestMetrics = new CounterTable();
     
     var avgResponseTimeMetrics = new AverageMeasurementTable();
+    
+    var responseTimeMetrics = new MeasurementTable();
+    
+    var totalResponseTimeMetrics = new MeasurementTable();
+    
+    var totalMemoryUsedMetrics = new MeasurementTable();
 
     var users = new Users();
     
@@ -46,7 +54,7 @@ module MetricsMsg {
                 users.add(name,user);
                 return user;
             } else {
-                return try! users.getValue(name);
+                return try! users[name];
             }
         }
 
@@ -107,11 +115,11 @@ module MetricsMsg {
 
         proc getUserMetrics(user: User) {
             if this.metrics.contains(user: User) {
-                return try! this.metrics.getValue(user);
+              return try! this.metrics[user];
             } else {
                 var userMetrics = new shared CounterTable();
                 this.metrics.add(user, userMetrics);
-                return userMetrics;
+                return try! this.metrics[user];
             }
         }
 
@@ -160,32 +168,54 @@ module MetricsMsg {
     class MeasurementTable {
         var measurements = new map(string, real);
 
+        /*
+         * Returns the measurement corresponding to the metric name If the
+         * metric does not exist, the metric value is set to 0.0 and is returned.
+         */
         proc get(metric: string): real throws {
+            var value: real;
+
             if !this.measurements.contains(metric) {
-                var value = 0.0;
-                    this.measurements.add(metric, value);
-                return value;
+                value = 0.0;
+                this.measurements.add(metric, value);
             } else {
-                return this.measurements(metric);
+                value = this.measurements(metric);
             }
+            
+            return value;
         }   
 
-        proc set(metric: string, measurement: real) {
+        /* 
+         * Sets the metrics value
+         */
+        proc set(metric: string, measurement: real) throws {
             this.measurements.addOrSet(metric, measurement);
         }
 
+        /*
+         * Returns the number of measurements in the MeasurementTable.s
+         */
         proc size() {
             return this.measurements.size;
         }
-        
-        proc items() {
-            return this.measurements.items();
+
+        /* 
+         * Adds a measurement to an existing measurement corresponding to the 
+         * metric name, setting the value if the metric does not exist.
+         */
+        proc add(metric: string, measurement: real) throws {
+            this.measurements.replace(metric,(this.get(metric) + measurement));
+        }
+
+        iter items() {
+          for (key, val) in zip(measurements.keys(), measurements.values()) do
+            yield(key, val);
         }
     }
 
     /* 
      * The AverageMeasurementTable extends the MeasurementTable by generating
-     * values that are averages of incoming values.
+     * values that are averages of incoming values for each metric.
      */
     class AverageMeasurementTable : MeasurementTable {
         //number of recorded measurements
@@ -194,7 +224,10 @@ module MetricsMsg {
         // total value of measurements to be averaged for each metric measured.s
         var measurementTotals = new map(string, real);
 
-        proc getNumMeasurements(metric: string) {
+        /*
+         * Returns the number of measurements corresponding to a metric.
+         */
+        proc getNumMeasurements(metric: string) throws {
             if this.numMeasurements.contains(metric) {
                 return this.numMeasurements(metric) + 1;
             } else {
@@ -202,7 +235,12 @@ module MetricsMsg {
             }
         }
         
-        proc getMeasurementTotal(metric: string) : real {
+        /*
+         * Returns the sum of all measurements corresponding to a metric. Note:
+         * this function is designed to invoked internally in order to 
+         * calculate the avg measurement value corresponding to the metric.
+         */
+        proc getMeasurementTotal(metric: string) : real throws {
             var value: real;
 
             if !this.measurementTotals.contains(metric) {
@@ -215,7 +253,15 @@ module MetricsMsg {
             return value;
         }
         
-        proc add(metric: string, measurement) throws {
+        /*
+         * The overridden add method updates the measurement value by doing the following:
+         *
+         * 1. adds the measurement to a running total measurement for the metric
+         * 2. increments the number of measurements for the metric
+         * 3. divides the updated total measurement by the number of measurements to
+         *    to calculate the avg measurement
+         */
+        override proc add(metric: string, measurement: real) throws {
             var numMeasurements = getNumMeasurements(metric);
             var measurementTotal = getMeasurementTotal(metric);
 
@@ -223,13 +269,8 @@ module MetricsMsg {
             this.measurementTotals(metric) += measurement;
 
             var value: real = this.measurementTotals(metric)/numMeasurements;
-  
-            this.measurements.addOrSet(metric, value);
 
-            mLogger.debug(getModuleName(),
-                          getRoutineName(),
-                          getLineNumber(),
-                          "Added Avg Response Time cmd: %s time %t".format(metric,value));
+            this.measurements.addOrSet(metric, value);
         }
     }
 
@@ -241,7 +282,7 @@ module MetricsMsg {
                 this.counts.add(metric,0);
                 return 0;
             } else {
-                return try! this.counts.getValue(metric);
+                return try! this.counts[metric];
             }
         }   
         
@@ -269,8 +310,9 @@ module MetricsMsg {
             }
         }   
         
-        proc items() {
-            return this.counts.items();
+        iter items() {
+          for (key, val) in zip(counts.keys(), counts.values()) do
+            yield(key, val);
         }
         
         proc size() {
@@ -294,7 +336,16 @@ module MetricsMsg {
         for metric in getNumRequestMetrics() {
             metrics.append(metric);
         }
+        for metric in getResponseTimeMetrics() {
+            metrics.append(metric);
+        }        
         for metric in getAvgResponseTimeMetrics() {
+            metrics.append(metric);
+        }
+        for metric in getTotalResponseTimeMetrics() {
+            metrics.append(metric);
+        }
+        for metric in getTotalMemoryUsedMetrics() {
             metrics.append(metric);
         }
         for metric in getSystemMetrics() {
@@ -360,6 +411,18 @@ module MetricsMsg {
     }
 
 
+    proc getResponseTimeMetrics() throws {
+        var metrics = new list(owned Metric?);
+
+        for item in responseTimeMetrics.items() {
+            metrics.append(new Metric(name=item[0], 
+                                      category=MetricCategory.RESPONSE_TIME,
+                                      value=item[1]));
+        }
+
+        return metrics;
+    }
+
     proc getAvgResponseTimeMetrics() throws {
         var metrics = new list(owned Metric?);
 
@@ -372,12 +435,43 @@ module MetricsMsg {
         return metrics;
     }
 
+    proc getTotalResponseTimeMetrics() throws {
+        var metrics = new list(owned Metric?);
+
+        for item in totalResponseTimeMetrics.items() {
+            metrics.append(new Metric(name=item[0], 
+                                      category=MetricCategory.TOTAL_RESPONSE_TIME,
+                                      value=item[1]));
+        }
+
+        return metrics;
+    }
+    
+    proc getTotalMemoryUsedMetrics() throws {
+        var metrics = new list(owned Metric?);
+
+        for item in totalMemoryUsedMetrics.items() {
+            metrics.append(new Metric(name=item[0], 
+                                      category=MetricCategory.TOTAL_MEMORY_USED,
+                                      value=item[1]));
+        }
+
+        return metrics;
+    }
+
+    proc getMaxLocaleMemory(loc) throws {
+       if memMax:real > 0 {
+           return memMax:real;
+       } else {
+           return loc.physicalMemory():real;
+       }
+    }
     proc getSystemMetrics() throws {
         var metrics = new list(owned Metric?);
 
         for loc in Locales {
             var used = memoryUsed():real;
-            var total = loc.physicalMemory():real;
+            var total = getMaxLocaleMemory(loc);
             
             mLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
                               'memoryUsed: %i physicalMemory: %i'.format(used,total));
@@ -553,6 +647,15 @@ module MetricsMsg {
             }
             when MetricCategory.SERVER_INFO {
                 metrics = "%jt".format(getServerInfo());
+            }
+            when MetricCategory.TOTAL_MEMORY_USED {
+                metrics = "%jt".format(getTotalMemoryUsedMetrics());            
+            }
+            when MetricCategory.AVG_RESPONSE_TIME {
+                metrics = "%jt".format(getAvgResponseTimeMetrics());            
+            }
+            when MetricCategory.TOTAL_RESPONSE_TIME {
+                metrics = "%jt".format(getTotalResponseTimeMetrics());            
             }
             otherwise {
                 throw getErrorWithContext(getLineNumber(),getModuleName(),getRoutineName(),

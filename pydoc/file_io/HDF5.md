@@ -25,6 +25,7 @@ While most objects in Arkouda can be saved, there are 3 main datatypes currently
 - DataFrame
 - Index
 - Categorical
+- SegArray
 
 HDF5 is able to contain any number of objects within the same file.
 
@@ -35,9 +36,10 @@ All data within the HDF5 file is expected to contain several attributes that aid
 `ObjType`: `int`
 > Integer representing the type of object stored in the group/dataset. This corresponds to the Chapel `enum ObjType`. Required to properly read each object.
 >
-> - 0 = `ArrayView`
-> - 1 = `pdarray`
-> - 2 = `Strings`
+- 0 = `ArrayView`
+- 1 = `pdarray`
+- 2 = `Strings`
+- 3 = `SegArray`
 
 `isBool`: `int`
 > Integer value (0 or 1) representing a boolean value that indicates if the data stored contains boolean values. This is only required to be set when the dataset contains boolean values.
@@ -114,7 +116,31 @@ Providing these attributes allows for the ArrayView object to be reconstructed f
 >               4. arkouda_version: 'current_arkouda_version' (Optional)
 >           2. Data - int64 values representing in start index of each string value.
 
-*Please Note - The offsets dataset is note required but can be provided. Strings uses null byte termination and is able to calculate the offsets of its components during reads.*
+*Please Note - The offsets dataset is not required but can be provided. Strings uses null byte termination and is able to calculate the offsets of its components during reads.*
+
+### SegArray
+
+`SegArray` objects are stored within an HDF5 group. This group contains datasets storing the values and segments separately.
+
+>1. Group (user provided dataset name. Defaults to 'segarray')
+>       1. Attributes
+>           1. ObjType: 3
+>           2. file_version: 2.0 (Optional)
+>           3. arkouda_version: 'current_arkouda_version' (Optional)
+>       2. Dataset - Values
+>           1. Attributes
+>               1. ObjType: 1
+>               2. isBool: 0 or 1
+>               3. file_version: 2.0 (Optional)
+>               4. arkouda_version: 'current_arkouda_version' (Optional)
+>           2. Data - numeric values representing our string values. int64, uint64, float64, or bool.
+>       3. Dataset - Offsets
+>           1. Attributes
+>               1. ObjType: 1
+>               2. isBool: 0
+>               3. file_version: 2.0 (Optional)
+>               4. arkouda_version: 'current_arkouda_version' (Optional)
+>           2. Data - int64 values representing the start index of each segmented value.
 
 ## Supported Write Modes
 
@@ -130,7 +156,7 @@ Providing these attributes allows for the ArrayView object to be reconstructed f
 > If the user elects to write to a single HDF5 file, all data will be pulled to the processing node and saved to ONE file with the supplied file name. It is important to ensure that the object is small enough to prevent memory exhaustion on the node.
 
 **Distributed Files**
-> if the user elects to write data to distributed files, data will be written to one file per locale. Each file will contain the data from the object local to the locale of that file. File names will be the name provided by the user with the suffix `_LOCALE####` where `####` will be replaced with the locale number. Because the data is distributed across multiple nodes, there is a much lower risk of memory exhaustion.
+> If the user elects to write data to distributed files, data will be written to one file per locale. Each file will contain the data from the object local to the locale of that file. File names will be the name provided by the user with the suffix `_LOCALE####` where `####` will be replaced with the locale number. Because the data is distributed across multiple nodes, there is a much lower risk of memory exhaustion.
 
 ## Legacy File Support
 
@@ -172,4 +198,11 @@ Older version of Arkouda used different schemas for `pdarray` and `Strings` obje
 ```{eval-rst}  
 - :py:meth:`arkouda.Categorical.to_hdf`
 - :py:meth:`arkouda.Categorical.save`
+```
+
+### SegArray
+
+```{eval-rst}  
+- :py:meth:`arkouda.SegArray.to_hdf`
+- :py:meth:`arkouda.SegArray.load`
 ```

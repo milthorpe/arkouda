@@ -24,7 +24,13 @@ extern "C" {
 #define ARROWDOUBLE 7
 #define ARROWTIMESTAMP ARROWINT64
 #define ARROWSTRING 6
+#define ARROWLIST 8
 #define ARROWERROR -1
+
+#define ARRAYVIEW 0 // not currently used, but included for continuity with Chapel
+#define PDARRAY 1
+#define STRINGS 2
+#define SEGARRAY 3
 
 // compression mappings
 #define SNAPPY_COMP 1
@@ -47,16 +53,31 @@ extern "C" {
                            const char* colname, int64_t numElems, int64_t startIdx,
                            int64_t batchSize, char** errMsg);
 
+  int c_readListColumnByName(const char* filename, void* chpl_arr, 
+                            const char* colname, int64_t numElems, 
+                            int64_t startIdx, int64_t batchSize, char** errMsg);
+  int cpp_readListColumnByName(const char* filename, void* chpl_arr, 
+                              const char* colname, int64_t numElems, 
+                              int64_t startIdx, int64_t batchSize, char** errMsg);
+
   int64_t cpp_getStringColumnNumBytes(const char* filename, const char* colname,
                                       void* chpl_offsets, int64_t numElems, int64_t startIdx, char** errMsg);
   int64_t c_getStringColumnNumBytes(const char* filename, const char* colname,
                                     void* chpl_offsets, int64_t numElems, int64_t startIdx, char** errMsg);
+
+  int64_t c_getListColumnSize(const char* filename, const char* colname,
+                                    void* chpl_seg_sizes, int64_t numElems, int64_t startIdx, char** errMsg);
+  int64_t cpp_getListColumnSize(const char* filename, const char* colname,
+                                    void* chpl_seg_sizes, int64_t numElems, int64_t startIdx, char** errMsg);
   
   int64_t c_getStringColumnNullIndices(const char* filename, const char* colname, void* chpl_nulls, char** errMsg);
   int64_t cpp_getStringColumnNullIndices(const char* filename, const char* colname, void* chpl_nulls, char** errMsg);
 
   int c_getType(const char* filename, const char* colname, char** errMsg);
   int cpp_getType(const char* filename, const char* colname, char** errMsg);
+
+  int c_getListType(const char* filename, const char* colname, char** errMsg);
+  int cpp_getListType(const char* filename, const char* colname, char** errMsg);
 
   int cpp_writeColumnToParquet(const char* filename, void* chpl_arr,
                                int64_t colnum, const char* dsetname, int64_t numelems,
@@ -71,6 +92,20 @@ extern "C" {
                                 int64_t rowGroupSize, int64_t dtype, int64_t compression,
                                 char** errMsg);
   int cpp_writeStrColumnToParquet(const char* filename, void* chpl_arr, void* chpl_offsets,
+                                  const char* dsetname, int64_t numelems,
+                                  int64_t rowGroupSize, int64_t dtype, int64_t compression,
+                                  char** errMsg);
+  
+  int c_createEmptyListParquetFile(const char* filename, const char* dsetname, int64_t dtype,
+                               int64_t compression, char** errMsg);
+  int cpp_createEmptyListParquetFile(const char* filename, const char* dsetname, int64_t dtype,
+                               int64_t compression, char** errMsg);
+
+  int c_writeListColumnToParquet(const char* filename, void* chpl_arr, void* chpl_offsets,
+                                  const char* dsetname, int64_t numelems,
+                                  int64_t rowGroupSize, int64_t dtype, int64_t compression,
+                                  char** errMsg);
+  int cpp_writeListColumnToParquet(const char* filename, void* chpl_arr, void* chpl_offsets,
                                   const char* dsetname, int64_t numelems,
                                   int64_t rowGroupSize, int64_t dtype, int64_t compression,
                                   char** errMsg);
@@ -90,13 +125,13 @@ extern "C" {
                                 char** errMsg);
   
   int c_writeMultiColToParquet(const char* filename, void* column_names, 
-                                void** ptr_arr, void* datatypes,
-                                int64_t colnum, int64_t numelems, int64_t rowGroupSize,
+                                void** ptr_arr, void** offset_arr, void* objTypes, void* datatypes,
+                                void* segArr_sizes, int64_t colnum, int64_t numelems, int64_t rowGroupSize,
                                 int64_t compression, char** errMsg);
 
   int cpp_writeMultiColToParquet(const char* filename, void* column_names, 
-                                  void** ptr_arr, void* datatypes,
-                                  int64_t colnum, int64_t numelems, int64_t rowGroupSize,
+                                  void** ptr_arr, void** offset_arr, void* objTypes, void* datatypes,
+                                  void* segArr_sizes, int64_t colnum, int64_t numelems, int64_t rowGroupSize,
                                   int64_t compression, char** errMsg);
     
   const char* c_getVersionInfo(void);

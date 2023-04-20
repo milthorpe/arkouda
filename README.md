@@ -119,11 +119,14 @@ This yielded a >20TB dataframe in Arkouda.
 
 For a complete list of requirements for Arkouda, please review [REQUIREMENTS.md](pydoc/setup/REQUIREMENTS.md).
 
-For detailed prerequisite information and installation guides, please review [INSTALL.md](pydoc/setup/INSTALL.md).
+For detailed prerequisite information and installation guides, please review the install guide for your operating system.
+- [Linux Install](pydoc/setup/LINUX_INSTALL.md)
+- [MacOS Install](pydoc/setup/MAC_INSTALL.md)
+- [Windows Install](pydoc/setup/WINDOWS_INSTALL.md)
 
 <a id="build-ak"></a>
 ## Building Arkouda <sup><sup><sub><a href="#toc">toc</a></sub></sup></sup>
-In order to run the Arkouda server, it must first be compiled. Detailed instructions on the build process can be found at [BUILD.md](BUILD.md).
+In order to run the Arkouda server, it must first be compiled. Detailed instructions on the build process can be found at [BUILD.md](pydoc/setup/BUILD.md).
 
 <a id="test-ak"></a>
 ## Testing Arkouda <sup><sup><sub><a href="#toc">toc</a></sub></sup></sup>
@@ -182,10 +185,10 @@ Memory tracking is turned on by default now, you can run server with memory trac
 ./arkouda_server --memTrack=false
 ```
 
+For situations where it is desirable to limit the amount of memory allocated to each locale, the `--memMax=$MEM_MAX_IN_BYTES` flag sets the max per-locale memory in bytes. 
+
 By default, the server listens on port `5555`. This value can be overridden with the command-line flag 
 `--ServerPort=1234`
-
-Memory tracking is turned on by default and turned off by using the  `--memTrack=false` flag
 
 Trace logging messages are turned on by default and turned off by using the `--trace=false` flag
 

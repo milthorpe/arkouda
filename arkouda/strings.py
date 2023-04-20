@@ -187,15 +187,12 @@ class Strings:
         self._regex_dict: Dict = dict()
         self.logger = getArkoudaLogger(name=__class__.__name__)  # type: ignore
 
-    """
-    NOTE:
-         The Strings.__del__() method should NOT be implemented.
-         Python will invoke the __del__() of any components by default.
-         Overriding this default behavior with an explicitly specified Strings.__del__() method may
-         introduce errors in the event that additional components are added to Strings
-         and the method is not updated.
-         By allowing Python's garbage collecting to handle this automatically, we avoid extra maintenance
-    """
+    def __del__(self):
+        try:
+            if self.name:
+                generic_msg(cmd="delete", args={"name": self.name})
+        except RuntimeError:
+            pass
 
     def __iter__(self):
         raise NotImplementedError(
@@ -357,7 +354,7 @@ class Strings:
             generic_msg(cmd="segmentLengths", args={"objType": self.objtype, "obj": self.entry})
         )
 
-    def encode(self, toEncoding : str, fromEncoding : str = "UTF-8"):
+    def encode(self, toEncoding: str, fromEncoding: str = "UTF-8"):
         """
         Return a new strings object in `toEncoding`, expecting that the
         current Strings is encoded in `fromEncoding`
@@ -659,7 +656,8 @@ class Strings:
 
         Parameters
         ----------
-        chars : the set of characters to be removed
+        chars
+            the set of characters to be removed
 
         Returns
         -------
@@ -1732,12 +1730,12 @@ class Strings:
 
         Notes
         -----
-        The number of bytes in the array cannot exceed ``arkouda.maxTransferBytes``,
+        The number of bytes in the array cannot exceed ``ak.client.maxTransferBytes``,
         otherwise a ``RuntimeError`` will be raised. This is to protect the user
         from overflowing the memory of the system on which the Python client
         is running, under the assumption that the server is running on a
         distributed system with much more memory than the client. The user
-        may override this limit by setting ak.maxTransferBytes to a larger
+        may override this limit by setting ak.client.maxTransferBytes to a larger
         value, but proceed with caution.
 
         See Also
@@ -1780,12 +1778,12 @@ class Strings:
 
         Notes
         -----
-        The number of bytes in the array cannot exceed ``arkouda.maxTransferBytes``,
+        The number of bytes in the array cannot exceed ``ak.client.maxTransferBytes``,
         otherwise a ``RuntimeError`` will be raised. This is to protect the user
         from overflowing the memory of the system on which the Python client
         is running, under the assumption that the server is running on a
         distributed system with much more memory than the client. The user
-        may override this limit by setting ak.maxTransferBytes to a larger
+        may override this limit by setting ak.client.maxTransferBytes to a larger
         value, but proceed with caution.
 
         See Also
@@ -1845,7 +1843,7 @@ class Strings:
         # Guard against overflowing client memory
         if array_bytes > maxTransferBytes:
             raise RuntimeError(
-                "Array exceeds allowed size for transfer. Increase client.maxTransferBytes to allow"
+                "Array exceeds allowed size for transfer. Increase ak.client.maxTransferBytes to allow"
             )
         # The reply from the server will be a bytes object
         rep_msg = generic_msg(
@@ -1936,7 +1934,7 @@ class Strings:
         - Any file extension can be used.The file I/O does not rely on the extension to
         determine the file format.
         """
-        from arkouda.io import mode_str_to_int
+        from arkouda.io import _mode_str_to_int
 
         return cast(
             str,
@@ -1945,8 +1943,9 @@ class Strings:
                 {
                     "values": self.entry,
                     "dset": dataset,
-                    "mode": mode_str_to_int(mode),
+                    "mode": _mode_str_to_int(mode),
                     "prefix": prefix_path,
+                    "objType": "strings",
                     "dtype": self.dtype,
                     "compression": compression,
                 },
@@ -1995,25 +1994,25 @@ class Strings:
         -----
         - Parquet files do not store the segments, only the values.
         - Strings state is saved as two datasets within an hdf5 group:
-        one for the string characters and one for the
-        segments corresponding to the start of each string
+          one for the string characters and one for the
+          segments corresponding to the start of each string
         - the hdf5 group is named via the dataset parameter.
         - The prefix_path must be visible to the arkouda server and the user must
-        have write permission.
+          have write permission.
         - Output files have names of the form ``<prefix_path>_LOCALE<i>``, where ``<i>``
-        ranges from 0 to ``numLocales`` for `file_type='distribute'`. Otherwise,
-        the file name will be `prefix_path`.
+          ranges from 0 to ``numLocales`` for `file_type='distribute'`. Otherwise,
+          the file name will be `prefix_path`.
         - If any of the output files already exist and
-        the mode is 'truncate', they will be overwritten. If the mode is 'append'
-        and the number of output files is less than the number of locales or a
-        dataset with the same name already exists, a ``RuntimeError`` will result.
+          the mode is 'truncate', they will be overwritten. If the mode is 'append'
+          and the number of output files is less than the number of locales or a
+          dataset with the same name already exists, a ``RuntimeError`` will result.
         - Any file extension can be used.The file I/O does not rely on the extension to
-        determine the file format.
+          determine the file format.
         See Also
         ---------
         to_hdf
         """
-        from arkouda.io import file_type_to_int, mode_str_to_int
+        from arkouda.io import _file_type_to_int, _mode_str_to_int
 
         return cast(
             str,
@@ -2022,12 +2021,146 @@ class Strings:
                 {
                     "values": self.entry,
                     "dset": dataset,
-                    "write_mode": mode_str_to_int(mode),
+                    "write_mode": _mode_str_to_int(mode),
                     "filename": prefix_path,
                     "dtype": self.dtype,
                     "save_offsets": save_offsets,
                     "objType": "strings",
-                    "file_format": file_type_to_int(file_type),
+                    "file_format": _file_type_to_int(file_type),
+                },
+            ),
+        )
+
+    def update_hdf(
+        self,
+        prefix_path: str,
+        dataset: str = "strings_array",
+        save_offsets: bool = True,
+        repack: bool = True,
+    ):
+        """
+        Overwrite the dataset with the name provided with this Strings object. If
+        the dataset does not exist it is added
+
+        Parameters
+        -----------
+        prefix_path : str
+            Directory and filename prefix that all output files share
+        dataset : str
+            Name of the dataset to create in files
+        save_offsets : bool
+            Defaults to True which will instruct the server to save the offsets array to HDF5
+            If False the offsets array will not be save and will be derived from the string values
+            upon load/read.
+        repack: bool
+            Default: True
+            HDF5 does not release memory on delete. When True, the inaccessible
+            data (that was overwritten) is removed. When False, the data remains, but is
+            inaccessible. Setting to false will yield better performance, but will cause
+            file sizes to expand.
+
+        Returns
+        --------
+        str - success message if successful
+
+        Raises
+        -------
+        RuntimeError
+            Raised if a server-side error is thrown saving the Strings object
+
+        Notes
+        ------
+        - If file does not contain File_Format attribute to indicate how it was saved,
+          the file name is checked for _LOCALE#### to determine if it is distributed.
+        - If the dataset provided does not exist, it will be added
+        """
+        from arkouda.io import _mode_str_to_int, _file_type_to_int, _get_hdf_filetype, _repack_hdf
+
+        # determine the format (single/distribute) that the file was saved in
+        file_type = _get_hdf_filetype(prefix_path + "*")
+
+        generic_msg(
+            cmd="tohdf",
+            args={
+                "values": self,
+                "dset": dataset,
+                "write_mode": _mode_str_to_int("append"),
+                "filename": prefix_path,
+                "dtype": self.dtype,
+                "save_offsets": save_offsets,
+                "objType": "strings",
+                "file_format": _file_type_to_int(file_type),
+                "overwrite": True,
+            },
+        )
+
+        if repack:
+            _repack_hdf(prefix_path)
+
+    @typechecked
+    def to_csv(
+        self,
+        prefix_path: str,
+        dataset: str = "strings_array",
+        col_delim: str = ",",
+        overwrite: bool = False,
+    ):
+        """
+        Write Strings to CSV file(s). File will contain a single column with the Strings data.
+        All CSV Files written by Arkouda include a header denoting data types of the columns.
+        Unlike other file formats, CSV files store Strings as their UTF-8 format instead of storing
+        bytes as uint(8).
+
+        Parameters
+        -----------
+        prefix_path: str
+            The filename prefix to be used for saving files. Files will have _LOCALE#### appended
+            when they are written to disk.
+        dataset: str
+            Column name to save the Strings under. Defaults to "strings_array".
+        col_delim: str
+            Defaults to ",". Value to be used to separate columns within the file.
+            Please be sure that the value used DOES NOT appear in your dataset.
+        overwrite: bool
+            Defaults to False. If True, any existing files matching your provided prefix_path will
+            be overwritten. If False, an error will be returned if existing files are found.
+
+        Returns
+        --------
+        str reponse message
+
+        Raises
+        ------
+        ValueError
+            Raised if all datasets are not present in all parquet files or if one or
+            more of the specified files do not exist
+        RuntimeError
+            Raised if one or more of the specified files cannot be opened.
+            If `allow_errors` is true this may be raised if no values are returned
+            from the server.
+        TypeError
+            Raised if we receive an unknown arkouda_type returned from the server
+
+        Notes
+        ------
+        - CSV format is not currently supported by load/load_all operations
+        - The column delimiter is expected to be the same for column names and data
+        - Be sure that column delimiters are not found within your data.
+        - All CSV files must delimit rows using newline (``\\n``) at this time.
+        """
+        return cast(
+            str,
+            generic_msg(
+                cmd="writecsv",
+                args={
+                    "datasets": [self],
+                    "col_names": [dataset],
+                    "filename": prefix_path,
+                    "num_dsets": 1,
+                    "col_delim": col_delim,
+                    "dtypes": [self.dtype.name],
+                    "row_count": self.size,
+                    "overwrite": overwrite,
                 },
             ),
         )

@@ -13,7 +13,7 @@ from arkouda.strings import Strings
 
 numeric_dtypes = {int64, uint64, float64}
 
-__all__ = ["argsort", "coargsort", "sort", "SortingAlgorithm"]
+__all__ = ["argsort", "coargsort", "sort"]
 
 SortingAlgorithm = Enum("SortingAlgorithm", ["RadixSortLSD", "TwoArrayRadixSort"])
 
@@ -158,8 +158,9 @@ def coargsort(
             size = a.size
         elif size != a.size:
             raise ValueError("All pdarrays, Strings, or Categoricals must be of the same size")
+
     if size == 0:
-        return zeros(0, dtype=arrays[0].dtype)
+        return zeros(0, dtype=int if isinstance(arrays[0], (Strings, Categorical)) else arrays[0].dtype)
 
     repMsg = generic_msg(
         cmd="coargsort",

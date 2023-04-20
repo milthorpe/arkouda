@@ -348,6 +348,58 @@ class OperatorsTest(ArkoudaTest):
             self.assertTrue(np.allclose((akf**ak_uint).to_ndarray(), npf**np_uint, equal_nan=True))
             self.assertTrue(np.allclose((ak_float**aku).to_ndarray(), np_float**npu, equal_nan=True))
             self.assertTrue(np.allclose((aku**ak_float).to_ndarray(), npu**np_float, equal_nan=True))
+            self.assertTrue(np.allclose((ak_float % aku).to_ndarray(), np_float % npu, equal_nan=True))
+            self.assertTrue(np.allclose((aku % ak_float).to_ndarray(), npu % np_float, equal_nan=True))
+
+    def test_shift_binop(self):
+        # This tests for a bug when left shifting by a value >=64 bits for int/uint, Issue #2099
+        # Max bit value
+        maxbits = 2**63 - 1
+
+        # Value arrays
+        ak_uint = ak.array([maxbits, maxbits, maxbits, maxbits], dtype=ak.uint64)
+        np_uint = np.array([maxbits, maxbits, maxbits, maxbits], dtype=np.uint64)
+        ak_int = ak.array([maxbits, maxbits, maxbits, maxbits], dtype=ak.int64)
+        np_int = np.array([maxbits, maxbits, maxbits, maxbits], dtype=np.int64)
+
+        # Shifting value arrays
+        ak_uint_array = ak.array([62, 63, 64, 65], dtype=ak.uint64)
+        np_uint_array = np.array([62, 63, 64, 65], dtype=np.uint64)
+        ak_int_array = ak.array([62, 63, 64, 65], dtype=ak.int64)
+        np_int_array = np.array([62, 63, 64, 65], dtype=np.int64)
+
+        # Binopvs case
+        for i in range(62, 66):
+            # Left shift
+            self.assertTrue(np.allclose((ak_uint << i).to_ndarray(), np_uint << i))
+            self.assertTrue(np.allclose((ak_int << i).to_ndarray(), np_int << i))
+            # Right shift
+            self.assertTrue(np.allclose((ak_uint >> i).to_ndarray(), np_uint >> i))
+            self.assertTrue(np.allclose((ak_int >> i).to_ndarray(), np_int >> i))
+
+        # Binopsv case
+        # Left Shift
+        self.assertListEqual((maxbits << ak_uint_array).to_list(), (maxbits << np_uint_array).tolist())
+        self.assertListEqual((maxbits << ak_int_array).to_list(), (maxbits << np_int_array).tolist())
+        # Right Shift
+        self.assertListEqual((maxbits >> ak_uint_array).to_list(), (maxbits >> np_uint_array).tolist())
+        self.assertListEqual((maxbits >> ak_int_array).to_list(), (maxbits >> np_int_array).tolist())
+
+        # Binopvv case, Same type
+        # Left Shift
+        self.assertListEqual((ak_uint << ak_uint_array).to_list(), (np_uint << np_uint_array).tolist())
+        self.assertListEqual((ak_int << ak_int_array).to_list(), (np_int << np_int_array).tolist())
+        # Right Shift
+        self.assertListEqual((ak_uint >> ak_uint_array).to_list(), (np_uint >> np_uint_array).tolist())
+        self.assertListEqual((ak_int >> ak_int_array).to_list(), (np_int >> np_int_array).tolist())
+
+        # Binopvv case, Mixed type
+        # Left Shift
+        self.assertListEqual((ak_uint << ak_int_array).to_list(), (np_uint << np_uint_array).tolist())
+        self.assertListEqual((ak_int << ak_uint_array).to_list(), (np_int << np_int_array).tolist())
+        # Right shift
+        self.assertListEqual((ak_uint >> ak_int_array).to_list(), (np_uint >> np_uint_array).tolist())
+        self.assertListEqual((ak_int >> ak_uint_array).to_list(), (np_int >> np_int_array).tolist())
 
     def test_concatenate_type_preservation(self):
         # Test that concatenate preserves special pdarray types (IPv4, Datetime, BitVector, ...)
@@ -821,6 +873,76 @@ class OperatorsTest(ArkoudaTest):
         for s in [i_scalar, u_scalar, bi_scalar]:
             self.assertListEqual([(bi[i] * s) % mod_by for i in range(bi.size)], (bi * s).to_list())
             self.assertListEqual([(s * bi[i]) % mod_by for i in range(bi.size)], (s * bi).to_list())
+
+    def test_bigint_rotate(self):
+        # see issue #2214
+        # verify bigint pdarray correctly rotate when shift_amount exceeds max_bits
+        # in this test we are rotating 10 with max_bits=4, so even rotations will equal 10
+        # and odd rotations will equal 5. We test rotations up to 10 (which is > 4)
+
+        # rotate by scalar
+        for i in range(10):
+            self.assertEqual(ak.array([10], dtype=ak.bigint, max_bits=4).rotl(i), 10 if i % 2 == 0 else 5)
+            self.assertEqual(ak.array([10], dtype=ak.bigint, max_bits=4).rotr(i), 10 if i % 2 == 0 else 5)
+
+        # rotate by array
+        left_rot = ak.bigint_from_uint_arrays([ak.full(10, 10, ak.uint64)], max_bits=4).rotl(ak.arange(10))
+        right_rot = ak.bigint_from_uint_arrays([ak.full(10, 10, ak.uint64)], max_bits=4).rotr(ak.arange(10))
+        ans = [10 if i % 2 == 0 else 5 for i in range(10)]
+        self.assertListEqual(left_rot.to_list(), ans)
+        self.assertListEqual(right_rot.to_list(), ans)
+
+    def test_fmod(self):
+        # Note - uint/float and float/uint handles in another test case
+        npf = np.array([2.23, 3.14, 3.08, 5.7])
+        npf2 = np.array([3.14, 2.23, 1.1, 4.1])
+        npi = np.array([1, 4, 1, 5])
+
+        akf = ak.array(npf)
+        akf2 = ak.array(npf2)
+        aki = ak.array(npi)
+
+        # vector-vector operations
+        self.assertTrue(np.allclose((akf % akf2).to_ndarray(), npf % npf2, equal_nan=True))
+        self.assertTrue(np.allclose((akf2 % akf).to_ndarray(), npf2 % npf, equal_nan=True))
+        self.assertTrue(np.allclose((akf % aki).to_ndarray(), npf % npi, equal_nan=True))
+        self.assertTrue(np.allclose((aki % akf).to_ndarray(), npi % npf, equal_nan=True))
+        self.assertTrue(np.allclose((akf2 % aki).to_ndarray(), npf2 % npi, equal_nan=True))
+        self.assertTrue(np.allclose((aki % akf2).to_ndarray(), npi % npf2, equal_nan=True))
+
+        # vector scalar and scalar vector
+        self.assertTrue(np.allclose((akf % 2).to_ndarray(), npf % 2, equal_nan=True))
+        self.assertTrue(np.allclose((2 % akf).to_ndarray(), 2 % npf, equal_nan=True))
+        self.assertTrue(np.allclose((akf % 2.14).to_ndarray(), npf % 2.14, equal_nan=True))
+        self.assertTrue(np.allclose((2.14 % akf).to_ndarray(), 2.14 % npf, equal_nan=True))
+        u = np.array([4]).astype(np.uint64)[0]
+        self.assertTrue(np.allclose((akf % u).to_ndarray(), npf % u, equal_nan=True))
+        self.assertTrue(np.allclose((u % akf).to_ndarray(), u % npf, equal_nan=True))
+
+        #opequal
+        npf_copy = npf
+        akf_copy = ak.array(npf_copy)
+        npf_copy %= npf2
+        akf_copy %= akf2
+        self.assertTrue(np.allclose(akf_copy.to_ndarray(), npf_copy, equal_nan=True))
+
+        npf_copy = npf
+        akf_copy = ak.array(npf_copy)
+        npf_copy %= npi
+        akf_copy %= aki
+        self.assertTrue(np.allclose(akf_copy.to_ndarray(), npf_copy, equal_nan=True))
+
+        npf_copy = npf
+        akf_copy = ak.array(npf_copy)
+        npf_copy %= 2
+        akf_copy %= 2
+        self.assertTrue(np.allclose(akf_copy.to_ndarray(), npf_copy, equal_nan=True))
+
+        npf_copy = npf
+        akf_copy = ak.array(npf_copy)
+        npf_copy %= 2.14
+        akf_copy %= 2.14
+        self.assertTrue(np.allclose(akf_copy.to_ndarray(), npf_copy, equal_nan=True))
 
 
 if __name__ == "__main__":

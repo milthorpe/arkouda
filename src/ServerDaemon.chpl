@@ -4,7 +4,7 @@ module ServerDaemon {
     use Security;
     use ServerConfig;
     use ServerErrors;
-    use Time;
+    use ArkoudaTimeCompat as Time;
     use ZMQ only;
     use Memory;
     use FileSystem;
@@ -26,6 +26,8 @@ module ServerDaemon {
     use MetricsMsg;
     use BigIntMsg;
     use NumPyDType;
+
+    use ArkoudaFileCompat;
 
     enum ServerDaemonType {DEFAULT,INTEGRATION,METRICS}
 
@@ -268,7 +270,7 @@ module ServerDaemon {
                 sdLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
                                'writing serverConnectionInfo to %t'.format(serverConnectionInfo));
                 try! {
-                    var w = open(serverConnectionInfo, iomode.cw).writer();
+                    var w = open(serverConnectionInfo, ioMode.cw).writer();
                     w.writef("%s %t %s\n",serverHostname,ServerPort,this.connectUrl);
                 }
             }
@@ -361,6 +363,7 @@ module ServerDaemon {
             registerFunction("clear", clearMsg);
             registerFunction("lsany", lsAnyMsg);
             registerFunction("getfiletype", getFileTypeMsg);
+            registerFunction("globExpansion", globExpansionMsg);
 
             // For a few specialized cmds we're going to add dummy functions, so they
             // get added to the client listing of available commands. They will be
@@ -391,7 +394,7 @@ module ServerDaemon {
             }
         }
 
-        proc processMetrics(user: string, cmd: string, args: MessageArgs, elapsedTime: real) throws {
+        proc processMetrics(user: string, cmd: string, args: MessageArgs, elapsedTime: real, memUsed: uint) throws {
             proc getArrayParameterObj(args: MessageArgs) throws {
                 var obj : ParameterObj;
 
@@ -408,22 +411,50 @@ module ServerDaemon {
                return !obj.key.isEmpty();
             }
           
-            // Update Request Metrics
+            // Update request metrics for the cmd
             requestMetrics.increment(cmd);
             
-            // Update User-Scoped Request Metrics
+            // Update user-scoped request metrics for the cmd
             userMetrics.incrementPerUserRequestMetrics(user,cmd);
+
+            // Update response time metric for the cmd
+            responseTimeMetrics.set(cmd,elapsedTime);
+            
+            sdLogger.debug(getModuleName(),
+                          getRoutineName(),
+                          getLineNumber(),
+                          "Set Response Time for %s: %t".format(cmd,elapsedTime));
+            
+            // Add response time to the avg response time for the cmd
+            avgResponseTimeMetrics.add(cmd,elapsedTime:real);
+            
+            // Add total response time
+            totalResponseTimeMetrics.add(cmd,elapsedTime:real);
+            
+            // Add total memory used
+            totalMemoryUsedMetrics.add(cmd,memUsed/1000000000:real);
+            
+            sdLogger.debug(getModuleName(),
+                          getRoutineName(),
+                          getLineNumber(),
+                          "Added Avg Response Time for cmd %s: %t".format(cmd,elapsedTime));
+                          
+            sdLogger.debug(getModuleName(),
+                          getRoutineName(),
+                          getLineNumber(),
+                          "Total Response Time for cmd %s: %t".format(cmd,totalResponseTimeMetrics.get(cmd)));
+                          
+            sdLogger.debug(getModuleName(),
+                          getRoutineName(),
+                          getLineNumber(),
+                          "Total Memory Used for cmd %s: %t GB".format(cmd,totalMemoryUsedMetrics.get(cmd)));    
 
             var apo = getArrayParameterObj(args);
 
             // Check to see if the incoming request corresponds to a pdarray operation
             if computeArrayMetrics(apo) {
                 var name = apo.val;
-                var value = elapsedTime;
-                
-                // Add the response time to the avg response time for the corresponding cmd
-                avgResponseTimeMetrics.add(cmd,value);
-            
+
                 /*
                  * Create the ArrayMetric object and output the individual response time
                  * as JSON to the console or arkouda.log for now. In the future, individual  
@@ -433,7 +464,7 @@ module ServerDaemon {
                 var metric = new ArrayMetric(name=name,
                                              category=MetricCategory.RESPONSE_TIME,
                                              scope=MetricScope.REQUEST,
-                                             value=value,
+                                             value=elapsedTime,
                                              cmd=cmd,
                                              dType=str2dtype(apo.dtype),
                                              size=getGenericTypedArrayEntry(apo.val, st).size
@@ -467,7 +498,7 @@ module ServerDaemon {
             }
             this.registerServerCommands();
                     
-            var startTime = getCurrentTime();
+            var startTime = timeSinceEpoch().totalSeconds();
         
             while !this.shutdownDaemon {
                 // receive message on the zmq socket
@@ -475,7 +506,7 @@ module ServerDaemon {
 
                 this.reqCount += 1;
 
-                var s0 = getCurrentTime();
+                var s0 = timeSinceEpoch().totalSeconds();
         
                 /*
                  * Separate the first tuple, which is a string binary containing the JSON binary
@@ -564,7 +595,7 @@ module ServerDaemon {
                     if (trace) {
                         sdLogger.info(getModuleName(),getRoutineName(),getLineNumber(),
                                         "<<< shutdown initiated by %s took %.17r sec".format(user, 
-                                                getCurrentTime() - s0));
+                                                timeSinceEpoch().totalSeconds() - s0));
                     }
                 }
 
@@ -613,11 +644,11 @@ module ServerDaemon {
                         if commandMap.contains(cmd) {
                             if moduleMap.contains(cmd) then
                                 usedModules.add(moduleMap[cmd]);
-                            repTuple = commandMap.getBorrowed(cmd)(cmd, msgArgs, st);
+                            repTuple = commandMap[cmd](cmd, msgArgs, st);
                         } else if commandMapBinary.contains(cmd) { // Binary response commands require different handling
                             if moduleMap.contains(cmd) then
                                 usedModules.add(moduleMap[cmd]);
-                            var binaryRepMsg = commandMapBinary.getBorrowed(cmd)(cmd, msgArgs, st);
+                            var binaryRepMsg = commandMapBinary[cmd](cmd, msgArgs, st);
                             sendRepMsg(binaryRepMsg);
                         } else {
                           repTuple = new MsgTuple("Unrecognized command: %s".format(cmd), MsgType.ERROR);
@@ -634,7 +665,7 @@ module ServerDaemon {
                                                               msgFormat=MsgFormat.STRING, user=user));
                 }
 
-                var elapsedTime = getCurrentTime() - s0;
+                var elapsedTime = timeSinceEpoch().totalSeconds() - s0;
 
                 /*
                  * log that the request message has been handled and reply message has been sent 
@@ -645,11 +676,17 @@ module ServerDaemon {
                                               "<<< %s took %.17r sec".format(cmd, elapsedTime));
                 }
                 if (trace && memTrack) {
+                    var memUsed = getMemUsed():uint * numLocales:uint;
+                    var memLimit = (getMemLimit():real * numLocales:uint):int;
+                    var pctMemUsed = ((memUsed:real/memLimit)*100):int;
                     sdLogger.info(getModuleName(),getRoutineName(),getLineNumber(),
-                        "bytes of memory used after command %t".format(getMemUsed():uint * numLocales:uint));
-                }
-                if metricsEnabled() {
-                    processMetrics(user, cmd, msgArgs, elapsedTime);
+                        "bytes of memory %t used after %s command is %t%% pct of max memory %t".format(memUsed,
+                                                                                                       cmd,
+                                                                                                       pctMemUsed,
+                                                                                                       memLimit));
+                    if metricsEnabled() {
+                        processMetrics(user, cmd, msgArgs, elapsedTime, memUsed);
+                    }
                 }
             } catch (e: ErrorWithMsg) {
                 // Generate a ReplyMsg of type ERROR and serialize to a JSON-formatted string
@@ -657,7 +694,7 @@ module ServerDaemon {
                                                         user=user));
                 if trace {
                     sdLogger.error(getModuleName(),getRoutineName(),getLineNumber(),
-                        "<<< %s resulted in error %s in  %.17r sec".format(cmd, e.msg, getCurrentTime() - s0));
+                        "<<< %s resulted in error %s in  %.17r sec".format(cmd, e.msg, timeSinceEpoch().totalSeconds() - s0));
                 }
             } catch (e: Error) {
                 // Generate a ReplyMsg of type ERROR and serialize to a JSON-formatted string
@@ -672,12 +709,12 @@ module ServerDaemon {
                 if trace {
                     sdLogger.error(getModuleName(), getRoutineName(), getLineNumber(), 
                     "<<< %s resulted in error: %s in %.17r sec".format(cmd, e.message(),
-                                                                                 getCurrentTime() - s0));
+                                                                                 timeSinceEpoch().totalSeconds() - s0));
                 }
             }
         }
 
-        var elapsed = getCurrentTime() - startTime;
+        var elapsed = timeSinceEpoch().totalSeconds() - startTime;
 
         deleteServerConnectionInfo();
 
@@ -711,10 +748,6 @@ module ServerDaemon {
         }
 
         override proc run() throws {
-            if integrationEnabled() {
-                register(ServiceEndpoint.METRICS);
-            }
-
             while !this.shutdownDaemon {
                 sdLogger.debug(getModuleName(), getRoutineName(), getLineNumber(),
                                "awaiting message on port %i".format(this.port));
@@ -756,9 +789,6 @@ module ServerDaemon {
                                                 msgFormat=MsgFormat.STRING, user=user));
             }
 
-            if integrationEnabled() {
-                deregisterFromExternalSystem(ServiceEndpoint.METRICS);
-            }
             return;
         }
     }
@@ -775,6 +805,10 @@ module ServerDaemon {
          */
         override proc run() throws {
             register(ServiceEndpoint.ARKOUDA_CLIENT);
+            // if metrics enabled, register the metrics socket
+            if metricsEnabled() {
+                register(ServiceEndpoint.METRICS);
+            }
             super.run();
         }
 

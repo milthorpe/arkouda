@@ -50,7 +50,7 @@ class IndexingTest(ArkoudaTest):
             self.assertEqual(pda[np.uint(2)], pda[2])
 
             # set [slice] = scalar/pdarray
-            pda[:10] = np.uint(-2)
+            pda[:10] = -2
             self.assertListEqual(pda[self.ukeys].to_list(), pda[self.ikeys].to_list())
             pda[:10] = ak.cast(ak.arange(10), t)
             self.assertListEqual(pda[self.ukeys].to_list(), pda[self.ikeys].to_list())
@@ -63,8 +63,8 @@ class IndexingTest(ArkoudaTest):
 
             if t == ak.bigint.name:
                 # bigint specific set [int] = val with uint key and value
-                pda[np.uint(2)] = 2 ** 200
-                self.assertEqual(pda[2], 2 ** 200)
+                pda[np.uint(2)] = 2**200
+                self.assertEqual(pda[2], 2**200)
 
                 # bigint specific set [slice] = scalar/pdarray
                 pda[:10] = 2**200
@@ -83,3 +83,9 @@ class IndexingTest(ArkoudaTest):
         a = ak.arange(10) * 2
         b = ak.cast(ak.array([3, 0, 8]), ak.uint64)
         a[b]
+
+    def test_bigint_indexing_preserves_max_bits(self):
+        max_bits = 64
+        a = ak.arange(2**200 - 1, 2**200 + 11, max_bits=max_bits)
+        self.assertEqual(max_bits, a[ak.arange(10)].max_bits)
+        self.assertEqual(max_bits, a[:].max_bits)

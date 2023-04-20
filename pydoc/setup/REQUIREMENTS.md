@@ -4,7 +4,7 @@
 
 The dependencies listed here have varying installation instructions depending upon your preferred operating system. Please use in the installation instructions provided in the [Installation Section](install_menu.rst).
 
-- ``Chapel 1.29.0 or later``
+- ``Chapel 1.30.0 or later``
 - `cmake>=3.11.0`
 - `zeromq>=4.2.5`
 - `hdf5`
@@ -27,6 +27,7 @@ The following python packages are required by the Arkouda client package.
 - `versioneer`
 - `matplotlib>=3.3.2`
 - `h5py>=3.7.0`
+- `hdf5==1.12.2`
 - `pip`
 - `types-tabulate`
 - `tables>=3.7.0`

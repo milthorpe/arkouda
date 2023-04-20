@@ -7,7 +7,7 @@ from typing import Dict
 
 from typeguard import typechecked
 
-from arkouda.dtypes import bigint
+from arkouda.dtypes import bigint, isSupportedNumber
 
 
 class ObjectType(Enum):
@@ -40,7 +40,6 @@ class ObjectType(Enum):
 
 
 class ParameterObject:
-
     __slots = ("key", "objType", "dtype", "val")
 
     key: str
@@ -104,6 +103,16 @@ class ParameterObject:
         return ParameterObject(key, ObjectType.STRINGS, "str", name)
 
     @staticmethod
+    def _is_supported_value(val):
+        import builtins
+        import numpy as np
+
+        return (
+            isinstance(val, (str, np.str_, builtins.bool, np.bool_))
+            or isSupportedNumber(val)
+        )
+
+    @staticmethod
     @typechecked
     def _build_list_param(key: str, val: list) -> ParameterObject:
         """
@@ -122,25 +131,26 @@ class ParameterObject:
         """
         from arkouda.pdarrayclass import pdarray
         from arkouda.strings import Strings
+        from arkouda.segarray import SegArray
 
         # want the object type. If pdarray the content dtypes can vary
         dtypes = {type(p).__name__ for p in val}
         if len(dtypes) == 1:
             t = dtypes.pop()
         else:
-            for t in dtypes:
-                if t not in [pdarray.__name__, Strings.__name__]:
-                    t_str = ", ".join(dtypes)
-                    raise TypeError(f"Lists of multiple types can only "
-                                    f"contain strings and pdarray. Found {t_str}")
-            # using pdarray for now. May change in future. This does not impact functionality
-            t = pdarray.__name__
-        if any(x == t for x in [pdarray.__name__, Strings.__name__]):
-            return ParameterObject(key, ObjectType.LIST, t, json.dumps([x.name for x in val]))
-        else:
-            # need all values to be str for chapel to read list properly
-            v = val if t == str.__name__ else [str(x) for x in val]
-            return ParameterObject(key, ObjectType.LIST, t, json.dumps(v))
+            for p in val:
+                if not (
+                    isinstance(p, (pdarray, Strings, SegArray))
+                    or ParameterObject._is_supported_value(p)
+                ):
+                    raise TypeError(
+                        f"List parameters must be pdarray, Strings, SegArray, str or a type "
+                        f"that inherits from the aforementioned. {type(p).__name__} "
+                        f"does not meet that criteria."
+                    )
+            t = "mixed"
+        data = [str(p) if ParameterObject._is_supported_value(p) else p.name for p in val]
+        return ParameterObject(key, ObjectType.LIST, t, json.dumps(data))
 
     @staticmethod
     @typechecked
@@ -280,7 +290,6 @@ context of an Arkouda server request.
 
 @dataclass(frozen=True)
 class RequestMessage:
-
     __slots = ("user", "token", "cmd", "format", "args", "size")
 
     user: str
@@ -364,7 +373,6 @@ a message returned by the Arkouda server
 
 @dataclass(frozen=True)
 class ReplyMessage:
-
     __slots__ = ("msg", "msgType", "user")
 
     msg: str

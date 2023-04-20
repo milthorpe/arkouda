@@ -71,6 +71,11 @@ module MultiTypeSymEntry
             this.assignableTypes.add(this.entryType);
         }
 
+        proc init(input) {
+          this.entryType = input.entryType;
+          this.assignableTypes = input.assignableTypes;
+        }
+
         /*
             Sets the name of the entry when it is added to the Symbol Table
         */
@@ -408,7 +413,7 @@ module MultiTypeSymEntry
         }
     }
 
-    /**
+    /*
         Base class for any entry that consists of multiple SymEntries that have varying types.
         These entries are related, but do not represent a single object.
         For Example, group by contains multiple SymEntries that are all considered part of the dataset.
@@ -573,6 +578,10 @@ module MultiTypeSymEntry
      */
     proc toSegStringSymEntry(entry: borrowed AbstractSymEntry) throws {
         return (entry: borrowed SegStringSymEntry);
+    }
+
+    proc toSegArraySymEntry(entry: borrowed AbstractSymEntry, type t) throws {
+        return (entry: borrowed SegArraySymEntry(t));
     }
 
     /**

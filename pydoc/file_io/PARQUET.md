@@ -12,6 +12,8 @@ More information on Parquet can be found [here](https://parquet.apache.org/).
 - Index
 - DataFrame
 - Strings
+- SegArray
+  - Strings dtype not yet supported. Track [here](https://github.com/Bears-R-Us/arkouda/issues/2121)
 
 ## Compression
 
@@ -28,10 +30,11 @@ Data can also be saved using no compression. Arkouda now supports writting Parqu
 ## Supported Write Modes
 
 **Truncate**
-> When writing to Parquet in `truncate` mode, any existing HDF5 file with the same name will be overwritten. If no file exists, one will be created. If writing multiple objects, all corresponding columns will be written to the Paruqet file at once. 
+> When writing to Parquet in `truncate` mode, any existing Parquet file with the same name will be overwritten. If no file exists, one will be created. If writing multiple objects, all corresponding columns will be written to the Paruqet file at once.
 
 **Append**
-> When writting to Parquet in `append` mode, all datasets will be appended to the file. If no file with the supplied name exists, one will be created. If any datasets being written have a name that is already the name of a dataset within the file, an error will be generated.
+> When writting to Parquet in `append` mode, all datasets will be appended to the file. If no file with the supplied name exists, one will be created. If any datasets being written have a name that is already the name of a dataset within the file, an error will be generated. Append is not supported for SegArray objects.
+>
 >*Please Note: appending to a Parquet file is not natively support and is extremely ineffiecent. It is recommended to read the file out and call `arkouda.io.to_parquet` on the output with the additional columns added and then writting in `truncate` mode.*
 
 ## API Reference
@@ -63,6 +66,12 @@ Data can also be saved using no compression. Arkouda now supports writting Parqu
 ```{eval-rst}  
 - :py:meth:`arkouda.Strings.to_parquet`
 - :py:meth:`arkouda.Strings.save`
+```
+
+### SegArray
+
+```{eval-rst}  
+- :py:meth:`arkouda.SegArray.to_parquet`
 ```
 
 ### Categorical

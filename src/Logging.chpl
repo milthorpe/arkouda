@@ -1,10 +1,12 @@
 module Logging {
     use Set;
-    use IO;
     use FileSystem;
-    use ArkoudaDateTimeCompat;
     use Reflection;
     use ServerErrors;
+    use ArkoudaTimeCompat as Time;
+
+    import IO.{format, stdout, file};
+    use ArkoudaFileCompat;
 
     /*
      * The LogLevel enum is used to provide a strongly-typed means of
@@ -59,10 +61,10 @@ module Logging {
             var writer;
             if exists(filePath) {
                 use ArkoudaFileCompat;
-                var aFile = open(filePath, iomode.rw);
-                writer = aFile.appendWriter();
+                var aFile = open(filePath, ioMode.rw);
+                writer = aFile.writer(region=aFile.size..);
             } else {
-                var aFile = open(filePath, iomode.cwr);
+                var aFile = open(filePath, ioMode.cwr);
                 writer = aFile.writer();
             }
 
@@ -175,13 +177,14 @@ module Logging {
         
         proc generateLogMessage(moduleName: string, routineName, lineNumber, 
                            msg, level: string) throws {
+            var lineStr: string = if lineNumber != 0 then "Line %i ".format(lineNumber) else "";
              if printDate {
-                 return "%s [%s] %s Line %i %s [Chapel] %s".format(
-                 generateDateTimeString(), moduleName,routineName,lineNumber, 
+                 return "%s [%s] %s %s%s [Chapel] %s".format(
+                 generateDateTimeString(), moduleName,routineName,lineStr, 
                                      level,msg);
              } else {
-                 return "[%s] %s Line %i %s [Chapel] %s".format(moduleName, 
-                 routineName,lineNumber,level,msg);            
+                 return "[%s] %s %s%s [Chapel] %s".format(moduleName, 
+                 routineName,lineStr,level,msg);            
              }
         }
          

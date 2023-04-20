@@ -11,16 +11,17 @@ module SegmentedString {
   use PrivateDist;
   use ServerConfig;
   use Unique;
-  use Time only getCurrentTime;
+  use ArkoudaTimeCompat as Time;
   use Reflection;
   use Logging;
   use ServerErrors;
-  use Regex;
   use SegmentedComputation;
 
   use Subprocess;
   use Path;
   use FileSystem;
+
+  use ArkoudaRegexCompat;
 
   private config const logLevel = ServerConfig.logLevel;
   private config const logChannel = ServerConfig.logChannel;
@@ -222,7 +223,7 @@ module SegmentedString {
       }
       ssLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
                                               "Computing lengths and offsets");
-      var t1 = getCurrentTime();
+      var t1 = timeSinceEpoch().totalSeconds();
       ref oa = offsets.a;
       const low = offsets.a.domain.low, high = offsets.a.domain.high;
       // Gather the right and left boundaries of the indexed strings
@@ -248,10 +249,10 @@ module SegmentedString {
       gatheredOffsets -= gatheredLengths;
       
       ssLogger.debug(getModuleName(),getRoutineName(),getLineNumber(), 
-                                "aggregation in %i seconds".format(getCurrentTime() - t1));
+                                "aggregation in %i seconds".format(timeSinceEpoch().totalSeconds() - t1));
       ssLogger.debug(getModuleName(),getRoutineName(),getLineNumber(), "Copying values");
       if logLevel == LogLevel.DEBUG {
-          t1 = getCurrentTime();
+          t1 = timeSinceEpoch().totalSeconds();
       }
       var gatheredVals = makeDistArray(retBytes, uint(8));
       if CHPL_COMM != 'none' {
@@ -295,7 +296,7 @@ module SegmentedString {
       }
       ssLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
                             "Gathered offsets and vals in %i seconds".format(
-                                           getCurrentTime() -t1));
+                                           timeSinceEpoch().totalSeconds() -t1));
       return (gatheredOffsets, gatheredVals);
     }
 
@@ -309,7 +310,7 @@ module SegmentedString {
       }
       ssLogger.debug(getModuleName(),getRoutineName(),getLineNumber(), 
                                                  "Computing lengths and offsets");
-      var t1 = getCurrentTime();
+      var t1 = timeSinceEpoch().totalSeconds();
       ref oa = offsets.a;
       const low = offsets.a.domain.low, high = offsets.a.domain.high;
       // check there's enough room to create a copy for scan and throw if creating a copy would go over memory limit
@@ -345,20 +346,20 @@ module SegmentedString {
         // Hash all strings
         ssLogger.debug(getModuleName(),getRoutineName(),getLineNumber(), "Hashing strings"); 
         var t1: real;
-        if logLevel == LogLevel.DEBUG { t1 = getCurrentTime(); }
+        if logLevel == LogLevel.DEBUG { t1 = timeSinceEpoch().totalSeconds(); }
         var hashes = this.siphash();
 
         if logLevel == LogLevel.DEBUG { 
             ssLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
-                           "hashing took %t seconds\nSorting hashes".format(getCurrentTime() - t1));
-            t1 = getCurrentTime();
+                           "hashing took %t seconds\nSorting hashes".format(timeSinceEpoch().totalSeconds() - t1));
+            t1 = timeSinceEpoch().totalSeconds();
         }
 
         // Return the permutation that sorts the hashes
         var iv = radixSortLSD_ranks(hashes);
         if logLevel == LogLevel.DEBUG { 
             ssLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
-                                            "sorting took %t seconds".format(getCurrentTime() - t1));
+                                            "sorting took %t seconds".format(timeSinceEpoch().totalSeconds() - t1));
         }
         if logLevel == LogLevel.DEBUG {
           var sortedHashes = [i in iv] hashes[i];
@@ -739,6 +740,59 @@ module SegmentedString {
       }
       return (subbedOffsets, subbedVals, numReplacements);
     }
+
+    proc segStrWhere(otherStr: ?t, condition: [] bool, newLens: [] int) throws where t == string {
+      // add one to account for null bytes
+      newLens += 1;
+      ref origOffs = this.offsets.a;
+      ref origVals = this.values.a;
+      const other = otherStr:bytes;
+
+      overMemLimit(newLens.size * numBytes(int));
+      var whereOffs = (+ scan newLens) - newLens;
+      const valSize = (+ reduce newLens);
+      var whereVals = makeDistArray(valSize, uint(8));
+
+      forall (whereOff, origOff, len, cond) in zip(whereOffs, origOffs, newLens, condition) with (var valAgg = newDstAggregator(uint(8))) {
+        if cond {
+          var localizedVals = new lowLevelLocalizingSlice(origVals, origOff..#len);
+          for i in 0..#len {
+            valAgg.copy(whereVals[whereOff+i], localizedVals.ptr[i]);
+          }
+        }
+        else {
+          for i in 0..#(len-1) {
+            valAgg.copy(whereVals[whereOff+i], other[i]:uint(8));
+          }
+          // write null byte
+          valAgg.copy(whereVals[whereOff+(len-1)], 0:uint(8));
+        }
+      }
+      return (whereOffs, whereVals);
+    }
+
+   proc segStrWhere(other: ?t, condition: [] bool, newLens: [] int) throws where t == owned SegString {
+      // add one to account for null bytes
+      newLens += 1;
+      ref origOffs = this.offsets.a;
+      ref origVals = this.values.a;
+      ref otherOffs = other.offsets.a;
+      ref otherVals = other.values.a;
+
+      overMemLimit(newLens.size * numBytes(int));
+      var whereOffs = (+ scan newLens) - newLens;
+      const valSize = (+ reduce newLens);
+      var whereVals = makeDistArray(valSize, uint(8));
+
+      forall (whereOff, origOff, otherOff, len, cond) in zip(whereOffs, origOffs, otherOffs, newLens, condition) with (var valAgg = newDstAggregator(uint(8))) {
+        const localizedVals = if cond then new lowLevelLocalizingSlice(origVals, origOff..#len) else new lowLevelLocalizingSlice(otherVals, otherOff..#len);
+        for i in 0..#len {
+          valAgg.copy(whereVals[whereOff+i], localizedVals.ptr[i]);
+        }
+      }
+      return (whereOffs, whereVals);
+    }
+
 
     /*
       Strip out all of the leading and trailing characters of each element of a segstring that are

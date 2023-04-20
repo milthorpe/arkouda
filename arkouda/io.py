@@ -11,25 +11,32 @@ import arkouda.array_view
 from arkouda.categorical import Categorical
 from arkouda.client import generic_msg
 from arkouda.pdarrayclass import create_pdarray, pdarray
+from arkouda.pdarraycreation import array
+from arkouda.segarray import SegArray
 from arkouda.strings import Strings
+from arkouda.array_view import ArrayView
 
 __all__ = [
     "get_filetype",
     "ls",
+    "ls_csv",
     "get_null_indices",
     "get_datasets",
+    "get_columns",
     "read_hdf",
     "read_parquet",
+    "read_csv",
     "read",
+    "read_tagged_data",
     "import_data",
     "export",
     "to_hdf",
     "to_parquet",
+    "to_csv",
     "save_all",
     "load",
     "load_all",
-    "file_type_to_int",
-    "mode_str_to_int",
+    "update_hdf",
 ]
 
 ARKOUDA_HDF5_FILE_METADATA_GROUP = "_arkouda_metadata"
@@ -48,7 +55,7 @@ def get_filetype(filenames: Union[str, List[str]]) -> str:
     Returns
     -------
     str
-        Type of the file returned as a string, either 'HDF5' or 'Parquet'
+        Type of the file returned as a string, either 'HDF5', 'Parquet' or 'CSV
 
     Raises
     ------
@@ -57,7 +64,8 @@ def get_filetype(filenames: Union[str, List[str]]) -> str:
 
     Notes
     -----
-    When list provided, it is assumed that all files are the same type
+    - When list provided, it is assumed that all files are the same type
+    - CSV Files without the Arkouda Header are not supported
 
     See Also
     --------
@@ -73,7 +81,7 @@ def get_filetype(filenames: Union[str, List[str]]) -> str:
     return cast(str, generic_msg(cmd="getfiletype", args={"filename": fname}))
 
 
-def ls(filename: str) -> List[str]:
+def ls(filename: str, col_delim: str = ",") -> List[str]:
     """
     This function calls the h5ls utility on a HDF5 file visible to the
     arkouda server or calls a function that imitates the result of h5ls
@@ -83,6 +91,8 @@ def ls(filename: str) -> List[str]:
     ----------
     filename : str
         The name of the file to pass to the server
+    col_delim : str
+        The delimiter used to separate columns if the file is a csv
 
     Returns
     -------
@@ -100,6 +110,11 @@ def ls(filename: str) -> List[str]:
     Notes
         - This will need to be updated because Parquet will not technically support this when we update.
             Similar functionality will be added for Parquet in the future
+        - For CSV files without headers, please use ls_csv
+
+    See Also
+    ---------
+    ls_csv
     """
     if not (filename and filename.strip()):
         raise ValueError("filename cannot be an empty string")
@@ -110,9 +125,7 @@ def ls(filename: str) -> List[str]:
             str,
             generic_msg(
                 cmd=cmd,
-                args={
-                    "filename": filename,
-                },
+                args={"filename": filename, "col_delim": col_delim},
             ),
         )
     )
@@ -169,7 +182,7 @@ def get_null_indices(
 
 
 @typechecked
-def file_type_to_int(file_type: str) -> int:
+def _file_type_to_int(file_type: str) -> int:
     """
     Convert a string to integer representing the format to save the file in
 
@@ -185,7 +198,7 @@ def file_type_to_int(file_type: str) -> int:
     Raises
     ------
     ValueError
-        - If mode is not 'single' or 'distribute'
+        If mode is not 'single' or 'distribute'
     """
     if file_type.lower() == "single":
         return 0
@@ -196,7 +209,7 @@ def file_type_to_int(file_type: str) -> int:
 
 
 @typechecked
-def mode_str_to_int(mode: str) -> int:
+def _mode_str_to_int(mode: str) -> int:
     """
     Convert string to integer representing the mode to write
 
@@ -212,7 +225,7 @@ def mode_str_to_int(mode: str) -> int:
     Raises
     ------
     ValueError
-        - If mode is not 'truncate' or 'append'
+        If mode is not 'truncate' or 'append'
     """
     if mode.lower() == "truncate":
         return 0
@@ -222,7 +235,9 @@ def mode_str_to_int(mode: str) -> int:
         raise ValueError(f"Write Mode expected to be 'truncate' or 'append'. Got {mode}.")
 
 
-def get_datasets(filenames: Union[str, List[str]], allow_errors: bool = False) -> List[str]:
+def get_datasets(
+    filenames: Union[str, List[str]], allow_errors: bool = False, column_delim: str = ","
+) -> List[str]:
     """
     Get the names of the datasets in the provide files
 
@@ -233,6 +248,8 @@ def get_datasets(filenames: Union[str, List[str]], allow_errors: bool = False) -
     allow_errors: bool
         Default: False
         Whether or not to allow errors while accessing datasets
+    column_delim : str
+        Column delimiter to be used if dataset is CSV. Otherwise, unused.
 
     Returns
     -------
@@ -259,7 +276,67 @@ def get_datasets(filenames: Union[str, List[str]], allow_errors: bool = False) -
         filenames = [filenames]
     for fname in filenames:
         try:
-            datasets = ls(fname)
+            datasets = ls(fname, col_delim=column_delim)
+            if datasets:
+                break
+        except RuntimeError:
+            if allow_errors:
+                pass
+            else:
+                raise
+
+    if not datasets:  # empty
+        raise RuntimeError("Unable to identify datasets.")
+    return datasets
+
+
+def ls_csv(filename: str, col_delim: str = ",") -> List[str]:
+    """
+    Used for identifying the datasets within a file when a CSV does not
+    have a header.
+
+    Parameters
+    ----------
+    filename : str
+        The name of the file to pass to the server
+    col_delim : str
+        The delimiter used to separate columns if the file is a csv
+
+    Returns
+    -------
+    str
+        The string output of the datasets from the server
+
+    See Also
+    ---------
+    ls
+    """
+    if not (filename and filename.strip()):
+        raise ValueError("filename cannot be an empty string")
+
+    return json.loads(
+        cast(
+            str,
+            generic_msg(
+                cmd="lscsv",
+                args={"filename": filename, "col_delim": col_delim},
+            ),
+        )
+    )
+
+
+def get_columns(
+    filenames: Union[str, List[str]], col_delim: str = ",", allow_errors: bool = False
+) -> List[str]:
+    """
+    Get a list of column names from CSV file(s).
+    """
+    datasets = []
+    if isinstance(filenames, str):
+        filenames = [filenames]
+    for fname in filenames:
+        try:
+            datasets = ls_csv(fname, col_delim)
             if datasets:
                 break
         except RuntimeError:
@@ -338,7 +415,7 @@ def _parse_errors(rep_msg, allow_errors: bool = False):
         )
 
 
-def _parse_obj(obj: Dict) -> Union[Strings, pdarray, arkouda.array_view.ArrayView]:
+def _parse_obj(obj: Dict) -> Union[Strings, pdarray, arkouda.array_view.ArrayView, SegArray]:
     """
     Helper function to create an Arkouda object from read response
 
@@ -358,6 +435,8 @@ def _parse_obj(obj: Dict) -> Union[Strings, pdarray, arkouda.array_view.ArrayVie
     """
     if "seg_string" == obj["arkouda_type"]:
         return Strings.from_return_msg(obj["created"])
+    elif "seg_array" == obj["arkouda_type"]:
+        return SegArray.from_return_msg(obj["created"])
     elif "pdarray" == obj["arkouda_type"]:
         return create_pdarray(obj["created"])
     elif "ArrayView" == obj["arkouda_type"]:
@@ -369,13 +448,34 @@ def _parse_obj(obj: Dict) -> Union[Strings, pdarray, arkouda.array_view.ArrayVie
         raise TypeError(f"Unknown arkouda type:{obj['arkouda_type']}")
 
 
+def _dict_recombine_segarrays(df_dict):
+    # this assumes segments will always have corresponding values.
+    # This should happen due to save config
+    seg_cols = ["_".join(col.split("_")[:-1]) for col in df_dict.keys() if col.endswith("_segments")]
+    df_dict_keys = [
+        "_".join(col.split("_")[:-1]) if col.endswith("_segments") or col.endswith("_values") else col
+        for col in df_dict.keys()
+    ]
+
+    # update dict to contain segarrays where applicable if any exist
+    if len(seg_cols) > 0:
+        df_dict = {
+            col: SegArray.from_parts(df_dict[col + "_segments"], df_dict[col + "_values"])
+            if col in seg_cols
+            else df_dict[col]
+            for col in df_dict_keys
+        }
+    return df_dict
+
+
 def _build_objects(
     rep_msg: Dict,
 ) -> Union[
     Strings,
     pdarray,
+    SegArray,
     arkouda.array_view.ArrayView,
-    Mapping[str, Union[Strings, pdarray, arkouda.array_view.ArrayView]],
+    Mapping[str, Union[Strings, pdarray, SegArray, arkouda.array_view.ArrayView]],
 ]:
     """
     Helper function to create the Arkouda objects from a read operation
@@ -394,13 +494,15 @@ def _build_objects(
     RuntimeError
         - If no objects were returned
     """
-    items = rep_msg["items"] if "items" in rep_msg else []
+    items = json.loads(rep_msg["items"]) if "items" in rep_msg else []
     # We have a couple possible return conditions
     # 1. We have multiple items returned i.e. multi pdarrays, multi strings, multi pdarrays & strings
     # 2. We have a single pdarray
     # 3. We have a single strings object
     if len(items) > 1:  # DataSets condition
-        return {item["dataset_name"]: _parse_obj(item) for item in items}
+        ds_dict = _dict_recombine_segarrays({item["dataset_name"]: _parse_obj(item) for item in items})
+        # if dict only has 1 element when it had >1 before, the element must be a segarray
+        return next(iter(ds_dict.values())) if len(ds_dict.keys()) == 1 else ds_dict
     elif len(items) == 1:
         return _parse_obj(items[0])
     else:
@@ -414,11 +516,13 @@ def read_hdf(
     strict_types: bool = True,
     allow_errors: bool = False,
     calc_string_offsets: bool = False,
+    tag_data=False,
 ) -> Union[
     pdarray,
     Strings,
+    SegArray,
     arkouda.array_view.ArrayView,
-    Mapping[str, Union[pdarray, Strings, arkouda.array_view.ArrayView]],
+    Mapping[str, Union[pdarray, Strings, SegArray, arkouda.array_view.ArrayView]],
 ]:
     """
     Read Arkouda objects from HDF5 file/s
@@ -446,13 +550,16 @@ def read_hdf(
         Default False, if True this will tell the server to calculate the
         offsets/segments array on the server versus loading them from HDF5 files.
         In the future this option may be set to True as the default.
+    tagData: bool
+        Default False, if True tag the data with the code associated with the filename
+        that the data was pulled from.
 
     Returns
     -------
-    For a single dataset returns an Arkouda pdarray, Arkouda Strings, or Arkouda ArrayView object
-    and for multiple datasets returns a dictionary of Arkouda pdarrays,
-    Arkouda Strings or Arkouda ArrayView.
-        Dictionary of {datasetName: pdarray or String}
+    For a single dataset returns an Arkouda pdarray, Arkouda Strings, Arkouda Segarrays,
+    or Arkouda ArrayViews. For multiple datasets returns a dictionary of Arkouda pdarrays,
+    Arkouda Strings, Arkouda Segarrays, or Arkouda ArrayViews.
+        Dictionary of {datasetName: pdarray, String, SegArray, or ArrayView}
 
     Raises
     ------
@@ -481,11 +588,16 @@ def read_hdf(
     and read all of them. Use ``get_datasets`` to show the names of datasets
     to HDF5 files.
 
+    See Also
+    ---------
+    read_tagged_data
+
     Examples
     --------
-    Read with file Extension
+    >>>
+    # Read with file Extension
     >>> x = ak.read_hdf('path/name_prefix.h5') # load HDF5
-    Read Glob Expression
+    # Read Glob Expression
     >>> x = ak.read_hdf('path/name_prefix*') # Reads HDF5
     """
     if isinstance(filenames, str):
@@ -493,6 +605,8 @@ def read_hdf(
     datasets = _prep_datasets(filenames, datasets, allow_errors)
 
     if iterative:
+        if tag_data:
+            raise RuntimeError("Cannot tag data with iterative read.")
         return {
             dset: read_hdf(
                 filenames,
@@ -500,6 +614,7 @@ def read_hdf(
                 strict_types=strict_types,
                 allow_errors=allow_errors,
                 calc_string_offsets=calc_string_offsets,
+                tag_data=tag_data,
             )[dset]
             for dset in datasets
         }
@@ -514,6 +629,7 @@ def read_hdf(
                 "calc_string_offsets": calc_string_offsets,
                 "dsets": datasets,
                 "filenames": filenames,
+                "tag_data": tag_data,
             },
         )
         rep = json.loads(rep_msg)  # See GenSymIO._buildReadAllMsgJson for json structure
@@ -527,90 +643,102 @@ def read_parquet(
     iterative: bool = False,
     strict_types: bool = True,
     allow_errors: bool = False,
+    tag_data: bool = False,
 ) -> Union[
     pdarray,
     Strings,
+    SegArray,
     arkouda.array_view.ArrayView,
-    Mapping[str, Union[pdarray, Strings, arkouda.array_view.ArrayView]],
+    Mapping[str, Union[pdarray, Strings, SegArray, arkouda.array_view.ArrayView]],
 ]:
     """
     Read Arkouda objects from Parquet file/s
 
-        Parameters
-        ----------
-        filenames : str, List[str]
-            Filename/s to read objects from
-        datasets : Optional str, List[str]
-            datasets to read from the provided files
-        iterative : bool
-            Iterative (True) or Single (False) function call(s) to server
-        strict_types: bool
-            If True (default), require all dtypes of a given dataset to have the
-            same precision and sign. If False, allow dtypes of different
-            precision and sign across different files. For example, if one
-            file contains a uint32 dataset and another contains an int64
-            dataset with the same name, the contents of both will be read
-            into an int64 pdarray.
-        allow_errors: bool
-            Default False, if True will allow files with read errors to be skipped
-            instead of failing.  A warning will be included in the return containing
-            the total number of files skipped due to failure and up to 10 filenames.
+    Parameters
+    ----------
+    filenames : str, List[str]
+        Filename/s to read objects from
+    datasets : Optional str, List[str]
+        datasets to read from the provided files
+    iterative : bool
+        Iterative (True) or Single (False) function call(s) to server
+    strict_types: bool
+        If True (default), require all dtypes of a given dataset to have the
+        same precision and sign. If False, allow dtypes of different
+        precision and sign across different files. For example, if one
+        file contains a uint32 dataset and another contains an int64
+        dataset with the same name, the contents of both will be read
+        into an int64 pdarray.
+    allow_errors: bool
+        Default False, if True will allow files with read errors to be skipped
+        instead of failing.  A warning will be included in the return containing
+        the total number of files skipped due to failure and up to 10 filenames.
+    tagData: bool
+        Default False, if True tag the data with the code associated with the filename
+        that the data was pulled from.
 
-        Returns
-        -------
-        For a single dataset returns an Arkouda pdarray, Arkouda Strings, or Arkouda ArrayView object
-        and for multiple datasets returns a dictionary of Arkouda pdarrays,
-        Arkouda Strings or Arkouda ArrayView.
-            Dictionary of {datasetName: pdarray or String}
+    Returns
+    -------
+    For a single dataset returns an Arkouda pdarray, Arkouda Strings, or Arkouda ArrayView object
+    and for multiple datasets returns a dictionary of Arkouda pdarrays,
+    Arkouda Strings or Arkouda ArrayView.
+        Dictionary of {datasetName: pdarray or String}
 
-        Raises
-        ------
-        ValueError
-            Raised if all datasets are not present in all parquet files or if one or
-            more of the specified files do not exist
-        RuntimeError
-            Raised if one or more of the specified files cannot be opened.
-            If `allow_errors` is true this may be raised if no values are returned
-            from the server.
-        TypeError
-            Raised if we receive an unknown arkouda_type returned from the server
+    Raises
+    ------
+    ValueError
+        Raised if all datasets are not present in all parquet files or if one or
+        more of the specified files do not exist
+    RuntimeError
+        Raised if one or more of the specified files cannot be opened.
+        If `allow_errors` is true this may be raised if no values are returned
+        from the server.
+    TypeError
+        Raised if we receive an unknown arkouda_type returned from the server
 
-        Notes
-        -----
-        If filenames is a string, it is interpreted as a shell expression
-        (a single filename is a valid expression, so it will work) and is
-        expanded with glob to read all matching files.
+    Notes
+    -----
+    If filenames is a string, it is interpreted as a shell expression
+    (a single filename is a valid expression, so it will work) and is
+    expanded with glob to read all matching files.
 
-        If iterative == True each dataset name and file names are passed to
-        the server as independent sequential strings while if iterative == False
-        all dataset names and file names are passed to the server in a single
-        string.
+    If iterative == True each dataset name and file names are passed to
+    the server as independent sequential strings while if iterative == False
+    all dataset names and file names are passed to the server in a single
+    string.
 
-        If datasets is None, infer the names of datasets from the first file
-        and read all of them. Use ``get_datasets`` to show the names of datasets
-        to Parquet files.
+    If datasets is None, infer the names of datasets from the first file
+    and read all of them. Use ``get_datasets`` to show the names of datasets
+    to Parquet files.
 
-        Parquet always recomputes offsets at this time
-        This will need to be updated once parquets workflow is updated
+    Parquet always recomputes offsets at this time
+    This will need to be updated once parquets workflow is updated
 
-        Examples
-        --------
-        Read without file Extension
-        >>> x = ak.read_parquet('path/name_prefix.parquet') # load Parquet
-        Read Glob Expression
-        >>> x = ak.read_parquet('path/name_prefix*') # Reads Parquet
+    See Also
+    ---------
+    read_tagged_data
+
+    Examples
+    --------
+    Read without file Extension
+    >>> x = ak.read_parquet('path/name_prefix.parquet') # load Parquet
+    Read Glob Expression
+    >>> x = ak.read_parquet('path/name_prefix*') # Reads Parquet
     """
     if isinstance(filenames, str):
         filenames = [filenames]
     datasets = _prep_datasets(filenames, datasets)
 
     if iterative:
+        if tag_data:
+            raise RuntimeError("Cannot tag data with iterative read.")
         return {
             dset: read_parquet(
                 filenames,
                 datasets=dset,
                 strict_types=strict_types,
                 allow_errors=allow_errors,
+                tag_data=tag_data,
             )[dset]
             for dset in datasets
         }
@@ -624,11 +752,96 @@ def read_parquet(
                 "allow_errors": allow_errors,
                 "dsets": datasets,
                 "filenames": filenames,
+                "tag_data": tag_data,
             },
         )
         rep = json.loads(rep_msg)  # See GenSymIO._buildReadAllMsgJson for json structure
         _parse_errors(rep, allow_errors)
         return _build_objects(rep)
+
+
+def read_csv(
+    filenames: Union[str, List[str]],
+    datasets: Optional[Union[str, List[str]]] = None,
+    column_delim: str = ",",
+    allow_errors: bool = False,
+) -> Union[
+    pdarray,
+    Strings,
+    SegArray,
+    arkouda.array_view.ArrayView,
+    Mapping[str, Union[pdarray, Strings, SegArray, arkouda.array_view.ArrayView]],
+]:
+    """
+    Read CSV file(s) into Arkouda objects. If more than one dataset is found, the objects
+    will be returned in a dictionary mapping the dataset name to the Arkouda object
+    containing the data. If the file contains the appropriately formatted header, typed
+    data will be returned. Otherwise, all data will be returned as a Strings object.
+
+    Parameters
+    -----------
+    filenames: str or List[str]
+        The filenames to read data from
+    datasets: str or List[str] (Optional)
+        names of the datasets to read. When `None`, all datasets will be read.
+    column_delim: str
+        The delimiter for column names and data. Defaults to ",".
+    allow_errors: bool
+        Default False, if True will allow files with read errors to be skipped
+        instead of failing.  A warning will be included in the return containing
+        the total number of files skipped due to failure and up to 10 filenames.
+
+    Returns
+    --------
+    pdarray, Strings or Mapping {dset_name: obj} where obj is a pdarray or Strings.
+
+    Raises
+    ------
+    ValueError
+        Raised if all datasets are not present in all parquet files or if one or
+        more of the specified files do not exist
+    RuntimeError
+        Raised if one or more of the specified files cannot be opened.
+        If `allow_errors` is true this may be raised if no values are returned
+        from the server.
+    TypeError
+        Raised if we receive an unknown arkouda_type returned from the server
+
+    See Also
+    ---------
+    to_csv
+
+    Notes
+    ------
+    - CSV format is not currently supported by load/load_all operations
+    - The column delimiter is expected to be the same for column names and data
+    - Be sure that column delimiters are not found within your data.
+    - All CSV files must delimit rows using newline (``\\n``) at this time.
+    - Unlike other file formats, CSV files store Strings as their UTF-8 format instead of storing
+      bytes as uint(8).
+    """
+    if isinstance(filenames, str):
+        filenames = [filenames]
+
+    if isinstance(datasets, str):
+        datasets = [datasets]
+    elif datasets is None:
+        datasets = get_columns(filenames, col_delim=column_delim, allow_errors=allow_errors)
+
+    rep_msg = generic_msg(
+        cmd="readcsv",
+        args={
+            "filenames": filenames,
+            "nfiles": len(filenames),
+            "datasets": datasets,
+            "num_dsets": len(datasets),
+            "col_delim": column_delim,
+            "allow_errors": allow_errors,
+        },
+    )
+    rep = json.loads(rep_msg)  # See GenSymIO._buildReadAllMsgJson for json structure
+    _parse_errors(rep, allow_errors)
+    return _build_objects(rep)
 
 
 def import_data(read_path: str, write_file: str = None, return_obj: bool = True, index: bool = False):
@@ -750,9 +963,9 @@ def export(
     Notes
     _____
     - If Arkouda file is exported for pandas, the format will not change. This mean parquet files
-    will remain parquet and hdf5 will remain hdf5.
+      will remain parquet and hdf5 will remain hdf5.
     - Export can only be performed from hdf5 or parquet files written by Arkouda. The result will be
-    the same file type, but formatted to be read by Pandas.
+      the same file type, but formatted to be read by Pandas.
     """
     from arkouda.dataframe import DataFrame
 
@@ -781,27 +994,41 @@ def export(
         return df
 
 
-def _bulk_write_prep(columns: Union[Mapping[str, pdarray], List[pdarray]], names: List[str] = None):
+def _bulk_write_prep(
+    columns: Union[
+        Mapping[str, Union[pdarray, Strings, SegArray, ArrayView]],
+        List[Union[pdarray, Strings, SegArray, ArrayView]],
+    ],
+    names: List[str] = None,
+):
     datasetNames = []
     if names is not None:
         if len(names) != len(columns):
             raise ValueError("Number of names does not match number of columns")
         else:
             datasetNames = names
+
+    data = []  # init to avoid undefined errors
     if isinstance(columns, dict):
-        pdarrays = list(columns.values())
+        data = list(columns.values())
         if names is None:
             datasetNames = list(columns.keys())
     elif isinstance(columns, list):
-        pdarrays = cast(List[pdarray], columns)
+        data = cast(List[pdarray], columns)
         if names is None:
             datasetNames = [str(column) for column in range(len(columns))]
 
-    return datasetNames, pdarrays
+    if len(data) == 0:
+        raise RuntimeError("No data was found.")
+
+    return datasetNames, data
 
 
 def to_parquet(
-    columns: Union[Mapping[str, pdarray], List[pdarray]],
+    columns: Union[
+        Mapping[str, Union[pdarray, Strings, SegArray, ArrayView]],
+        List[Union[pdarray, Strings, SegArray, ArrayView]],
+    ],
     prefix_path: str,
     names: List[str] = None,
     mode: str = "truncate",
@@ -899,7 +1126,10 @@ def to_parquet(
 
 
 def to_hdf(
-    columns: Union[Mapping[str, pdarray], List[pdarray]],
+    columns: Union[
+        Mapping[str, Union[pdarray, Strings, SegArray, ArrayView]],
+        List[Union[pdarray, Strings, SegArray, ArrayView]],
+    ],
     prefix_path: str,
     names: List[str] = None,
     mode: str = "truncate",
@@ -977,8 +1207,170 @@ def to_hdf(
             mode = "append"
 
 
+def _get_hdf_filetype(filename: str) -> str:
+    if not (filename and filename.strip()):
+        raise ValueError("filename cannot be an empty string")
+
+    cmd = "hdffileformat"
+    return cast(
+        str,
+        generic_msg(
+            cmd=cmd,
+            args={"filename": filename},
+        ),
+    )
+
+
+def _repack_hdf(prefix_path: str):
+    """
+    Overwrites the existing hdf5 file with a copy that removes any inaccessible datasets
+    """
+    file_type = _get_hdf_filetype(prefix_path + "*")
+    dset_list = ls(prefix_path + "*")
+    if len(dset_list) == 1:
+        # early out because when overwriting only one value, hdf5 automatically releases memory
+        return
+    data = read_hdf(prefix_path + "*")
+    if not isinstance(data, dict):
+        # handles the case of reading only 1 dataset
+        data = [data]  # type: ignore
+    to_hdf(data, prefix_path, names=dset_list, file_type=file_type)  # type: ignore
+
+
+def update_hdf(
+    columns: Union[
+        Mapping[str, Union[pdarray, Strings, SegArray, ArrayView]],
+        List[Union[pdarray, Strings, SegArray, ArrayView]],
+    ],
+    prefix_path: str,
+    names: List[str] = None,
+    repack: bool = True,
+):
+    """
+    Overwrite the datasets with name appearing in names or keys in columns if columns
+    is a dictionary
+
+    Parameters
+    -----------
+    columns : dict or list of pdarrays
+        Collection of arrays to save
+    prefix_path : str
+        Directory and filename prefix for output files
+    names : list of str
+        Dataset names for the pdarrays
+    repack: bool
+        Default: True
+        HDF5 does not release memory on delete. When True, the inaccessible
+        data (that was overwritten) is removed. When False, the data remains, but is
+        inaccessible. Setting to false will yield better performance, but will cause
+        file sizes to expand.
+
+    Raises
+    -------
+    RuntimeError
+        Raised if a server-side error is thrown saving the datasets
+
+    Notes
+    -----
+    - If file does not contain File_Format attribute to indicate how it was saved,
+      the file name is checked for _LOCALE#### to determine if it is distributed.
+    - If the datasets provided do not exist, they will be added
+    - Because HDF5 deletes do not release memory, this will create a copy of the
+      file with the new data
+    - This workflow is slightly different from `to_hdf` to prevent reading and
+      creating a copy of the file for each dataset
+    """
+    datasetNames, pdarrays = _bulk_write_prep(columns, names)
+
+    for arr, name in zip(pdarrays, cast(List[str], datasetNames)):
+        # overwrite the data without repacking. Repack done once at end if set
+        arr.update_hdf(prefix_path, dataset=name, repack=False)
+
+    if repack:
+        _repack_hdf(prefix_path)
+
+
+def to_csv(
+    columns: Union[Mapping[str, Union[pdarray, Strings]], List[Union[pdarray, Strings]]],
+    prefix_path: str,
+    names: List[str] = None,
+    col_delim: str = ",",
+    overwrite: bool = False,
+):
+    """
+    Write Arkouda object(s) to CSV file(s). All CSV Files written by Arkouda
+    include a header denoting data types of the columns.
+
+    Parameters
+    -----------
+    columns: Mapping[str, pdarray] or List[pdarray]
+        The objects to be written to CSV file. If a mapping is used and `names` is None
+        the keys of the mapping will be used as the dataset names.
+    prefix_path: str
+        The filename prefix to be used for saving files. Files will have _LOCALE#### appended
+        when they are written to disk.
+    names: List[str] (Optional)
+        names of dataset to be written. Order should correspond to the order of data
+        provided in `columns`.
+    col_delim: str
+        Defaults to ",". Value to be used to separate columns within the file.
+        Please be sure that the value used DOES NOT appear in your dataset.
+    overwrite: bool
+        Defaults to False. If True, any existing files matching your provided prefix_path will
+        be overwritten. If False, an error will be returned if existing files are found.
+
+    Returns
+    --------
+    None
+
+    Raises
+    ------
+    ValueError
+        Raised if any datasets are present in all csv files or if one or
+        more of the specified files do not exist
+    RuntimeError
+        Raised if one or more of the specified files cannot be opened.
+        If `allow_errors` is true this may be raised if no values are returned
+        from the server.
+    TypeError
+        Raised if we receive an unknown arkouda_type returned from the server
+
+    See Also
+    ---------
+    read_csv
+
+    Notes
+    ------
+    - CSV format is not currently supported by load/load_all operations
+    - The column delimiter is expected to be the same for column names and data
+    - Be sure that column delimiters are not found within your data.
+    - All CSV files must delimit rows using newline (``\\n``) at this time.
+    - Unlike other file formats, CSV files store Strings as their UTF-8 format instead of storing
+      bytes as uint(8).
+    """
+    datasetNames, pdarrays = _bulk_write_prep(columns, names)  # type: ignore
+    dtypes = [a.dtype.name for a in pdarrays]
+
+    generic_msg(
+        cmd="writecsv",
+        args={
+            "datasets": pdarrays,
+            "col_names": datasetNames,
+            "filename": prefix_path,
+            "num_dsets": len(pdarrays),
+            "col_delim": col_delim,
+            "dtypes": dtypes,
+            "row_count": pdarrays[0].size,  # all columns should have equal number of entries
+            "overwrite": overwrite,
+        },
+    )
+
+
 def save_all(
-    columns: Union[Mapping[str, pdarray], List[pdarray]],
+    columns: Union[
+        Mapping[str, Union[pdarray, Strings, SegArray, ArrayView]],
+        List[Union[pdarray, Strings, SegArray, ArrayView]],
+    ],
     prefix_path: str,
     names: List[str] = None,
     file_format="HDF5",
@@ -1059,11 +1451,13 @@ def load(
     file_format: str = "INFER",
     dataset: str = "array",
     calc_string_offsets: bool = False,
+    column_delim: str = ",",
 ) -> Union[
     pdarray,
     Strings,
+    SegArray,
     arkouda.array_view.ArrayView,
-    Mapping[str, Union[pdarray, Strings, arkouda.array_view.ArrayView]],
+    Mapping[str, Union[pdarray, Strings, SegArray, arkouda.array_view.ArrayView]],
 ]:
     """
     Load a pdarray previously saved with ``pdarray.save()``.
@@ -1080,6 +1474,8 @@ def load(
     calc_string_offsets : bool
         If True the server will ignore Segmented Strings 'offsets' array and derive
         it from the null-byte terminators.  Defaults to False currently
+    column_delim : str
+        Column delimiter to be used if dataset is CSV. Otherwise, unused.
 
     Returns
     -------
@@ -1109,6 +1505,8 @@ def load(
 
     This function will be deprecated when glob flags are added to read_* functions
 
+    CSV files without the Arkouda Header are not supported.
+
     Examples
     --------
     >>> # Loading from file without extension
@@ -1128,8 +1526,10 @@ def load(
         file_format = get_filetype(globstr) if file_format.lower() == "infer" else file_format
         if file_format.lower() == "hdf5":
             return read_hdf(globstr, dataset, calc_string_offsets=calc_string_offsets)
-        else:
+        elif file_format.lower() == "parquet":
             return read_parquet(globstr, dataset)
+        else:
+            return read_csv(globstr, dataset, column_delim=column_delim)
     except RuntimeError as re:
         if "does not exist" in str(re):
             raise ValueError(
@@ -1142,24 +1542,28 @@ def load(
 
 @typechecked
 def load_all(
-    path_prefix: str, file_format: str = "INFER"
-) -> Mapping[str, Union[pdarray, Strings, Categorical]]:
+    path_prefix: str, file_format: str = "INFER", column_delim: str = ","
+) -> Mapping[str, Union[pdarray, Strings, SegArray, Categorical]]:
     """
-    Load multiple pdarrays or Strings previously saved with ``save_all()``.
+    Load multiple pdarrays, Strings, SegArrays, or Categoricals previously
+    saved with ``save_all()``.
 
     Parameters
     ----------
     path_prefix : str
         Filename prefix used to save the original pdarray
     file_format: str
-        'INFER', 'HDF5' or 'Parquet'. Defaults to 'INFER'. Indicates the format being loaded.
+        'INFER', 'HDF5', 'Parquet', or 'CSV'. Defaults to 'INFER'. Indicates the format being loaded.
         When 'INFER' the processing will detect the format
-        Defaults to 'HDF5'
+        Defaults to 'INFER'
+    column_delim : str
+        Column delimiter to be used if dataset is CSV. Otherwise, unused.
 
     Returns
     -------
-    Mapping[str,pdarray]
-        Dictionary of {datsetName: pdarray} with the previously saved pdarrays
+    Mapping[str, Union[pdarray, Strings, SegArray, Categorical]]
+        Dictionary of {datsetName: Union[pdarray, Strings, SegArray, Categorical]}
+        with the previously saved pdarrays, Strings, SegArrays, or Categoricals
 
 
     Raises
@@ -1183,15 +1587,18 @@ def load_all(
     This function has been updated to determine the file extension based on the file format variable
 
     This function will be deprecated when glob flags are added to read_* methods
+
+    CSV files without the Arkouda Header are not supported.
     """
     prefix, extension = os.path.splitext(path_prefix)
     firstname = f"{prefix}_LOCALE0000{extension}"
     try:
         result = {
             dataset: load(prefix, file_format=file_format, dataset=dataset)
-            for dataset in get_datasets(firstname)
+            for dataset in get_datasets(firstname, column_delim=column_delim)
         }
 
+        result = _dict_recombine_segarrays(result)
         # Check for Categoricals and remove if necessary
         removal_names, categoricals = Categorical.parse_hdf_categoricals(result)
         if removal_names:
@@ -1229,11 +1636,13 @@ def read(
     strictTypes: bool = True,
     allow_errors: bool = False,
     calc_string_offsets=False,
+    column_delim: str = ",",
 ) -> Union[
     pdarray,
     Strings,
+    SegArray,
     arkouda.array_view.ArrayView,
-    Mapping[str, Union[pdarray, Strings, arkouda.array_view.ArrayView]],
+    Mapping[str, Union[pdarray, Strings, SegArray, arkouda.array_view.ArrayView]],
 ]:
     """
     Read datasets from files.
@@ -1262,13 +1671,15 @@ def read(
         Default False, if True this will tell the server to calculate the
         offsets/segments array on the server versus loading them from HDF5 files.
         In the future this option may be set to True as the default.
+    column_delim : str
+        Column delimiter to be used if dataset is CSV. Otherwise, unused.
 
     Returns
     -------
-    For a single dataset returns an Arkouda pdarray, Arkouda Strings, or Arkouda ArrayView object
-    and for multiple datasets returns a dictionary of Arkouda pdarrays,
-    Arkouda Strings or Arkouda ArrayView.
-        Dictionary of {datasetName: pdarray or String}
+    For a single dataset returns an Arkouda pdarray, Arkouda Strings, Arkouda Segarrays,
+    or Arkouda ArrayViews. For multiple datasets returns a dictionary of Arkouda pdarrays,
+    Arkouda Strings, Arkouda Segarrays, or Arkouda ArrayViews.
+        Dictionary of {datasetName: pdarray, String, SegArray, or ArrayView}
 
     Raises
     ------
@@ -1293,6 +1704,8 @@ def read(
     If datasets is None, infer the names of datasets from the first file
     and read all of them. Use ``get_datasets`` to show the names of datasets
     to HDF5/Parquet files.
+
+    CSV files without the Arkouda Header are not supported.
 
     Examples
     --------
@@ -1324,5 +1737,95 @@ def read(
             strict_types=strictTypes,
             allow_errors=allow_errors,
         )
+    elif ftype.lower() == "csv":
+        return read_csv(
+            filenames, datasets=datasets, column_delim=column_delim, allow_errors=allow_errors
+        )
+    else:
+        raise RuntimeError(f"Invalid File Type detected, {ftype}")
+
+
+def read_tagged_data(
+    filenames: Union[str, List[str]],
+    datasets: Optional[Union[str, List[str]]] = None,
+    strictTypes: bool = True,
+    allow_errors: bool = False,
+    calc_string_offsets=False,
+):
+    """
+    Read datasets from files and tag each record to the file it was read from.
+    File Type is determined automatically.
+
+    Parameters
+    ----------
+    filenames : list or str
+        Either a list of filenames or shell expression
+    datasets : list or str or None
+        (List of) name(s) of dataset(s) to read (default: all available)
+    strictTypes: bool
+        If True (default), require all dtypes of a given dataset to have the
+        same precision and sign. If False, allow dtypes of different
+        precision and sign across different files. For example, if one
+        file contains a uint32 dataset and another contains an int64
+        dataset with the same name, the contents of both will be read
+        into an int64 pdarray.
+    allow_errors: bool
+        Default False, if True will allow files with read errors to be skipped
+        instead of failing.  A warning will be included in the return containing
+        the total number of files skipped due to failure and up to 10 filenames.
+    calc_string_offsets: bool
+        Default False, if True this will tell the server to calculate the
+        offsets/segments array on the server versus loading them from HDF5 files.
+        In the future this option may be set to True as the default.
+
+    Examples
+    ---------
+    Read files and return data with tagging corresponding to the Categorical returned
+    cat.codes will link the codes in data to the filename. Data will contain the code `Filename_Codes`
+    >>> data, cat = ak.read_tagged_data('path/name')
+    >>> data
+    {'Filname_Codes': array([0 3 6 9 12]), 'col_name': array([0 0 0 1])}
+    """
+    if isinstance(filenames, str):
+        filenames = [filenames]
+
+    # handle glob expansion
+    j_str = generic_msg(
+        cmd="globExpansion",
+        args={"file_count": len(filenames), "filenames": filenames},
+    )
+    file_list = json.loads(j_str)
+    file_cat = Categorical(
+        array(file_list)
+    )  # create a categorical from the ak.Strings representation of the file list
+
+    ftype = get_filetype(filenames)
+    if ftype.lower() == "hdf5":
+        return (
+            read_hdf(
+                filenames,
+                datasets=datasets,
+                iterative=False,
+                strict_types=strictTypes,
+                allow_errors=allow_errors,
+                calc_string_offsets=calc_string_offsets,
+                tag_data=True,
+            ),
+            file_cat,
+        )
+    elif ftype.lower() == "parquet":
+        return (
+            read_parquet(
+                filenames,
+                datasets=datasets,
+                iterative=False,  # hard-coded because iterative not supported
+                strict_types=strictTypes,
+                allow_errors=allow_errors,
+                tag_data=True,
+            ),
+            file_cat,
+        )
+    elif ftype.lower() == "csv":
+        raise RuntimeError("CSV does not support tagging data with file name associated.")
     else:
         raise RuntimeError(f"Invalid File Type detected, {ftype}")

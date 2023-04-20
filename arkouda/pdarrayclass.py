@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import builtins
 import json
-from typing import List, Optional, Sequence, Union, cast
+from typing import List, Optional, Sequence, Tuple, Union, cast
 
 import numpy as np  # type: ignore
 from typeguard import typechecked
@@ -54,6 +54,7 @@ __all__ = [
     "rotr",
     "cov",
     "corr",
+    "divmod",
     "sqrt",
     "power",
     "attach_pdarray",
@@ -177,6 +178,7 @@ class pdarray:
         ndim: int_scalars,
         shape: Sequence[int],
         itemsize: int_scalars,
+        max_bits: Optional[int] = None,
     ) -> None:
         self.name = name
         self.dtype = dtype(mydtype)
@@ -184,6 +186,8 @@ class pdarray:
         self.ndim = ndim
         self.shape = shape
         self.itemsize = itemsize
+        if max_bits:
+            self.max_bits = max_bits
 
     def __del__(self):
         try:
@@ -213,7 +217,22 @@ class pdarray:
 
         return generic_msg(cmd="repr", args={"array": self, "printThresh": pdarrayIterThresh})
 
-    def format_other(self, other: object) -> str:
+    @property
+    def max_bits(self):
+        if self.dtype == bigint:
+            if not hasattr(self, "_max_bits"):
+                # if _max_bits hasn't been set, fetch value from server
+                self._max_bits = generic_msg(cmd="get_max_bits", args={"array": self})
+            return int(self._max_bits)
+        return None
+
+    @max_bits.setter
+    def max_bits(self, max_bits):
+        if self.dtype == bigint:
+            generic_msg(cmd="set_max_bits", args={"array": self, "max_bits": max_bits})
+            self._max_bits = max_bits
+
+    def format_other(self, other) -> str:
         """
         Attempt to cast scalar other to the element dtype of this pdarray,
         and print the resulting value to a string (e.g. for sending to a
@@ -236,7 +255,10 @@ class pdarray:
 
         """
         try:
-            other = self.dtype.type(other)
+            if self.dtype != bigint:
+                other = np.array([other]).astype(self.dtype)[0]
+            else:
+                other = int(other)
         except Exception:
             raise TypeError(f"Unable to convert {other} to {self.dtype.name}")
         if self.dtype == bool:
@@ -1395,7 +1417,7 @@ class pdarray:
         Saves the array to numLocales HDF5 files with the name
         ``cwd/path/name_prefix_LOCALE####.parquet`` where #### is replaced by each locale number
         """
-        from arkouda.io import mode_str_to_int
+        from arkouda.io import _mode_str_to_int
 
         return cast(
             str,
@@ -1404,8 +1426,9 @@ class pdarray:
                 args={
                     "values": self,
                     "dset": dataset,
-                    "mode": mode_str_to_int(mode),
+                    "mode": _mode_str_to_int(mode),
                     "prefix": prefix_path,
+                    "objType": "pdarray",
                     "dtype": self.dtype,
                     "compression": compression,
                 },
@@ -1472,7 +1495,7 @@ class pdarray:
         Saves the array in to single hdf5 file on the root node.
         ``cwd/path/name_prefix.hdf5``
         """
-        from arkouda.io import file_type_to_int, mode_str_to_int
+        from arkouda.io import _file_type_to_int, _mode_str_to_int
 
         return cast(
             str,
@@ -1481,11 +1504,132 @@ class pdarray:
                 args={
                     "values": self,
                     "dset": dataset,
-                    "write_mode": mode_str_to_int(mode),
+                    "write_mode": _mode_str_to_int(mode),
                     "filename": prefix_path,
                     "dtype": self.dtype,
                     "objType": "pdarray",
-                    "file_format": file_type_to_int(file_type),
+                    "file_format": _file_type_to_int(file_type),
+                },
+            ),
+        )
+
+    def update_hdf(self, prefix_path: str, dataset: str = "array", repack: bool = True):
+        """
+        Overwrite the dataset with the name provided with this pdarray. If
+        the dataset does not exist it is added
+
+        Parameters
+        -----------
+        prefix_path : str
+            Directory and filename prefix that all output files share
+        dataset : str
+            Name of the dataset to create in files
+        repack: bool
+            Default: True
+            HDF5 does not release memory on delete. When True, the inaccessible
+            data (that was overwritten) is removed. When False, the data remains, but is
+            inaccessible. Setting to false will yield better performance, but will cause
+            file sizes to expand.
+
+        Returns
+        --------
+        str - success message if successful
+
+        Raises
+        -------
+        RuntimeError
+            Raised if a server-side error is thrown saving the pdarray
+
+        Notes
+        ------
+        - If file does not contain File_Format attribute to indicate how it was saved,
+          the file name is checked for _LOCALE#### to determine if it is distributed.
+        - If the dataset provided does not exist, it will be added
+        """
+        from arkouda.io import _mode_str_to_int, _file_type_to_int, _get_hdf_filetype, _repack_hdf
+
+        # determine the format (single/distribute) that the file was saved in
+        file_type = _get_hdf_filetype(prefix_path + "*")
+
+        generic_msg(
+            cmd="tohdf",
+            args={
+                "values": self,
+                "dset": dataset,
+                "write_mode": _mode_str_to_int("append"),
+                "filename": prefix_path,
+                "dtype": self.dtype,
+                "objType": "pdarray",
+                "file_format": _file_type_to_int(file_type),
+                "overwrite": True,
+            },
+        )
+
+        if repack:
+            _repack_hdf(prefix_path)
+
+    @typechecked
+    def to_csv(
+        self,
+        prefix_path: str,
+        dataset: str = "array",
+        col_delim: str = ",",
+        overwrite: bool = False,
+    ):
+        """
+        Write pdarray to CSV file(s). File will contain a single column with the pdarray data.
+        All CSV Files written by Arkouda include a header denoting data types of the columns.
+
+        Parameters
+        -----------
+        prefix_path: str
+            The filename prefix to be used for saving files. Files will have _LOCALE#### appended
+            when they are written to disk.
+        dataset: str
+            Column name to save the pdarray under. Defaults to "array".
+        col_delim: str
+            Defaults to ",". Value to be used to separate columns within the file.
+            Please be sure that the value used DOES NOT appear in your dataset.
+        overwrite: bool
+            Defaults to False. If True, any existing files matching your provided prefix_path will
+            be overwritten. If False, an error will be returned if existing files are found.
+
+        Returns
+        --------
+        str reponse message
+
+        Raises
+        ------
+        ValueError
+            Raised if all datasets are not present in all parquet files or if one or
+            more of the specified files do not exist
+        RuntimeError
+            Raised if one or more of the specified files cannot be opened.
+            If `allow_errors` is true this may be raised if no values are returned
+            from the server.
+        TypeError
+            Raised if we receive an unknown arkouda_type returned from the server
+
+        Notes
+        ------
+        - CSV format is not currently supported by load/load_all operations
+        - The column delimiter is expected to be the same for column names and data
+        - Be sure that column delimiters are not found within your data.
+        - All CSV files must delimit rows using newline (`\n`) at this time.
+        """
+        return cast(
+            str,
+            generic_msg(
+                cmd="writecsv",
+                args={
+                    "datasets": [self],
+                    "col_names": [dataset],
+                    "filename": prefix_path,
+                    "num_dsets": 1,
+                    "col_delim": col_delim,
+                    "dtypes": [self.dtype.name],
+                    "row_count": self.size,
+                    "overwrite": overwrite,
                 },
             ),
         )
@@ -1574,6 +1718,7 @@ class pdarray:
         ``cwd/path/name_prefix_LOCALE####.parquet`` where #### is replaced by each locale number
         """
         from warnings import warn
+
         warn(
             "ak.pdarray.save has been deprecated. Please use ak.pdarray.to_parquet or ak.pdarray.to_hdf",
             DeprecationWarning,
@@ -1756,12 +1901,13 @@ class pdarray:
 
 # end pdarray class def
 
+
 # creates pdarray object
 #   only after:
 #       all values have been checked by python module and...
 #       server has created pdarray already before this is called
 @typechecked
-def create_pdarray(repMsg: str) -> pdarray:
+def create_pdarray(repMsg: str, max_bits=None) -> pdarray:
     """
     Return a pdarray instance pointing to an array created by the arkouda server.
     The user should not call this function directly.
@@ -1804,7 +1950,7 @@ def create_pdarray(repMsg: str) -> pdarray:
         f"created Chapel array with name: {name} dtype: {mydtype} size: {size} ndim: {ndim} "
         + f"shape: {shape} itemsize: {itemsize}"
     )
-    return pdarray(name, dtype(mydtype), size, ndim, shape, itemsize)
+    return pdarray(name, dtype(mydtype), size, ndim, shape, itemsize, max_bits)
 
 
 def clear() -> None:
@@ -2250,6 +2396,81 @@ def corr(x: pdarray, y: pdarray) -> np.float64:
     cov(x, y) / (x.std(ddof=1) * y.std(ddof=1))
     """
     return parse_single_value(generic_msg(cmd="corr", args={"x": x, "y": y}))
+
+
+@typechecked
+def divmod(
+    x: Union[numeric_scalars, pdarray],
+    y: Union[numeric_scalars, pdarray],
+    where: Union[bool, pdarray] = True,
+) -> Tuple[pdarray, pdarray]:
+    """
+    Parameters
+    ----------
+    x : numeric_scalars(float_scalars, int_scalars) or pdarray
+        The dividend array, the values that will be the numerator of the floordivision and will be
+        acted on by the bases for modular division.
+    y : numeric_scalars(float_scalars, int_scalars) or pdarray
+        The divisor array, the values that will be the denominator of the division and will be the
+        bases for the modular division.
+    where : Boolean or pdarray
+        This condition is broadcast over the input. At locations where the condition is True, the
+        corresponding value will be divided using floor and modular division. Elsewhere, it will retain
+        its original value. Default set to True.
+
+    Returns
+    -------
+    (pdarray, pdarray)
+        Returns a tuple that contains quotient and remainder of the division
+
+    Raises
+    ------
+    TypeError
+        At least one entry must be a pdarray
+    ValueError
+        If both inputs are both pdarrays, their size must match
+    ZeroDivisionError
+        No entry in y is allowed to be 0, to prevent division by zero
+
+    Notes
+    -----
+    The div is calculated by x // y
+    The mod is calculated by x % y
+
+    Examples
+    --------
+    >>> x = ak.arange(5, 10)
+    >>> y = ak.array([2, 1, 4, 5, 8])
+    >>> ak.divmod(x,y)
+    (array([2 6 1 1 1]), array([1 0 3 3 1]))
+    >>> ak.divmod(x,y, x % 2 == 0)
+    (array([5 6 7 1 9]), array([5 0 7 3 9]))
+    """
+    from arkouda.numeric import cast as akcast
+    from arkouda.numeric import where as akwhere
+    from arkouda.pdarraycreation import full
+
+    if not isinstance(x, pdarray) and not isinstance(y, pdarray):
+        raise TypeError("At least one entry must be a pdarray.")
+
+    if isinstance(x, pdarray) and isinstance(y, pdarray):
+        if x.size != y.size:
+            raise ValueError(f"size mismatch {x.size} {y.size}")
+
+    equal_zero = y == 0
+    if equal_zero if isinstance(equal_zero, bool) else any(equal_zero):
+        raise ZeroDivisionError("Can not divide by zero")
+
+    if where is True:
+        return x // y, x % y  # type: ignore
+    elif where is False:
+        if not isinstance(x, pdarray) and isinstance(y, pdarray):
+            x = full(y.size, x)
+        return x, x  # type: ignore
+    else:
+        div = cast(pdarray, x // y)
+        mod = cast(pdarray, x % y)
+        return (akwhere(where, div, akcast(x, div.dtype)), akwhere(where, mod, akcast(x, mod.dtype)))
 
 
 @typechecked

@@ -12,9 +12,10 @@ module SegmentedMsg {
   use MultiTypeSymEntry;
   use RandArray;
   use IO;
-  use Map;
   use GenSymIO;
   use BigInteger;
+
+  use ArkoudaMapCompat;
 
   private config const logLevel = ServerConfig.logLevel;
   private config const logChannel = ServerConfig.logChannel;
@@ -24,6 +25,7 @@ module SegmentedMsg {
   * Build a Segmented Array object based on the segments/values specified.
   **/
   proc assembleSegArrayMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
+    var repMsg: string;
     var segName = msgArgs.getValueOf("segments");
     var valName = msgArgs.getValueOf("values"); 
     smLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
@@ -34,13 +36,8 @@ module SegmentedMsg {
 
     var rtnmap: map(string, string) = new map(string, string);
 
-    var valEntry = st.tab.getBorrowed(valName);
-    if valEntry.isAssignableTo(SymbolEntryType.SegStringSymEntry){ //SegString
-      var vals = getSegString(valName, st);
-      var segArray = getSegArray(segs.a, vals.values.a, st);
-      segArray.fillReturnMap(rtnmap, st);
-    } 
-    else { // pdarray
+    var valEntry = st.tab[valName];
+    if valEntry.isAssignableTo(SymbolEntryType.TypedArraySymEntry) { // pdarray
       var values = getGenericTypedArrayEntry(valName, st);
       select values.dtype {
         when (DType.Int64) {
@@ -77,7 +74,12 @@ module SegmentedMsg {
         }
       }
     }
-    var repMsg: string = "%jt".format(rtnmap);
+    else {
+      repMsg = "Values must be a pdarray.";
+      smLogger.debug(getModuleName(), getRoutineName(), getLineNumber(), repMsg);
+      return new MsgTuple(repMsg, MsgType.ERROR);
+    }
+    repMsg = "%jt".format(rtnmap);
     smLogger.debug(getModuleName(), getRoutineName(), getLineNumber(), repMsg);
     return new MsgTuple(repMsg, MsgType.NORMAL);
   }
@@ -85,39 +87,29 @@ module SegmentedMsg {
   proc getSANonEmptyMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
     var repMsg: string = "";
     var name = msgArgs.getValueOf("name"): string;
-    var entry = st.tab.getBorrowed(name);
+    var entry = st.tab[name];
     var genEntry: GenSymEntry = toGenSymEntry(entry);
     var neName = st.nextName();
     select genEntry.dtype {
       when (DType.Int64) {
         var segArr = getSegArray(name, st, int);
-        st.addEntry(neName, new shared SymEntry(segArr.getNonEmpty()));
-        repMsg = "created " + st.attrib(neName) + "+" + segArr.getNonEmptyCount():string;
+        repMsg = "created " + st.attrib(name) + "+" + segArr.getNonEmptyCount():string;
       }
       when (DType.UInt64) {
         var segArr = getSegArray(name, st, uint);
-        st.addEntry(neName, new shared SymEntry(segArr.getNonEmpty()));
-        repMsg = "created " + st.attrib(neName) + "+" + segArr.getNonEmptyCount():string;
+        repMsg = "created " + st.attrib(name) + "+" + segArr.getNonEmptyCount():string;
       }
       when (DType.Float64) {
         var segArr = getSegArray(name, st, real);
-        st.addEntry(neName, new shared SymEntry(segArr.getNonEmpty()));
-        repMsg = "created " + st.attrib(neName) + "+" + segArr.getNonEmptyCount():string;
+        repMsg = "created " + st.attrib(name) + "+" + segArr.getNonEmptyCount():string;
       }
       when (DType.Bool) {
         var segArr = getSegArray(name, st, bool);
-        st.addEntry(neName, new shared SymEntry(segArr.getNonEmpty()));
-        repMsg = "created " + st.attrib(neName) + "+" + segArr.getNonEmptyCount():string;
-      }
-      when (DType.UInt8){
-        var segArr = getSegArray(name, st, uint(8));
-        st.addEntry(neName, new shared SymEntry(segArr.getNonEmpty()));
-        repMsg = "created " + st.attrib(neName) + "+" + segArr.getNonEmptyCount():string;
+        repMsg = "created " + st.attrib(name) + "+" + segArr.getNonEmptyCount():string;
       }
       when (DType.BigInt){
         var segArr = getSegArray(name, st, bigint);
-        st.addEntry(neName, new shared SymEntry(segArr.getNonEmpty()));
-        repMsg = "created " + st.attrib(neName) + "+" + segArr.getNonEmptyCount():string;
+        repMsg = "created " + st.attrib(name) + "+" + segArr.getNonEmptyCount():string;
       }
       otherwise {
         throw new owned ErrorWithContext("Values array has unsupported dtype %s".format(genEntry.dtype:string),
@@ -1421,6 +1413,33 @@ module SegmentedMsg {
       }
     }
   }
+
+  proc segmentedWhereMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
+    var repMsg: string;
+    const segStrName = msgArgs.getValueOf("seg_str");
+    const other = msgArgs.getValueOf("other");
+    const conditionName = msgArgs.getValueOf("condition");
+    const newLensName = msgArgs.getValueOf("new_lens");
+    const isStrLiteral = msgArgs.get("is_str_literal").getBoolValue();
+    // check to make sure symbols defined
+    st.checkTable(segStrName);
+    st.checkTable(conditionName);
+    st.checkTable(newLensName);
+    if !isStrLiteral {
+      st.checkTable(other);
+    }
+
+    const strings = getSegString(segStrName, st);
+    ref condition = toSymEntry(getGenericTypedArrayEntry(conditionName, st), bool).a;
+    ref newLens = toSymEntry(getGenericTypedArrayEntry(newLensName, st), int).a;
+
+    var (off, val) = if isStrLiteral then strings.segStrWhere(other, condition, newLens) else strings.segStrWhere(getSegString(other, st), condition, newLens);
+    var retString = getSegString(off, val, st);
+    repMsg = "created " + st.attrib(retString.name) + "+created bytes.size %t".format(retString.nBytes);
+
+    smLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),repMsg);
+    return new MsgTuple(repMsg, MsgType.NORMAL);
+  }
   
   use CommandMap;
   registerFunction("segmentLengths", segmentLengthsMsg, getModuleName());
@@ -1445,4 +1464,5 @@ module SegmentedMsg {
   registerFunction("stringsToJSON", stringsToJSONMsg, getModuleName());
   registerBinaryFunction("segStr-tondarray", segStrTondarrayMsg, getModuleName());
   registerFunction("segmentedSubstring", segmentedSubstringMsg, getModuleName());
+  registerFunction("segmentedWhere", segmentedWhereMsg, getModuleName());
 }

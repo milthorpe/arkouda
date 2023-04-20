@@ -16,13 +16,13 @@ For convenience, the steps to install Chapel from source are detailed here. If y
 **Step 2**
 > Unpack the release
 > ```bash
-> tar xzf chapel-1.29.0.tar.gz
+> tar xzf chapel-1.30.0.tar.gz
 > ```
 
 **Step 3**
 > Access the directory created when the release was unpacked
 > ```bash
-> cd chapel-1.29.0
+> cd chapel-1.30.0
 > ```
 
 **Step 4**
@@ -39,6 +39,8 @@ For convenience, the steps to install Chapel from source are detailed here. If y
 >
 > brew install gmp
 > export CHPL_GMP=system
+>
+> unset CHPL_DEVELOPER
 > ```
 
 > If you choose to use the packages bundled with Chapel, use the following settings.
@@ -58,7 +60,7 @@ For convenience, the steps to install Chapel from source are detailed here. If y
 **Step 7**
 > Use GNU make to build Chapel
 > ```bash
-> make
+> make -j 16
 > ```
 
 **Step 8**
@@ -81,13 +83,14 @@ brew install chapel
 Arkouda provides 2 `.yml` files for configuration, one for users and one for developers. The `.yml` files are configured with a default name for the environment, which is used for example interactions with conda. *Please note that you are able to provide a different name by using the `-n` or `--name` parameters when calling `conda env create`
 
 ```bash
-#Works with all Chipsets (including Apple Silicon)
-brew install miniforge
-#Add /opt/homebrew/Caskroom/miniforge/base/bin as the first line in /etc/paths
-
-#works with only x86 Architecture (excludes Apple Silicon)
+# we recommend running the full Anaconda 
 brew install anaconda3
-#Add /opt/homebrew/Caskroom/anaconda3/base/bin as the first line in /etc/paths
+
+# Note - the exact path may vary based on the release of Anaconda that is current. Run the script to install Anaconda.
+/opt/homebrew/Caskroom/anaconda/2022.10/Anaconda3-2022.10-MacOSX-arm64.sh
+
+# initialize conda
+conda init
 
 # User conda env
 conda env create -f arkouda-env.yml

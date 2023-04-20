@@ -22,6 +22,7 @@ from arkouda.dtypes import int64 as akint64
 from arkouda.groupbyclass import GroupBy as akGroupBy
 from arkouda.groupbyclass import unique
 from arkouda.index import Index
+from arkouda.io import _dict_recombine_segarrays, get_filetype, load_all
 from arkouda.numeric import cast as akcast
 from arkouda.numeric import cumsum
 from arkouda.numeric import isnan as akisnan
@@ -30,7 +31,6 @@ from arkouda.pdarrayclass import RegistrationError
 from arkouda.pdarrayclass import attach as pd_attach
 from arkouda.pdarrayclass import pdarray, unregister_pdarray_by_name
 from arkouda.pdarraycreation import arange, array, create_pdarray, zeros
-from arkouda.io import get_filetype, load_all
 from arkouda.pdarraysetops import concatenate, in1d, intersect1d
 from arkouda.row import Row
 from arkouda.segarray import SegArray
@@ -186,7 +186,6 @@ class DiffAggregate(AggregateOps):
     @classmethod
     def _make_aggop(cls, opname):
         def aggop(self):
-
             return Series(self.gb.aggregate(self.values, opname))
 
         return aggop
@@ -385,7 +384,7 @@ class DataFrame(UserDict):
             for k in self._columns:
                 result[k] = UserDict.__getitem__(self, k)[key]
             # To stay consistent with numpy, provide the old index values
-            return DataFrame(initialdata=result, index=key)
+            return DataFrame(initialdata=result, index=self.index.index[key])
 
         # Select rows or columns using a list
         if isinstance(key, (list, tuple)):
@@ -399,6 +398,7 @@ class DataFrame(UserDict):
                     result.data[k] = UserDict.__getitem__(self, k)
                     result._columns.append(k)
                 result._empty = False
+                result._set_index(self.index)  # column lens remain the same. Copy the indexing
                 return result
             else:
                 raise TypeError(
@@ -427,7 +427,7 @@ class DataFrame(UserDict):
             s = key
             for k in self._columns:
                 rtn_data[k] = UserDict.__getitem__(self, k)[s]
-            return DataFrame(initialdata=rtn_data, index=arange(self.size)[s])
+            return DataFrame(initialdata=rtn_data, index=self.index.index[arange(self.size)[s]])
         else:
             raise IndexError("Invalid selector: unknown error.")
 
@@ -550,7 +550,7 @@ class DataFrame(UserDict):
                 newdf[col] = self[col].categories[self[col].codes[idx]]
             else:
                 newdf[col] = self[col][idx]
-        newdf._set_index(idx)
+        newdf._set_index(self.index.index[idx])
         return newdf.to_pandas(retain_index=True)
 
     def _get_head_tail_server(self):
@@ -634,7 +634,7 @@ class DataFrame(UserDict):
                 df_dict[msg[1]] = create_pdarray(msg[2])
 
         new_df = DataFrame(df_dict)
-        new_df._set_index(idx)
+        new_df._set_index(self.index.index[idx])
         return new_df.to_pandas(retain_index=True)[self._columns]
 
     def _shape_str(self):
@@ -1496,6 +1496,46 @@ class DataFrame(UserDict):
         data = self._prep_data(index=index, columns=columns)
         to_hdf(data, prefix_path=path, file_type=file_type)
 
+    def update_hdf(self, prefix_path: str, index=False, columns=None, repack: bool = True):
+        """
+        Overwrite the dataset with the name provided with this pdarray. If
+        the dataset does not exist it is added
+
+        Parameters
+        -----------
+        prefix_path : str
+            Directory and filename prefix that all output files share
+        index : bool
+            If True, save the index column. By default, do not save the index.
+        columns: List
+            List of columns to include in the file. If None, writes out all columns
+        repack: bool
+            Default: True
+            HDF5 does not release memory on delete. When True, the inaccessible
+            data (that was overwritten) is removed. When False, the data remains, but is
+            inaccessible. Setting to false will yield better performance, but will cause
+            file sizes to expand.
+
+        Returns
+        --------
+        str - success message if successful
+
+        Raises
+        -------
+        RuntimeError
+            Raised if a server-side error is thrown saving the pdarray
+
+        Notes
+        ------
+        - If file does not contain File_Format attribute to indicate how it was saved,
+          the file name is checked for _LOCALE#### to determine if it is distributed.
+        - If the dataset provided does not exist, it will be added
+        """
+        from arkouda.io import update_hdf
+
+        data = self._prep_data(index=index, columns=columns)
+        update_hdf(data, prefix_path=prefix_path, repack=repack)
+
     def to_parquet(self, path, index=False, columns=None, compression: Optional[str] = None):
         """
         Save DataFrame to disk as parquet, preserving column names.
@@ -1532,6 +1572,115 @@ class DataFrame(UserDict):
 
         data = self._prep_data(index=index, columns=columns)
         to_parquet(data, prefix_path=path, compression=compression)
+
+    @typechecked
+    def to_csv(
+        self,
+        path: str,
+        index: bool = False,
+        columns: Optional[List[str]] = None,
+        col_delim: str = ",",
+        overwrite: bool = False,
+    ):
+        """
+        Writes DataFrame to CSV file(s). File will contain a column for each column in the DataFrame.
+        All CSV Files written by Arkouda include a header denoting data types of the columns.
+        Unlike other file formats, CSV files store Strings as their UTF-8 format instead of storing
+        bytes as uint(8).
+
+        Parameters
+        -----------
+        path: str
+            The filename prefix to be used for saving files. Files will have _LOCALE#### appended
+            when they are written to disk.
+        index: bool
+            Defaults to False. If True, the index of the DataFrame will be written to the file
+            as a column
+        columns: List[str] (Optional)
+            Column names to assign when writing data
+        col_delim: str
+            Defaults to ",". Value to be used to separate columns within the file.
+            Please be sure that the value used DOES NOT appear in your dataset.
+        overwrite: bool
+            Defaults to False. If True, any existing files matching your provided prefix_path will
+            be overwritten. If False, an error will be returned if existing files are found.
+
+        Returns
+        --------
+        None
+
+        Raises
+        ------
+        ValueError
+            Raised if all datasets are not present in all parquet files or if one or
+            more of the specified files do not exist
+        RuntimeError
+            Raised if one or more of the specified files cannot be opened.
+            If `allow_errors` is true this may be raised if no values are returned
+            from the server.
+        TypeError
+            Raised if we receive an unknown arkouda_type returned from the server
+
+        Notes
+        ------
+        - CSV format is not currently supported by load/load_all operations
+        - The column delimiter is expected to be the same for column names and data
+        - Be sure that column delimiters are not found within your data.
+        - All CSV files must delimit rows using newline (`\n`) at this time.
+        """
+        from arkouda.io import to_csv
+
+        data = self._prep_data(index=index, columns=columns)
+        to_csv(data, path, names=columns, col_delim=col_delim, overwrite=overwrite)
+
+    @classmethod
+    def read_csv(cls, filename: str, col_delim: str = ","):
+        """
+        Read the columns of a CSV file into an Arkouda DataFrame.
+        If the file contains the appropriately formatted header, typed data will be returned.
+        Otherwise, all data will be returned as a Strings objects.
+
+        Parameters
+        -----------
+        filename: str
+            Filename to read data from
+        col_delim: str
+            Defaults to ",". The delimiter for columns within the data.
+
+        Returns
+        --------
+        Arkouda DataFrame containing the columns from the CSV file.
+
+        Raises
+        ------
+        ValueError
+            Raised if all datasets are not present in all parquet files or if one or
+            more of the specified files do not exist
+        RuntimeError
+            Raised if one or more of the specified files cannot be opened.
+            If `allow_errors` is true this may be raised if no values are returned
+            from the server.
+        TypeError
+            Raised if we receive an unknown arkouda_type returned from the server
+
+        See Also
+        ---------
+        to_csv
+
+        Notes
+        ------
+        - CSV format is not currently supported by load/load_all operations
+        - The column delimiter is expected to be the same for column names and data
+        - Be sure that column delimiters are not found within your data.
+        - All CSV files must delimit rows using newline (`\n`) at this time.
+        - Unlike other file formats, CSV files store Strings as their UTF-8 format instead of storing
+        bytes as uint(8).
+
+        """
+        from arkouda.io import read_csv
+
+        data = read_csv(filename, column_delim=col_delim)
+        return cls(data)
 
     def save(
         self,
@@ -1595,32 +1744,9 @@ class DataFrame(UserDict):
         filetype = get_filetype(first_file) if file_format.lower() == "infer" else file_format
 
         # columns load backwards
-        df_dict = load_all(prefix_path, file_format=filetype)
-
-        # this assumes segments will always have corresponding values.
-        # This should happen due to save config
-        seg_cols = [col.split("_")[0] for col in df_dict.keys() if col.endswith("_segments")]
-        df_dict_keys = [
-            col.split("_")[0] if col.endswith("_segments") or col.endswith("_values") else col
-            for col in df_dict.keys()
-        ]
-
-        # update dict to contain segarrays where applicable if any exist
-        if len(seg_cols) > 0:
-            df_dict = {
-                col: SegArray.from_parts(df_dict[col + "_segments"], df_dict[col + "_values"])
-                if col in seg_cols
-                else df_dict[col]
-                for col in df_dict_keys
-            }
-
-        df = cls(df_dict)
-        if filetype == "HDF5":
-            return df
-        else:
-            # return the dataframe with them reversed so they match what was saved
-            # This is only an issue with parquet
-            return df[df.columns[::-1]]
+        df = cls(_dict_recombine_segarrays(load_all(prefix_path, file_format=filetype)))
+        # if parquet, return reversed dataframe to match what was saved
+        return df if filetype == "HDF5" else df[df.columns[::-1]]
 
     def argsort(self, key, ascending=True):
         """
@@ -2422,7 +2548,6 @@ def intersect(a, b, positions=True, unique=False):
 
     # It takes more effort to do this with ak.Strings arrays.
     elif isinstance(a, Strings) and isinstance(b, Strings):
-
         # Hash the two arrays first
         hash_a00, hash_a01 = a.hash()
         hash_b00, hash_b01 = b.hash()

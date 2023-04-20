@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-import argparse
-
 from groupby import *
 
 TYPES = ("str", "mixed")

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import warnings
 from typing import cast as type_cast
+from typing import Optional, Sequence
 
 import numpy as np  # type: ignore
 
@@ -12,7 +14,6 @@ from arkouda.dtypes import int64 as akint64
 from arkouda.dtypes import isSupportedInt, str_, translate_np_dtype
 from arkouda.groupbyclass import GroupBy, broadcast
 from arkouda.infoclass import list_registry
-from arkouda.io import load
 from arkouda.logger import getArkoudaLogger
 from arkouda.numeric import cumsum
 from arkouda.pdarrayclass import RegistrationError, create_pdarray, is_sorted, pdarray
@@ -28,18 +29,18 @@ def gen_ranges(starts, ends, stride=1):
     Parameters
     ----------
     starts : pdarray, int64
-    The start value of each range
+        The start value of each range
     ends : pdarray, int64
-    The end value (exclusive) of each range
+        The end value (exclusive) of each range
     stride: int
-    Difference between successive elements of each range
+        Difference between successive elements of each range
 
     Returns
     -------
     segments : pdarray, int64
-    The starting index of each range in the resulting array
+        The starting index of each range in the resulting array
     ranges : pdarray, int64
-    The actual ranges, flattened into a single array
+        The actual ranges, flattened into a single array
     """
     if starts.size != ends.size:
         raise ValueError("starts and ends must be same length")
@@ -187,6 +188,8 @@ class SegArray:
         # validate inputs
         if not isinstance(segments, pdarray) or segments.dtype != akint64:
             raise TypeError("Segments must be int64 pdarray")
+        if not isinstance(values, pdarray):
+            raise TypeError("Values must be a pdarray.")
         if not is_sorted(segments):
             raise ValueError("Segments must be unique and in sorted order")
         if segments.size > 0:
@@ -403,6 +406,13 @@ class SegArray:
         Return a deep copy.
         """
         return SegArray.from_parts(self.segments, self.values)
+
+    def __del__(self):
+        try:
+            if self.name:
+                generic_msg(cmd="delete", args={"name": self.name})
+        except RuntimeError:
+            pass
 
     def __getitem__(self, i):
         if isSupportedInt(i):
@@ -972,8 +982,6 @@ class SegArray:
         self,
         prefix_path,
         dataset="segarray",
-        segment_suffix="_segments",
-        value_suffix="_values",
         mode="truncate",
         file_type="distribute",
     ):
@@ -987,10 +995,6 @@ class SegArray:
             Directory and filename prefix that all output files will share
         dataset : str
             Name prefix for saved data within the HDF5 file
-        segment_suffix : str
-            Suffix to append to dataset name for segments array
-        value_suffix : str
-            Suffix to append to dataset name for values array
         mode : str {'truncate' | 'append'}
             By default, truncate (overwrite) output files, if they exist.
             If 'append', add data as a new column to existing files.
@@ -1015,19 +1019,157 @@ class SegArray:
         ---------
         load
         """
-        self.segments.to_hdf(
-            prefix_path, dataset=dataset + segment_suffix, mode=mode, file_type=file_type
+        from arkouda.io import _file_type_to_int, _mode_str_to_int
+
+        return type_cast(
+            str,
+            generic_msg(
+                cmd="tohdf",
+                args={
+                    "seg_name": self.name,
+                    "dset": dataset,
+                    "write_mode": _mode_str_to_int(mode),
+                    "filename": prefix_path,
+                    "dtype": self.dtype,
+                    "objType": "segarray",
+                    "file_format": _file_type_to_int(file_type),
+                },
+            ),
         )
-        self.values.to_hdf(
-            prefix_path, dataset=dataset + value_suffix, mode="append", file_type=file_type
+
+    def update_hdf(
+        self,
+        prefix_path: str,
+        dataset: str = "segarray",
+        repack: bool = True,
+    ):
+        """
+        Overwrite the dataset with the name provided with this SegArray object. If
+        the dataset does not exist it is added.
+
+        Parameters
+        -----------
+        prefix_path : str
+            Directory and filename prefix that all output files share
+        dataset : str
+            Name of the dataset to create in files
+        repack: bool
+            Default: True
+            HDF5 does not release memory on delete. When True, the inaccessible
+            data (that was overwritten) is removed. When False, the data remains, but is
+            inaccessible. Setting to false will yield better performance, but will cause
+            file sizes to expand.
+
+        Returns
+        --------
+        str - success message if successful
+
+        Raises
+        -------
+        RuntimeError
+            Raised if a server-side error is thrown saving the SegArray
+
+        Notes
+        ------
+        - If file does not contain File_Format attribute to indicate how it was saved,
+          the file name is checked for _LOCALE#### to determine if it is distributed.
+        - If the dataset provided does not exist, it will be added
+        - Because HDF5 deletes do not release memory, this will create a copy of the
+          file with the new data
+        """
+        from arkouda.io import _get_hdf_filetype, _mode_str_to_int, _file_type_to_int, _repack_hdf
+
+        # determine the format (single/distribute) that the file was saved in
+        file_type = _get_hdf_filetype(prefix_path + "*")
+
+        generic_msg(
+            cmd="tohdf",
+            args={
+                "seg_name": self.name,
+                "dset": dataset,
+                "write_mode": _mode_str_to_int("append"),
+                "filename": prefix_path,
+                "dtype": self.dtype,
+                "objType": "segarray",
+                "file_format": _file_type_to_int(file_type),
+                "overwrite": True,
+            },
+        )
+
+        if repack:
+            _repack_hdf(prefix_path)
+
+    def to_parquet(
+        self, prefix_path, dataset="segarray", mode: str = "truncate", compression: Optional[str] = None
+    ):
+        """
+        Save the SegArray object to Parquet. The result is a collection of files,
+        one file per locale of the arkouda server, where each filename starts
+        with prefix_path. Each locale saves its chunk of the object to its
+        corresponding file.
+        Parameters
+        ----------
+        prefix_path : str
+            Directory and filename prefix that all output files share
+        dataset : str
+            Name of the dataset to create in files (must not already exist)
+        mode : str {'truncate' | 'append'}
+            Deprecated.
+            Parameter kept to maintain functionality of other calls. Only Truncate
+            supported.
+            By default, truncate (overwrite) output files, if they exist.
+            If 'append', attempt to create new dataset in existing files.
+        compression : str (Optional)
+            (None | "snappy" | "gzip" | "brotli" | "zstd" | "lz4")
+            Sets the compression type used with Parquet files
+        Returns
+        -------
+        string message indicating result of save operation
+        Raises
+        ------
+        RuntimeError
+            Raised if a server-side error is thrown saving the pdarray
+        ValueError
+            If write mode is not Truncate.
+        Notes
+        -----
+        - Append mode for Parquet has been deprecated. It was not implemented for SegArray.
+        - The prefix_path must be visible to the arkouda server and the user must
+        have write permission.
+        - Output files have names of the form ``<prefix_path>_LOCALE<i>``, where ``<i>``
+        ranges from 0 to ``numLocales`` for `file_type='distribute'`.
+        - If any of the output files already exist and
+        the mode is 'truncate', they will be overwritten. If the mode is 'append'
+        and the number of output files is less than the number of locales or a
+        dataset with the same name already exists, a ``RuntimeError`` will result.
+        - Any file extension can be used.The file I/O does not rely on the extension to
+        determine the file format.
+        """
+        from arkouda.io import _mode_str_to_int
+
+        if mode.lower() == "append":
+            raise ValueError("Append mode is not supported for SegArray.")
+
+        return type_cast(
+            str,
+            generic_msg(
+                "writeParquet",
+                {
+                    "values": self.name,
+                    "dset": dataset,
+                    "mode": _mode_str_to_int(mode),
+                    "prefix": prefix_path,
+                    "objType": "segarray",
+                    "dtype": self.dtype,
+                    "compression": compression,
+                },
+            ),
         )
 
     def save(
         self,
         prefix_path,
         dataset="segarray",
-        segment_suffix="_segments",
-        value_suffix="_values",
         mode="truncate",
         file_type="distribute",
     ):
@@ -1074,6 +1216,7 @@ class SegArray:
         to_hdf, load
         """
         from warnings import warn
+
         warn(
             "ak.SegArray.save has been deprecated. Please use ak.SegArray.to_hdf",
             DeprecationWarning,
@@ -1081,20 +1224,12 @@ class SegArray:
         return self.to_hdf(
             prefix_path,
             dataset,
-            segment_suffix=segment_suffix,
-            value_suffix=value_suffix,
             mode=mode,
             file_type=file_type,
         )
 
     @classmethod
-    def load(
-        cls,
-        prefix_path,
-        dataset="segarray",
-        segment_suffix="_segments",
-        value_suffix="_values",
-    ):
+    def read_hdf(cls, prefix_path, dataset="segarray"):
         """
         Load a saved SegArray from HDF5. All arguments must match what
         was supplied to SegArray.save()
@@ -1105,20 +1240,24 @@ class SegArray:
             Directory and filename prefix
         dataset : str
             Name prefix for saved data within the HDF5 files
-        segment_suffix : str
-            Suffix to append to dataset name for segments array
-        value_suffix : str
-            Suffix to append to dataset name for values array
 
         Returns
         -------
         SegArray
         """
-        if segment_suffix == value_suffix:
-            raise ValueError("Segment suffix and value suffix must be different")
-        segments = load(prefix_path, dataset=dataset + segment_suffix)
-        values = load(prefix_path, dataset=dataset + value_suffix)
-        return cls(segments, values)
+        from arkouda.io import load
+
+        return load(prefix_path, dataset=dataset)
+
+    @classmethod
+    def load(cls, prefix_path, dataset="segarray", segment_name="segments", value_name="values"):
+        warnings.warn(
+            "ak.SegArray.load() is deprecated. Please use ak.SegArray.read_hdf() instead.",
+            DeprecationWarning,
+        )
+        if segment_name != "segments" or value_name != "values":
+            dataset = [dataset + "_" + value_name, dataset + "_" + segment_name]
+        return cls.read_hdf(prefix_path, dataset)
 
     def intersect(self, other):
         """
@@ -1335,6 +1474,44 @@ class SegArray:
                 truth[-1] = False
             segments[truth] = segments[arange(self.size)[truth] + 1]
             return SegArray.from_parts(segments, new_values[g.permutation])
+
+    def filter(self, filter, discard_empty: bool = False):
+        """
+        Filter values out of the SegArray object
+
+        Parameters
+        ----------
+        filter: pdarray, list, or value
+            The value/s to be filtered out of the SegArray
+        discard_empty: bool
+            Defaults to False. When True, empty segments are removed from
+            the return SegArray
+
+        Returns
+        --------
+        SegArray
+        """
+        from arkouda.pdarraysetops import in1d
+
+        # convert to pdarray if more than 1 element
+        if isinstance(filter, Sequence):
+            filter = array(filter)
+
+        # create boolean index for values to keep
+        keep = (
+            in1d(self.values, filter, invert=True)
+            if isinstance(filter, pdarray)
+            else self.values != filter
+        )
+
+        new_vals = self.values[keep]
+
+        # recreate the segment boundaries
+        seg_cts = self.grouping.sum(keep)[1]
+        new_segs = cumsum(seg_cts) - seg_cts
+
+        new_segarray = SegArray.from_parts(new_segs, new_vals)
+        return new_segarray[new_segarray.non_empty] if discard_empty else new_segarray
 
     def register(self, user_defined_name):
         """

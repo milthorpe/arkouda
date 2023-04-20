@@ -583,6 +583,27 @@ class DataFrameTest(ArkoudaTest):
             ak_loaded = ak.DataFrame.load(f"{tmp_dirname}/seg_test.h5")
             self.assertTrue(df.to_pandas().equals(ak_loaded.to_pandas()))
 
+            # test with segarray with _ in column name
+            df_dict = {
+                "c_1": ak.arange(3, 6),
+                "c_2": ak.arange(6, 9),
+                "c_3": ak.segarray(ak.array([0, 9, 14]), ak.arange(20)),
+            }
+            akdf = ak.DataFrame(df_dict)
+            akdf.to_hdf(f"{tmp_dirname}/seg_test.h5")
+            self.assertEqual(
+                len(glob.glob(f"{tmp_dirname}/seg_test*.h5")), ak.get_config()["numLocales"]
+            )
+            ak_loaded = ak.DataFrame.load(f"{tmp_dirname}/seg_test.h5")
+            self.assertTrue(akdf.to_pandas().equals(ak_loaded.to_pandas()))
+
+            # test load_all and read workflows
+            ak_load_all = ak.DataFrame(ak.load_all(f"{tmp_dirname}/seg_test.h5"))
+            self.assertTrue(akdf.to_pandas().equals(ak_load_all.to_pandas()))
+
+            ak_read = ak.DataFrame(ak.read(f"{tmp_dirname}/seg_test*"))
+            self.assertTrue(akdf.to_pandas().equals(ak_read.to_pandas()))
+
     def test_isin(self):
         df = ak.DataFrame({"col_A": ak.array([7, 3]), "col_B": ak.array([1, 9])})
 
@@ -619,3 +640,85 @@ class DataFrameTest(ArkoudaTest):
         # to avoid loss of precision see (#1983)
         df = pd.DataFrame({"Test": [2**64 - 1, 0]})
         self.assertEqual(df["Test"].dtype, ak.uint64)
+
+    def test_head_tail_resetting_index(self):
+        # Test that issue #2183 is resolved
+        df = ak.DataFrame({"cnt": ak.arange(65)})
+        # Note we have to call __repr__ to trigger head_tail_server call
+
+        bool_idx = df[df["cnt"] > 3]
+        bool_idx.__repr__()
+        self.assertListEqual(bool_idx.index.index.to_list(), list(range(4, 65)))
+
+        slice_idx = df[:]
+        slice_idx.__repr__()
+        self.assertListEqual(slice_idx.index.index.to_list(), list(range(65)))
+
+        # verify it persists non-int Index
+        idx = ak.concatenate([ak.zeros(5, bool), ak.ones(60, bool)])
+        df = ak.DataFrame({"cnt": ak.arange(65)}, index=idx)
+
+        bool_idx = df[df["cnt"] > 3]
+        bool_idx.__repr__()
+        # the new index is first False and rest True (because we lose first 4), so equivalent to arange(61, bool)
+        self.assertListEqual(bool_idx.index.index.to_list(), ak.arange(61, dtype=bool).to_list())
+
+        slice_idx = df[:]
+        slice_idx.__repr__()
+        self.assertListEqual(slice_idx.index.index.to_list(), idx.to_list())
+
+    def test_ipv4_columns(self):
+        # test with single IPv4 column
+        df = ak.DataFrame({
+            'a': ak.arange(10),
+            'b': ak.IPv4(ak.arange(10))
+        })
+        with tempfile.TemporaryDirectory(dir=DataFrameTest.df_test_base_tmp) as tmp_dirname:
+            fname = tmp_dirname + "/ipv4_df"
+            df.to_parquet(fname)
+
+            data = ak.read(fname+"*")
+            rddf = ak.DataFrame({
+                'a': data['a'],
+                'b': ak.IPv4(data['b'])
+            })
+
+            self.assertListEqual(df['a'].to_list(), rddf['a'].to_list())
+            self.assertListEqual(df['b'].to_list(), rddf['b'].to_list())
+
+        # test with multiple
+        df = ak.DataFrame({
+            'a': ak.IPv4(ak.arange(10)),
+            'b': ak.IPv4(ak.arange(10))
+        })
+        with tempfile.TemporaryDirectory(dir=DataFrameTest.df_test_base_tmp) as tmp_dirname:
+            fname = tmp_dirname + "/ipv4_df"
+            df.to_parquet(fname)
+
+            data = ak.read(fname + "*")
+            rddf = ak.DataFrame({
+                'a': ak.IPv4(data['a']),
+                'b': ak.IPv4(data['b'])
+            })
+
+            self.assertListEqual(df['a'].to_list(), rddf['a'].to_list())
+            self.assertListEqual(df['b'].to_list(), rddf['b'].to_list())
+
+        # test replacement of IPv4 with uint representation
+        df = ak.DataFrame({
+            'a': ak.IPv4(ak.arange(10))
+        })
+        df['a'] = df['a'].export_uint()
+        self.assertListEqual(ak.arange(10).to_list(), df['a'].to_list())
+    def test_subset(self):
+        df = ak.DataFrame({
+            'a': ak.arange(100),
+            'b': ak.randint(0, 20, 100),
+            'c': ak.random_strings_uniform(0, 16, 100),
+            'd': ak.randint(25, 75, 100)
+        })
+        df2 = df[['a', 'b']]
+        self.assertListEqual(['a', 'b'], df2.columns)
+        self.assertListEqual(df.index.to_list(), df2.index.to_list())
+        self.assertListEqual(df['a'].to_list(), df2['a'].to_list())
+        self.assertListEqual(df['b'].to_list(), df2['b'].to_list())

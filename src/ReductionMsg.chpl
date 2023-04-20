@@ -2,10 +2,11 @@ module ReductionMsg
 {
     use ServerConfig;
 
-    use Time only;
+    use ArkoudaTimeCompat as Time;
     use Math only;
     use Reflection only;
     use CommAggregation;
+    use BigInteger;
 
     use MultiTypeSymbolTable;
     use MultiTypeSymEntry;
@@ -24,6 +25,10 @@ module ReductionMsg
     private config const logLevel = ServerConfig.logLevel;
     private config const logChannel = ServerConfig.logChannel;
     const rmLogger = new Logger(logLevel, logChannel);
+
+    // this should never be called with the default value
+    // it should always be overriden by the pdarray's max_bits attribute
+    var class_lvl_max_bits = -1;
 
     // these functions take an array and produce a scalar
     // parse and respond to reduction message
@@ -584,6 +589,50 @@ module ReductionMsg
                     }
                 }
             }
+            when (DType.BigInt) {
+                var values = toSymEntry(gVal, bigint);
+                var max_bits = values.max_bits;
+                var has_max_bits = max_bits != -1;
+                if has_max_bits {
+                    class_lvl_max_bits = max_bits;
+                }
+                select op {
+                    when "sum" {
+                        var res = segSum(values.a, segments.a);
+                        st.addEntry(rname, new shared SymEntry(res));
+                    }
+                    when "min" {
+                        if !has_max_bits {
+                          throw new Error("Must set max_bits to MIN");
+                        }
+                        var res = segMin(values.a, segments.a);
+                        st.addEntry(rname, new shared SymEntry(res));
+                    }
+                    when "max" {
+                        if !has_max_bits {
+                          throw new Error("Must set max_bits to MAX");
+                        }
+                        var res = segMax(values.a, segments.a);
+                        st.addEntry(rname, new shared SymEntry(res));
+                    }
+                    when "or" {
+                        var res = segOr(values.a, segments.a);
+                        st.addEntry(rname, new shared SymEntry(res));
+                    }
+                    when "and" {
+                        if !has_max_bits {
+                          throw new Error("Must set max_bits to AND");
+                        }
+                        var res = segAnd(values.a, segments.a);
+                        st.addEntry(rname, new shared SymEntry(res));
+                    }
+                    otherwise {
+                        var errorMsg = notImplementedError(pn,op,gVal.dtype);
+                        rmLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
+                        return new MsgTuple(errorMsg, MsgType.ERROR);
+                    }
+                }
+            }
           otherwise {
               var errorMsg = unrecognizedTypeError(pn, dtype2str(gVal.dtype));
               rmLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
@@ -620,7 +669,10 @@ module ReductionMsg
         agg.copy(flagvalues[s][0], true);
       }
       // check there's enough room to create a copy for scan and throw if creating a copy would go over memory limit
-      overMemLimit((numBytes(t)+1) * flagvalues.size);
+      if t != bigint {
+        // TODO update when we have a better way to handle bigint mem estimation
+        overMemLimit((numBytes(t)+1) * flagvalues.size);
+      }
       // Scan with custom operator, which resets the bitwise AND
       // at segment boundaries.
       const scanresult = ResettingPlusScanOp scan flagvalues;
@@ -654,6 +706,7 @@ module ReductionMsg
       proc identity {
         if eltType == (bool, real) then return (false, 0.0);
         else if eltType == (bool, uint) then return (false, 0:uint);
+        else if eltType == (bool, bigint) then return (false, 0:bigint);
         else return (false, 0);
       }
 
@@ -861,7 +914,7 @@ module ReductionMsg
     }
 
     proc segMin(values:[?vD] ?t, segments:[?D] int, skipNan=false): [D] t throws {
-      var res: [D] t = max(t);
+      var res: [D] t = if t != bigint then max(t) else (1:bigint << class_lvl_max_bits) - 1;
       if (D.size == 0) { return res; }
       var keys = expandKeys(vD, segments);
       var kv: [keys.domain] (int, t);
@@ -872,8 +925,16 @@ module ReductionMsg
         kv = [(k, v) in zip(keys, values)] (-k, v);
       }
       // check there's enough room to create a copy for scan and throw if creating a copy would go over memory limit
-      overMemLimit(numBytes(int) * kv.size);
-      var cummin = min scan kv;
+      if t != bigint {
+        // TODO update when we have a better way to handle bigint mem estimation
+        overMemLimit((numBytes(t) + numBytes(int)) * kv.size);
+      }
+      var cummin: [keys.domain] (int, t);
+      if t != bigint {
+        cummin = min scan kv;
+      } else {
+        cummin = segmentedBigintMinScanOp scan kv;
+      }
       forall (i, r, low) in zip(D, res, segments) with (var agg = newSrcAggregator(t)) {
         var vi: int;
         if (i < D.high) {
@@ -887,9 +948,34 @@ module ReductionMsg
       }
       return res;
     }
-    
+
+    class segmentedBigintMinScanOp: ReduceScanOp {
+      type eltType;
+      const max_val: bigint = (1:bigint << class_lvl_max_bits) - 1;
+      var value = (max(int), max_val);
+
+      proc identity {
+        return (max(int), max_val);
+      }
+      proc accumulate(x) {
+        value = min(x, value);
+      }
+      proc accumulateOntoState(ref state, x) {
+        state = min(state, x);
+      }
+      proc combine(x) {
+        value = min(value, x.value);
+      }
+      proc generate() {
+        return value;
+      }
+      proc clone() {
+        return new unmanaged segmentedBigintMinScanOp(eltType=eltType);
+      }
+    }
+
     proc segMax(values:[?vD] ?t, segments:[?D] int, skipNan=false): [D] t throws {
-      var res: [D] t = min(t);
+      var res: [D] t = if t != bigint then min(t) else -(1:bigint << class_lvl_max_bits);
       if (D.size == 0) { return res; }
       var keys = expandKeys(vD, segments);
       var kv: [keys.domain] (int, t);
@@ -900,8 +986,16 @@ module ReductionMsg
         kv = [(k, v) in zip(keys, values)] (k, v);
       }
       // check there's enough room to create a copy for scan and throw if creating a copy would go over memory limit
-      overMemLimit(numBytes(int) * kv.size);
-      var cummax = max scan kv;
+      if t != bigint {
+        // TODO update when we have a better way to handle bigint mem estimation
+        overMemLimit((numBytes(t) + numBytes(int)) * kv.size);
+      }
+      var cummax: [keys.domain] (int, t);
+      if t != bigint {
+        cummax = max scan kv;
+      } else {
+        cummax = segmentedBigintMaxScanOp scan kv;
+      }
       
       forall (i, r, low) in zip(D, res, segments) with (var agg = newSrcAggregator(t)) {
         var vi: int;
@@ -915,6 +1009,31 @@ module ReductionMsg
         }
       }
       return res;
+    }
+
+    class segmentedBigintMaxScanOp: ReduceScanOp {
+      type eltType;
+      const min_val: bigint = -(1:bigint << class_lvl_max_bits);
+      var value = (min(int), min_val);
+
+      proc identity {
+        return (min(int), min_val);
+      }
+      proc accumulate(x) {
+        value = max(x, value);
+      }
+      proc accumulateOntoState(ref state, x) {
+        state = max(state, x);
+      }
+      proc combine(x) {
+        value = max(value, x.value);
+      }
+      proc generate() {
+        return value;
+      }
+      proc clone() {
+        return new unmanaged segmentedBigintMaxScanOp(eltType=eltType);
+      }
     }
 
     proc segArgmin(values:[?vD] ?t, segments:[?D] int): ([D] t, [D] int) throws {
@@ -997,7 +1116,10 @@ module ReductionMsg
         agg.copy(flagvalues[s][0], true);
       }
       // check there's enough room to create a copy for scan and throw if creating a copy would go over memory limit
-      overMemLimit((numBytes(t)+1) * flagvalues.size);
+      if t != bigint {
+        // TODO update when we have a better way to handle bigint mem estimation
+        overMemLimit((numBytes(t)+1) * flagvalues.size);
+      }
       // Scan with custom operator, which resets the bitwise AND
       // at segment boundaries.
       const scanresult = ResettingOrScanOp scan flagvalues;
@@ -1026,9 +1148,11 @@ module ReductionMsg
          have already been scanned, or for internal state, the flag means 
          "there has already been a reset in the computation of this value".
       */
-      var value = if eltType == (bool, int) then (false, 0) else (false, 0:uint);
+      var value: eltType;
 
-      proc identity return if eltType == (bool, int) then (false, 0) else (false, 0:uint);
+      proc identity {
+        return if eltType == (bool, int) then (false, 0) else if eltType == (bool, uint) then (false, 0:uint) else (false, 0:bigint);
+      }
 
       proc accumulate(x) {
         // Assume x is an element that has not yet been scanned, and
@@ -1080,7 +1204,10 @@ module ReductionMsg
         agg.copy(flagvalues[s][0], true);
       }
       // check there's enough room to create a copy for scan and throw if creating a copy would go over memory limit
-      overMemLimit((numBytes(t)+1) * flagvalues.size);
+      if t != bigint {
+        // TODO update when we have a better way to handle bigint mem estimation
+        overMemLimit((numBytes(t)+1) * flagvalues.size);
+      }
       // Scan with custom operator, which resets the bitwise AND
       // at segment boundaries.
       const scanresult = ResettingAndScanOp scan flagvalues;
@@ -1109,9 +1236,12 @@ module ReductionMsg
          have already been scanned, or for internal state, the flag means 
          "there has already been a reset in the computation of this value".
       */
-      var value = if eltType == (bool, int) then (false, 0xffffffffffffffff:int) else (false, 0xffffffffffffffff:uint);
+      const max_val: bigint = (1:bigint << class_lvl_max_bits) - 1;
+      var value = if eltType == (bool, int) then (false, 0xffffffffffffffff:int) else if eltType == (bool, uint) then (false, 0xffffffffffffffff:uint) else (false, max_val);
 
-      proc identity return if eltType == (bool, int) then (false, 0xffffffffffffffff:int) else (false, 0xffffffffffffffff:uint);
+      proc identity {
+        return if eltType == (bool, int) then (false, 0xffffffffffffffff:int) else if eltType == (bool, uint) then (false, 0xffffffffffffffff:uint) else (false, max_val);
+      }
 
       proc accumulate(x) {
         // Assume x is an element that has not yet been scanned, and
@@ -1196,7 +1326,7 @@ module ReductionMsg
       }
       var keys = expandKeys(kD, segments);
       // sort keys and values together
-      var t1 = Time.getCurrentTime();
+      var t1 = Time.timeSinceEpoch().totalSeconds();
       rmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(), 
                                                          "Sorting keys and values...");
       /* var toSort = [(k, v) in zip(keys, values)] (k, v); */
@@ -1218,7 +1348,7 @@ module ReductionMsg
         valsAgg.copy(kvi1, values[idx]);
       }
       rmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
-                                           "sort time = %i".format(Time.getCurrentTime() - t1));
+                                           "sort time = %i".format(Time.timeSinceEpoch().totalSeconds() - t1));
       rmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
                                            "Finding unique (key, value) pairs...");
       var truth: [kD] bool;
@@ -1245,7 +1375,7 @@ module ReductionMsg
         }
       }
       rmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
-                                       "time = %i".format(Time.getCurrentTime() - t1));
+                                       "time = %i".format(Time.timeSinceEpoch().totalSeconds() - t1));
       rmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
                                        "Finding unique keys and num unique vals per key.");
       // find steps in keys
@@ -1283,7 +1413,7 @@ module ReductionMsg
         }
       }
       rmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
-                                                   "time = %i".format(Time.getCurrentTime() - t1));
+                                                   "time = %i".format(Time.timeSinceEpoch().totalSeconds() - t1));
       return res;
     }
 

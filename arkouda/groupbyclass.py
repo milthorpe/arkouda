@@ -246,6 +246,7 @@ class GroupBy:
         # This prevents non-bool values that can be evaluated to true (ie non-empty arrays)
         # from causing unexpected results. Experienced when forgetting to wrap multiple key arrays in [].
         # See Issue #1267
+        self.name = None
         if not isinstance(assume_sorted, bool):
             raise TypeError("assume_sorted must be of type bool.")
 
@@ -293,6 +294,13 @@ class GroupBy:
                 self.unique_keys = self.keys[uki]
             else:
                 self.unique_keys = tuple(a[uki] for a in self.keys)
+
+    def __del__(self):
+        try:
+            if self.name:
+                generic_msg(cmd="delete", args={"name": self.name})
+        except RuntimeError:
+            pass
 
     def size(self) -> Tuple[groupable, pdarray]:
         """
@@ -1159,8 +1167,8 @@ class GroupBy:
         RuntimeError
             Raised if all is not supported for the values dtype
         """
-        if values.dtype != akint64 and values.dtype != akuint64:
-            raise TypeError("OR is only supported for pdarrays of dtype int64 or uint64")
+        if values.dtype not in [akint64, akuint64, bigint]:
+            raise TypeError("OR is only supported for pdarrays of dtype int64, uint64, or bigint")
 
         return self.aggregate(values, "or")  # type: ignore
 
@@ -1195,8 +1203,8 @@ class GroupBy:
         RuntimeError
             Raised if all is not supported for the values dtype
         """
-        if values.dtype != akint64 and values.dtype != akuint64:
-            raise TypeError("AND is only supported for pdarrays of dtype int64 or uint64")
+        if values.dtype not in [akint64, akuint64, bigint]:
+            raise TypeError("AND is only supported for pdarrays of dtype int64, uint64, or bigint")
 
         return self.aggregate(values, "and")  # type: ignore
 
@@ -1231,7 +1239,7 @@ class GroupBy:
         RuntimeError
             Raised if all is not supported for the values dtype
         """
-        if values.dtype != akint64 and values.dtype != akuint64:
+        if values.dtype not in [akint64, akuint64]:
             raise TypeError("XOR is only supported for pdarrays of dtype int64 or uint64")
 
         return self.aggregate(values, "xor")  # type: ignore
@@ -1314,8 +1322,19 @@ class GroupBy:
             The unique keys, in grouped order
         result : (list of) SegArray
             The unique values of each group
+
+        Raises
+        ------
+        TypeError
+            Raised if values is or contains Strings or Categorical
         """
         from arkouda.segarray import SegArray
+        from arkouda import Categorical
+
+        if isinstance(values, (Strings, Categorical)) or (
+            isinstance(values, Sequence) and any([isinstance(v, (Strings, Categorical)) for v in values])
+        ):
+            raise TypeError("Groupby.unique not supported on Strings or Categorical")
 
         togroup = self._nested_grouping_helper(values)
         # Group to unique (key, value) pairs
@@ -1387,11 +1406,9 @@ class GroupBy:
         # By default, result is in original order
         >>> g.broadcast(values)
         array([3, 5, 3, 5, 3])
-
         # With permute=False, result is in grouped order
         >>> g.broadcast(values, permute=False)
         array([3, 3, 3, 5, 5]
-
         >>> a = ak.randint(1,5,10)
         >>> a
         array([3, 1, 4, 4, 4, 1, 3, 3, 2, 2])
@@ -1868,6 +1885,7 @@ def broadcast(
 
     Examples
     --------
+    >>>
     # Define a sparse matrix with 3 rows and 7 nonzeros
     >>> row_starts = ak.array([0, 2, 5])
     >>> nnz = 7
@@ -1875,7 +1893,6 @@ def broadcast(
     >>> row_number = ak.arange(3)
     >>> ak.broadcast(row_starts, row_number, nnz)
     array([0 0 1 1 1 2 2])
-
     # If the original nonzeros were in reverse order...
     >>> permutation = ak.arange(6, -1, -1)
     >>> ak.broadcast(row_starts, row_number, permutation=permutation)

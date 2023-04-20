@@ -12,6 +12,8 @@ module ServerConfig
     use Reflection;
     use ServerErrors;
     use Logging;
+
+    use ArkoudaFileCompat;
     
     enum Deployment {STANDARD,KUBERNETES}
     
@@ -210,11 +212,18 @@ module ServerConfig
     }
 
     /*
-    Get the physical memory available on this locale
+    Get an estimate for how much memory can be allocated. Based on runtime with
+    chpl_comm_regMemHeapInfo if using a fixed heap, otherwise physical memory
     */ 
     proc getPhysicalMemHere() {
-        use Memory.Diagnostics;
-        return here.physicalMemory();
+        use Memory.Diagnostics, CTypes;
+        extern proc chpl_comm_regMemHeapInfo(start: c_ptr(c_void_ptr), size: c_ptr(c_size_t)): void;
+        var unused: c_void_ptr;
+        var heap_size: c_size_t;
+        chpl_comm_regMemHeapInfo(c_ptrTo(unused), c_ptrTo(heap_size));
+        if heap_size != 0 then
+            return heap_size.safeCast(int);
+        return here.physicalMemory(unit = MemUnits.Bytes);
     }
 
     /*
@@ -223,7 +232,7 @@ module ServerConfig
     proc getByteorder() throws {
         use IO;
         var writeVal = 1, readVal = 0;
-        var tmpf = openmem();
+        var tmpf = openMemFile();
         tmpf.writer(kind=iobig).write(writeVal);
         tmpf.reader(kind=ionative).read(readVal);
         return if writeVal == readVal then "big" else "little";
@@ -239,10 +248,14 @@ module ServerConfig
 
     /*
     Get the memory limit for this server run
-    returns a percentage of the physical memory per locale
+    returns either the memMax if set or a percentage of the physical memory per locale
     */
     proc getMemLimit():uint {
-        return ((perLocaleMemLimit:real / 100.0) * getPhysicalMemHere()):uint; // checks on locale-0
+        if memMax:int > 0 {
+            return memMax:uint;
+        } else {
+            return ((perLocaleMemLimit:real / 100.0) * getPhysicalMemHere()):uint; // checks on locale-0
+        }
     }
 
     var memHighWater:uint = 0;

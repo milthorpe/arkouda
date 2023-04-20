@@ -1,8 +1,19 @@
+import os
+import tempfile
+
 from base_test import ArkoudaTest
 from context import arkouda as ak
 
+from arkouda import io_util
+
 
 class SegArrayTest(ArkoudaTest):
+    @classmethod
+    def setUpClass(cls):
+        super(SegArrayTest, cls).setUpClass()
+        SegArrayTest.seg_test_base_tmp = "{}/seg_test".format(os.getcwd())
+        io_util.get_directory(SegArrayTest.seg_test_base_tmp)
+
     def test_creation(self):
         a = [10, 11, 12, 13, 14, 15]
         b = [20, 21]
@@ -282,13 +293,6 @@ class SegArrayTest(ArkoudaTest):
 
         with self.assertRaises(ValueError):
             segarr.set_jth(1, 4, 999)
-
-        s = ak.array(["abc", "123"])
-        s_segments = ak.array([0])
-        segarr = ak.segarray(s_segments, s)
-
-        with self.assertRaises(TypeError):
-            segarr.set_jth(0, 0, "test")
 
     def test_get_length_n(self):
         a = [10, 11, 12, 13, 14, 15]
@@ -588,7 +592,15 @@ class SegArrayTest(ArkoudaTest):
         self.assertListEqual(xor[0].tolist(), [])
         self.assertListEqual(xor[1].tolist(), [3, 4])
 
-    def bigint_test(self):
+    def test_segarray_load(self):
+        segarr = ak.segarray(ak.array([0, 9, 14]), ak.arange(20))
+        with tempfile.TemporaryDirectory(dir=SegArrayTest.seg_test_base_tmp) as tmp_dirname:
+            segarr.to_hdf(f"{tmp_dirname}/seg_test.h5")
+
+            seg_load = ak.SegArray.read_hdf(f"{tmp_dirname}/seg_test*")
+            self.assertTrue(ak.all(segarr == seg_load))
+
+    def test_bigint(self):
         a = [2**80, 2**81]
         b = [2**82, 2**83]
         c = [2**84]
@@ -607,4 +619,55 @@ class SegArrayTest(ArkoudaTest):
         )
         self.assertEqual(segarr.__eq__(ak.array([1])), NotImplemented)
         self.assertTrue(segarr.__eq__(segarr).all())
-        self.assertTrue(segarr.non_empty_count() == 5)
+        self.assertTrue(segarr.non_empty_count == 3)
+
+    def test_filter(self):
+        v = ak.randint(0, 5, 100)
+        s = ak.arange(0, 100, 2)
+        sa = ak.SegArray.from_parts(s, v)
+
+        # test filtering single value retain empties
+        filter_result = sa.filter(2, discard_empty=False)
+        self.assertEqual(sa.size, filter_result.size)
+        #ensure 2 does not exist in return values
+        self.assertTrue((filter_result.values != 2).all())
+        for i in range(sa.size):
+            self.assertListEqual(sa[i][(sa[i] != 2)].tolist(), filter_result[i].tolist())
+
+        # test list filter
+        filter_result = sa.filter([1, 2], discard_empty=False)
+        self.assertEqual(sa.size, filter_result.size)
+        # ensure 1 & 2 do not exist in return values
+        self.assertTrue((filter_result.values != 1).all())
+        self.assertTrue((filter_result.values != 2).all())
+        for i in range(sa.size):
+            x = ak.in1d(ak.array(sa[i]), ak.array([1, 2]), invert=True)
+            v = ak.array(sa[i])[x]
+            self.assertListEqual(v.to_list(), filter_result[i].tolist())
+
+        # test pdarray filter
+        filter_result = sa.filter(ak.array([1, 2]), discard_empty=False)
+        self.assertEqual(sa.size, filter_result.size)
+        # ensure 1 & 2 do not exist in return values
+        self.assertTrue((filter_result.values != 1).all())
+        self.assertTrue((filter_result.values != 2).all())
+        for i in range(sa.size):
+            x = ak.in1d(ak.array(sa[i]), ak.array([1, 2]), invert=True)
+            v = ak.array(sa[i])[x]
+            self.assertListEqual(v.to_list(), filter_result[i].tolist())
+
+        # test dropping empty segments
+        filter_result = sa.filter(ak.array([1, 2]), discard_empty=True)
+        # ensure no empty segments
+        self.assertTrue((filter_result.lengths != 0).all())
+        # ensure 2 does not exist in return values
+        self.assertTrue((filter_result.values != 2).all())
+        offset = 0
+        for i in range(sa.size):
+            x = ak.in1d(ak.array(sa[i]), ak.array([1, 2]), invert=True)
+            v = ak.array(sa[i])[x]
+            if v.size != 0:
+                self.assertListEqual(v.to_list(), filter_result[i-offset].tolist())
+            else:
+                offset += 1
+

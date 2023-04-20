@@ -193,7 +193,11 @@ class Index:
 
     def lookup(self, key):
         if not isinstance(key, pdarray):
-            raise TypeError("Lookup must be on an arkouda array")
+            # try to handle single value
+            try:
+                key = array([key])
+            except Exception:
+                raise TypeError("Lookup must be on an arkouda array")
 
         return in1d(self.values, key)
 
@@ -244,6 +248,48 @@ class Index:
         """
         return self.values.to_hdf(prefix_path, dataset=dataset, mode=mode, file_type=file_type)
 
+    def update_hdf(
+        self,
+        prefix_path: str,
+        dataset: str = "array",
+        repack: bool = True,
+    ):
+        """
+        Overwrite the dataset with the name provided with this Index object. If
+        the dataset does not exist it is added.
+
+        Parameters
+        -----------
+        prefix_path : str
+            Directory and filename prefix that all output files share
+        dataset : str
+            Name of the dataset to create in files
+        repack: bool
+            Default: True
+            HDF5 does not release memory on delete. When True, the inaccessible
+            data (that was overwritten) is removed. When False, the data remains, but is
+            inaccessible. Setting to false will yield better performance, but will cause
+            file sizes to expand.
+
+        Returns
+        --------
+        str - success message if successful
+
+        Raises
+        -------
+        RuntimeError
+            Raised if a server-side error is thrown saving the index
+
+        Notes
+        ------
+        - If file does not contain File_Format attribute to indicate how it was saved,
+          the file name is checked for _LOCALE#### to determine if it is distributed.
+        - If the dataset provided does not exist, it will be added
+        - Because HDF5 deletes do not release memory, this will create a copy of the
+          file with the new data
+        """
+        return self.values.update_hdf(prefix_path, dataset=dataset, repack=repack)
+
     def to_parquet(
         self,
         prefix_path: str,
@@ -290,6 +336,57 @@ class Index:
         determine the file format.
         """
         return self.values.to_parquet(prefix_path, dataset=dataset, mode=mode, compression=compression)
+
+    @typechecked
+    def to_csv(
+        self,
+        prefix_path: str,
+        dataset: str = "index",
+        col_delim: str = ",",
+        overwrite: bool = False,
+    ):
+        """
+        Write Index to CSV file(s). File will contain a single column with the pdarray data.
+        All CSV Files written by Arkouda include a header denoting data types of the columns.
+
+        Parameters
+        -----------
+        prefix_path: str
+            The filename prefix to be used for saving files. Files will have _LOCALE#### appended
+            when they are written to disk.
+        dataset: str
+            Column name to save the pdarray under. Defaults to "array".
+        col_delim: str
+            Defaults to ",". Value to be used to separate columns within the file.
+            Please be sure that the value used DOES NOT appear in your dataset.
+        overwrite: bool
+            Defaults to False. If True, any existing files matching your provided prefix_path will
+            be overwritten. If False, an error will be returned if existing files are found.
+
+        Returns
+        --------
+        str reponse message
+
+        Raises
+        ------
+        ValueError
+            Raised if all datasets are not present in all parquet files or if one or
+            more of the specified files do not exist
+        RuntimeError
+            Raised if one or more of the specified files cannot be opened.
+            If `allow_errors` is true this may be raised if no values are returned
+            from the server.
+        TypeError
+            Raised if we receive an unknown arkouda_type returned from the server
+
+        Notes
+        ------
+        - CSV format is not currently supported by load/load_all operations
+        - The column delimiter is expected to be the same for column names and data
+        - Be sure that column delimiters are not found within your data.
+        - All CSV files must delimit rows using newline (`\n`) at this time.
+        """
+        return self.values.to_csv(prefix_path, dataset=dataset, col_delim=col_delim, overwrite=overwrite)
 
     def save(
         self,
@@ -397,7 +494,7 @@ class MultiIndex(Index):
     def __getitem__(self, key):
         from arkouda.series import Series
 
-        if type(key) == Series:
+        if isinstance(key, Series):
             key = key.values
         return MultiIndex([i[key] for i in self.index])
 
@@ -475,7 +572,9 @@ class MultiIndex(Index):
         return MultiIndex(idx)
 
     def lookup(self, key):
-        if type(key) != list and type(key) != tuple:
+        if not isinstance(key, list) and not isinstance(key, tuple):
             raise TypeError("MultiIndex lookup failure")
-
+        # if individual vals convert to pdarrays
+        if not isinstance(key[0], pdarray):
+            key = [array([x]) for x in key]
         return in1d(self.index, key)

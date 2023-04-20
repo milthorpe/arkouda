@@ -1,6 +1,7 @@
 from enum import Enum
-from typing import ForwardRef, Optional, Tuple, Union
+from typing import ForwardRef, List, Optional, Tuple, Union
 from typing import cast as type_cast
+from typing import no_type_check
 
 import numpy as np  # type: ignore
 from typeguard import typechecked
@@ -16,7 +17,10 @@ from arkouda.dtypes import (
     resolve_scalar_dtype,
 )
 from arkouda.groupbyclass import GroupBy
-from arkouda.pdarrayclass import create_pdarray, pdarray
+from arkouda.pdarrayclass import all as ak_all
+from arkouda.pdarrayclass import any as ak_any
+from arkouda.pdarrayclass import argmax, create_pdarray, pdarray
+from arkouda.pdarraycreation import array
 from arkouda.strings import Strings
 
 Categorical = ForwardRef("Categorical")
@@ -421,15 +425,18 @@ def cos(pda: pdarray) -> pdarray:
 
 
 @typechecked
-def hash(pda: pdarray, full: bool = True) -> Union[Tuple[pdarray, pdarray], pdarray]:
+def hash(
+    pda: Union[pdarray, List[pdarray]], full: bool = True
+) -> Union[Tuple[pdarray, pdarray], pdarray]:
     """
     Return an element-wise hash of the array.
 
     Parameters
     ----------
-    pda : pdarray
+    pda : Union[pdarray, list[pdarray]]
 
     full : bool
+        This is only used when a single pdarray is passed into hash
         By default, a 128-bit hash is computed and returned as
         two int64 arrays. If full=False, then a 64-bit hash
         is computed and returned as a single int64 array.
@@ -437,9 +444,11 @@ def hash(pda: pdarray, full: bool = True) -> Union[Tuple[pdarray, pdarray], pdar
     Returns
     -------
     hashes
-        If full=True, a 2-tuple of pdarrays containing the high
+        If full=True or a list of pdarrays is passed,
+        a 2-tuple of pdarrays containing the high
         and low 64 bits of each hash, respectively.
-        If full=False, a single pdarray containing a 64-bit hash
+        If full=False and a single pdarray is passed,
+        a single pdarray containing a 64-bit hash
 
     Raises
     ------
@@ -448,19 +457,47 @@ def hash(pda: pdarray, full: bool = True) -> Union[Tuple[pdarray, pdarray], pdar
 
     Notes
     -----
-    This function uses the SIPhash algorithm, which can output
-    either a 64-bit or 128-bit hash. However, the 64-bit hash
-    runs a significant risk of collisions when applied to more
-    than a few million unique values. Unless the number of unique
-    values is known to be small, the 128-bit hash is strongly
-    recommended.
+    In the case of a single pdarray being passed, this function
+    uses the SIPhash algorithm, which can output either a 64-bit
+    or 128-bit hash. However, the 64-bit hash runs a significant
+    risk of collisions when applied to more than a few million
+    unique values. Unless the number of unique values is known to
+    be small, the 128-bit hash is strongly recommended.
 
     Note that this hash should not be used for security, or for
     any cryptographic application. Not only is SIPhash not
     intended for such uses, but this implementation employs a
     fixed key for the hash, which makes it possible for an
     adversary with control over input to engineer collisions.
+
+    In the case of a list of pdrrays being passed, a non-linear
+    function must be applied to each array since hashes of subsequent
+    arrays cannot be simply XORed because equivalent values will
+    cancel each other out, hence we do a rotation by the ordinal of
+    the array.
     """
+    if isinstance(pda, pdarray):
+        return _hash_single(pda, full)
+
+    repMsg = type_cast(
+        str,
+        generic_msg(
+            cmd="efuncArr",
+            args={
+                "nameslist": [n.name for n in pda],
+                "typeslist": [n.objtype for n in pda],
+                "length": len(pda),
+                "size": len(pda[0]),
+            },
+        ),
+    )
+
+    a, b = repMsg.split("+")
+    return create_pdarray(a), create_pdarray(b)
+
+
+@typechecked
+def _hash_single(pda: pdarray, full: bool = True):
     repMsg = type_cast(
         str,
         generic_msg(
@@ -478,10 +515,83 @@ def hash(pda: pdarray, full: bool = True) -> Union[Tuple[pdarray, pdarray], pdar
         return create_pdarray(repMsg)
 
 
+@no_type_check
+def _str_cat_where(
+    condition: pdarray,
+    A: Union[str, Strings, Categorical],
+    B: Union[str, Strings, Categorical],
+) -> Union[Strings, Categorical]:
+    # added @no_type_check because mypy can't handle Categorical not being declared
+    # sooner, but there are circular dependencies preventing that
+    from arkouda.categorical import Categorical
+    from arkouda.pdarraysetops import concatenate
+
+    if isinstance(A, str) and isinstance(B, (Categorical, Strings)):
+        # This allows us to assume if a str is present it is B
+        A, B, condition = B, A, ~condition
+
+    # one cat and one str
+    if isinstance(A, Categorical) and isinstance(B, str):
+        is_in_categories = A.categories == B
+        if ak_any(is_in_categories):
+            new_categories = A.categories
+            b_code = argmax(is_in_categories)
+        else:
+            new_categories = concatenate([A.categories, array([B])])
+            b_code = A.codes.size + 1
+        new_codes = where(condition, A.codes, b_code)
+        return Categorical.from_codes(new_codes, new_categories, NAvalue=A.NAvalue).reset_categories()
+
+    # both cat
+    if isinstance(A, Categorical) and isinstance(B, Categorical):
+        if A.codes.size != B.codes.size:
+            raise TypeError("Categoricals must be same length")
+        if A.categories.size != B.categories.size or not ak_all(A.categories == B.categories):
+            A, B = A.standardize_categories([A, B])
+        new_codes = where(condition, A.codes, B.codes)
+        return Categorical.from_codes(new_codes, A.categories, NAvalue=A.NAvalue).reset_categories()
+
+    # one strings and one str
+    if isinstance(A, Strings) and isinstance(B, str):
+        new_lens = where(condition, A.get_lengths(), len(B))
+        repMsg = generic_msg(
+            cmd="segmentedWhere",
+            args={
+                "seg_str": A,
+                "other": B,
+                "is_str_literal": True,
+                "new_lens": new_lens,
+                "condition": condition,
+            },
+        )
+        return Strings.from_return_msg(repMsg)
+
+    # both strings
+    if isinstance(A, Strings) and isinstance(B, Strings):
+        if A.size != B.size:
+            raise TypeError("Strings must be same length")
+        new_lens = where(condition, A.get_lengths(), B.get_lengths())
+        repMsg = generic_msg(
+            cmd="segmentedWhere",
+            args={
+                "seg_str": A,
+                "other": B,
+                "is_str_literal": False,
+                "new_lens": new_lens,
+                "condition": condition,
+            },
+        )
+        return Strings.from_return_msg(repMsg)
+
+    raise TypeError("ak.where is not supported between Strings and Categorical")
+
+
 @typechecked
 def where(
-    condition: pdarray, A: Union[numeric_scalars, pdarray], B: Union[numeric_scalars, pdarray]
-) -> pdarray:
+    condition: pdarray,
+    A: Union[str, numeric_scalars, pdarray, Strings, Categorical],  # type: ignore
+    B: Union[str, numeric_scalars, pdarray, Strings, Categorical],  # type: ignore
+) -> Union[pdarray, Strings, Categorical]:  # type: ignore
     """
     Returns an array with elements chosen from A and B based upon a
     conditioning array. As is the case with numpy.where, the return array
@@ -493,9 +603,9 @@ def where(
     ----------
     condition : pdarray
         Used to choose values from A or B
-    A : Union[numeric_scalars, pdarray]
+    A : Union[numeric_scalars, str, pdarray, Strings, Categorical]
         Value(s) used when condition is True
-    B : Union[numeric_scalars, pdarray]
+    B : Union[numeric_scalars, str, pdarray, Strings, Categorical]
         Value(s) used when condition is False
 
     Returns
@@ -508,9 +618,9 @@ def where(
     ------
     TypeError
         Raised if the condition object is not a pdarray, if A or B is not
-        an int, np.int64, float, np.float64, or pdarray, if pdarray dtypes
-        are not supported or do not match, or multiple condition clauses (see
-        Notes section) are applied
+        an int, np.int64, float, np.float64, pdarray, str, Strings, Categorical
+        if pdarray dtypes are not supported or do not match, or multiple
+        condition clauses (see Notes section) are applied
     ValueError
         Raised if the shapes of the condition, A, and B pdarrays are unequal
 
@@ -534,6 +644,18 @@ def where(
     >>> ak.where(cond,a1,a2)
     array([1, 2, 3, 4, 10, 10, 10, 10, 10])
 
+    >>> s1 = ak.array([f'str {i}' for i in range(10)])
+    >>> s2 = 'str 21'
+    >>> cond = (ak.arange(10) % 2 == 0)
+    >>> ak.where(cond,s1,s2)
+    array(['str 0', 'str 21', 'str 2', 'str 21', 'str 4', 'str 21', 'str 6', 'str 21', 'str 8','str 21'])
+
+    >>> c1 = ak.Categorical(ak.array([f'str {i}' for i in range(10)]))
+    >>> c2 = ak.Categorical(ak.array([f'str {i}' for i in range(9, -1, -1)]))
+    >>> cond = (ak.arange(10) % 2 == 0)
+    >>> ak.where(cond,c1,c2)
+    array(['str 0', 'str 8', 'str 2', 'str 6', 'str 4', 'str 4', 'str 6', 'str 2', 'str 8', 'str 0'])
+
     Notes
     -----
     A and B must have the same dtype and only one conditional clause
@@ -543,7 +665,19 @@ def where(
     if (not isSupportedNumber(A) and not isinstance(A, pdarray)) or (
         not isSupportedNumber(B) and not isinstance(B, pdarray)
     ):
-        raise TypeError("both A and B must be an int, np.int64, float, np.float64, or pdarray")
+        from arkouda.categorical import Categorical  # type: ignore
+
+        # fmt: off
+        if (
+            not isinstance(A, (str, Strings, Categorical))  # type: ignore
+            or not isinstance(B, (str, Strings, Categorical))  # type: ignore
+        ):
+            # fmt:on
+            raise TypeError(
+                "both A and B must be an int, np.int64, float, np.float64, pdarray OR"
+                " both A and B must be an str, Strings, Categorical"
+            )
+        return _str_cat_where(condition, A, B)
     if isinstance(A, pdarray) and isinstance(B, pdarray):
         repMsg = generic_msg(
             cmd="efunc3vv",
