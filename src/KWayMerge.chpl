@@ -1,4 +1,6 @@
 module KWayMerge {
+  use GPUIterator;
+
   config const TREE_MERGE: bool = false; 
 
   record KeysComparator {
@@ -11,37 +13,58 @@ module KWayMerge {
     inline proc key(kr) { const (k, _) = kr; return k; }
   }
 
-  proc mergeSortedKeys(dst: [?aD] ?keyType, src: [aD] keyType, chunks: int) {
-    merge(dst, src, chunks, new KeysComparator(max(keyType)));
-  }
-
-  proc mergeSortedRanks(dst: [?aD] ?t, src: [aD] t, chunks: int) where isTuple(t) {
-    merge(dst, src, chunks, new KeysRanksComparator(max(t)));
-  }
-
-  private proc merge(dst: [?aD] ?t, src: [aD] t, chunks: int, comparator) {
-    if TREE_MERGE {
-      treeMerge(dst, src, chunks, comparator);
-    } else {
-      directMerge(dst, src, chunks, comparator);
+  proc mergeSortedKeys(dst: [?aD] ?keyType, src: [aD] keyType, localesToMerge: [0..1] locale, pivot: int) {
+    coforall loc in localesToMerge do on loc {
+      var localSub = aD.localSubdomain();
+      var dstLocal = dst.localSlice(localSub);
+      var srcLocal = src.localSlice(localSub);
+      var chunks = [localSub.dim(0).first..<pivot, pivot..<localSub.dim(0).last];
+      directMerge(dst, src, chunks, new KeysComparator(max(keyType)));
     }
   }
 
-  private proc directMerge(dst: [?aD] ?t, src: [aD] t, chunks: int, comparator) {
-    var cNextIdx: [0..<chunks] int;
-    var cLastIdx: [0..<chunks] int;
-    var draw: [0..<chunks] t;
-    for tid in 0..<chunks {
-      const iters = computeChunk(aD.dim(0), tid, chunks);
-      cNextIdx[tid] = iters.first;
-      cLastIdx[tid] = iters.last;
+  proc mergeSortedKeys(dst: [?aD] ?keyType, src: [aD] keyType, numChunks: int) {
+    mergeChunks(dst, src, numChunks, new KeysComparator(max(keyType)));
+  }
+
+  proc mergeSortedRanks(dst: [?aD] ?t, src: [aD] t, numChunks: int) where isTuple(t) {
+    mergeChunks(dst, src, numChunks, new KeysRanksComparator(max(t)));
+  }
+
+  private proc mergeChunks(dst: [?aD] ?t, src: [aD] t, numChunks: int, comparator) {
+    if TREE_MERGE {
+      treeMerge(dst, src, numChunks, comparator);
+    } else {
+      directMerge(dst, src, numChunks, comparator);
+    }
+  }
+
+  private proc directMerge(dst: [?aD] ?t, src: [aD] t, numChunks: int, comparator) {
+    var cNextIdx: [0..<numChunks] int;
+    var cLastIdx: [0..<numChunks] int;
+    var chunks: [0..<numChunks] range(int);
+    var draw: [0..<numChunks] t;
+    for tid in 0..<numChunks {
+      chunks[tid] = computeChunk(aD.dim(0), tid, numChunks);
+    }
+    directMerge(dst, src, chunks, comparator);
+  }
+
+  private proc directMerge(dst: [?aD] ?t, src: [aD] t, chunks: [?chunkD] range(int), comparator) {
+    var numChunks = chunkD.size;
+    var cNextIdx: [0..<numChunks] int;
+    var cLastIdx: [0..<numChunks] int;
+    var draw: [0..<numChunks] t;
+    for tid in 0..<numChunks {
+      cNextIdx[tid] = chunks[tid].first;
+      cLastIdx[tid] = chunks[tid].last;
       draw[tid] = src[cNextIdx[tid]];
       cNextIdx[tid] += 1;
     }
     for i in 0..#aD.size {
       var minA = draw[0];
       var minALoc: int = 0;
-      for j in 1..<chunks {
+      for j in 1..<numChunks {
         if (comparator.key(draw[j]) < comparator.key(minA)) {
           minA = draw[j];
           minALoc = j;
@@ -58,17 +81,17 @@ module KWayMerge {
     }
   }
 
-  private proc treeMerge(dst: [?aD] ?t, src: [aD] t, chunks: int, comparator) {
-    var cNextIdx: [0..<chunks] int;
-    var cLastIdx: [0..<chunks] int;
-    for chunkId in 0..<chunks {
-      const iters = computeChunk(aD.dim(0), chunkId, chunks);
+  private proc treeMerge(dst: [?aD] ?t, src: [aD] t, numChunks: int, comparator) {
+    var cNextIdx: [0..<numChunks] int;
+    var cLastIdx: [0..<numChunks] int;
+    for chunkId in 0..<numChunks {
+      const iters = computeChunk(aD.dim(0), chunkId, numChunks);
       //writeln("I think chunk ", chunkId, " is ", iters);
       cNextIdx[chunkId] = iters.first;
       cLastIdx[chunkId] = iters.last;
     }
 
-    const numLevels = ceil(log2(chunks:real)):int;
+    const numLevels = ceil(log2(numChunks:real)):int;
     const treeSize = 2**numLevels;
     //writeln("numLevels = ", numLevels, " treeSize = ", treeSize);
 
@@ -98,7 +121,7 @@ module KWayMerge {
       if (level == numLevels) {
         // leaf node
         const chunkId = idx-treeSize;
-        if chunkId < chunks {
+        if chunkId < numChunks {
         //writeln("build tree bottom level, idx = ", idx, " real idx = ", chunkId, " src[cNextIdx[chunkId]] = ", src[cNextIdx[chunkId]]);
         return (src[cNextIdx[chunkId]], chunkId);
         } else {
