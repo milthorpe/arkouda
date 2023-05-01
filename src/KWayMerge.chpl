@@ -13,14 +13,16 @@ module KWayMerge {
     inline proc key(kr) { const (k, _) = kr; return k; }
   }
 
-  proc mergeSortedKeys(dst: [?aD] ?keyType, src: [aD] keyType, localesToMerge: [0..1] locale, pivot: int) {
-    coforall loc in localesToMerge do on loc {
+  proc mergeSortedKeys(dst: [?aD] ?keyType, src: [aD] keyType, localesToMerge: [0..1] (locale,int), pivot: int) {
+    coforall (loc,cut) in localesToMerge do on loc {
       var localSub = aD.localSubdomain();
       var dstLocal = dst.localSlice(localSub);
       var srcLocal = src.localSlice(localSub);
-      var chunks = [localSub.dim(0).first..<pivot, pivot..<localSub.dim(0).last];
+      //writeln("at ", loc, " merging ", localSub.dim(0).first,"..",(cut-1)," and ", cut, "..", localSub.dim(0).last);
+      var chunks = [localSub.dim(0).first..<cut, cut..localSub.dim(0).last];
       directMerge(dst, src, chunks, new KeysComparator(max(keyType)));
     }
+    //writeln("now A = ", dst);
   }
 
   proc mergeSortedKeys(dst: [?aD] ?keyType, src: [aD] keyType, numChunks: int) {
@@ -55,13 +57,15 @@ module KWayMerge {
     var cNextIdx: [0..<numChunks] int;
     var cLastIdx: [0..<numChunks] int;
     var draw: [0..<numChunks] t;
+    var totalSize: int = 0;
     for tid in 0..<numChunks {
       cNextIdx[tid] = chunks[tid].first;
       cLastIdx[tid] = chunks[tid].last;
+      totalSize += chunks[tid].last - chunks[tid].first + 1;
       draw[tid] = src[cNextIdx[tid]];
       cNextIdx[tid] += 1;
     }
-    for i in 0..#aD.size {
+    for i in chunks[0].first..#totalSize {
       var minA = draw[0];
       var minALoc: int = 0;
       for j in 1..<numChunks {
