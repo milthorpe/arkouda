@@ -52,14 +52,14 @@ module CUBSum {
             proc this(lo: int, hi: int, N: int) {
                 var deviceId: int(32);
                 GetDevice(deviceId);
-                var timer: Timer;
+                var timer: stopwatch;
                 if logSumKernelTime {
                     timer.start();
                 }
                 deviceSum[deviceId] = cubSumDevice(e.etype, e.getDeviceArray(deviceId).dPtr(), N, deviceId);
                 if logSumKernelTime {
                     timer.stop();
-                    if deviceId == 0 then writef("%10.3dr", timer.elapsed(TimeUnits.milliseconds));
+                    if deviceId == 0 then writef("%10.3dr", timer.elapsed()*1000.0);
                 }
             }
         }
@@ -91,14 +91,14 @@ module CUBSum {
                 var deviceId: int(32);
                 GetDevice(deviceId);
                 arr.prefetchToDevice(lo, hi, deviceId);
-                var timer: Timer;
+                var timer: stopwatch;
                 if logSumKernelTime {
                     timer.start();
                 }
                 deviceSum[deviceId] = cubSumDevice(arr.etype, arr.dPtr(lo), N, deviceId);
                 if logSumKernelTime {
                     timer.stop();
-                    if deviceId == 0 then writef("%10.3dr", timer.elapsed(TimeUnits.milliseconds));
+                    if deviceId == 0 then writef("%10.3dr", timer.elapsed()*1000.0);
                 }
             }
         }
