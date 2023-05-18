@@ -7,7 +7,7 @@ module CUBSum {
     use IO;
     use Time;
 
-    config const logSumKernelTime = false;
+    config var logSumKernelTime = false;
     config const sumReduceOnGPU = true;
 
     extern proc cubSum_int32(input: c_void_ptr, output: c_void_ptr, num_items: c_size_t);
@@ -42,44 +42,50 @@ module CUBSum {
         return cubSum(aEntry);
     }
 
-    proc cubSum(e: SymEntry) {
-        e.createDeviceCache();
+    proc cubSum(ref e: SymEntry) {
+        
+        var sum: e.etype = 0;
+        ref a = e.a;
+        coforall loc in a.targetLocales() with (+ reduce sum) do on loc {
+            var deviceSum: [0..#nGPUs] e.etype;
 
-        var deviceSum: [0..#nGPUs] e.etype;
-
-        // TODO: proper lambda functions break Chapel compiler
-        record Lambda {
-            proc this(lo: int, hi: int, N: int) {
-                var deviceId: int(32);
-                GetDevice(deviceId);
-                var timer: stopwatch;
-                if logSumKernelTime {
-                    timer.start();
-                }
-                deviceSum[deviceId] = cubSumDevice(e.etype, e.getDeviceArray(deviceId).dPtr(), N, deviceId);
-                if logSumKernelTime {
-                    timer.stop();
-                    if deviceId == 0 then writef("%10.3dr", timer.elapsed()*1000.0);
+            // TODO: proper lambda functions break Chapel compiler
+            record Lambda {
+                proc this(lo: int, hi: int, N: int) {
+                    var localDom = a.localSubdomain();
+                    var deviceId: int(32);
+                    GetDevice(deviceId);
+                    PrefetchToDevice(c_ptrTo(a.localSlice(localDom)), lo*c_sizeof(e.etype), (hi+1)*c_sizeof(e.etype), deviceId); 
+                    var timer: stopwatch;
+                    if logSumKernelTime {
+                        timer.start();
+                    }
+                    deviceSum[deviceId] = cubSumDevice(e.etype, c_ptrTo(a.localSlice(localDom)(localDom.dim(0).first+lo)), N, deviceId);
+                    if logSumKernelTime {
+                        timer.stop();
+                        if deviceId == 0 then writef("%10.3dr", timer.elapsed()*1000.0);
+                    }
                 }
             }
-        }
-        // get local domain's indices
-        var lD = e.a.domain.localSubdomain();
-        // calc task's indices from local domain's indices
-        var tD = {lD.low..lD.high};
-        var cubSumCallback = new Lambda();
+            // get local domain's indices
+            var lD = e.a.domain.localSubdomain();
+            // calc task's indices from local domain's indices
+            var tD = {lD.low..lD.high};
+            var cubSumCallback = new Lambda();
 
-        forall i in GPU(tD, cubSumCallback) {
-            writeln("Should not reach this point!");
-            exit(1);
-        }
+            forall i in GPU(tD, cubSumCallback) {
+                writeln("Should not reach this point!");
+                exit(1);
+            }
 
-        if sumReduceOnGPU || disableMultiGPUs || nGPUs == 1 {
-            // no need to merge
-            return deviceSum[0];
+            if sumReduceOnGPU || disableMultiGPUs || nGPUs == 1 {
+                // no need to merge
+                sum += deviceSum[0];
+            } else {
+                sum += (+ reduce deviceSum);
+            }
         }
-
-        return + reduce deviceSum;
+        return sum;
     }
 
     proc cubSumUnified(arr: GPUUnifiedArray) {
