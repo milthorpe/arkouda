@@ -1,6 +1,23 @@
 #include <cub/cub.cuh>
 #include <stdio.h>
 
+#define CUDA_ERROR_CHECK
+#define CudaSafeCall( err ) __cudaSafeCall( err, __FILE__, __LINE__ )
+
+inline void __cudaSafeCall( cudaError err, const char *file, const int line )
+{
+#ifdef CUDA_ERROR_CHECK
+    if ( cudaSuccess != err )
+    {
+        fprintf( stderr, "cudaSafeCall() failed at %s:%i : %s\n",
+                 file, line, cudaGetErrorString( err ) );
+        exit( -1 );
+    }
+#endif
+
+    return;
+}
+
 using namespace cub;
 
 template <typename T> void cubSum(const T *d_in, T *d_out, int64_t num_items) {
@@ -12,12 +29,12 @@ template <typename T> void cubSum(const T *d_in, T *d_out, int64_t num_items) {
   CubDebugExit(DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items));
 
   // Allocate temporary storage
-  cudaMalloc(&d_temp_storage, temp_storage_bytes);
+  CudaSafeCall(cudaMalloc(&d_temp_storage, temp_storage_bytes));
 
   // Compute Sum
   CubDebugExit(DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items));
 
-  cudaFree(d_temp_storage);
+  CudaSafeCall(cudaFree(d_temp_storage));
 }
 
 extern "C" {
