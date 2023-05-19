@@ -154,7 +154,7 @@ module MultiTypeSymEntry
         
         // not sure yet how to implement numpy data() function
 
-        proc init(type etype, len: int = 0) {
+        proc init(type etype, len: int = 0, GPU:bool = false) {
             this.entryType = SymbolEntryType.TypedArraySymEntry;
             assignableTypes.add(this.entryType);
             this.dtype = whichDtype(etype);
@@ -214,58 +214,16 @@ module MultiTypeSymEntry
         */
         type etype;
 
+        /* Whether the array is allocated in GPU unified memory */
+        param GPU: bool;
+
         /*
         'a' is the distributed array whose value and type are defined by
         makeDist{Dom,Array}() to support varying distributions
         */
-        var a = makeDistArray(size, etype);
+        var a = makeDistArray(size, etype, GPU);
         /* Removed domain accessor, use `a.domain` instead */
         proc aD { compilerError("SymEntry.aD has been removed, use SymEntry.a.domain instead"); }
-
-        /** Represents a copy of the array cached on GPU devices */
-        class DeviceCache {
-            /** Is the device copy the latest version of the array? */
-            var isCurrent = false; // TODO thread-safe way to manage this
-            /* Indicates the range of data for each GPU device */
-            var deviceChunks: [gpuDevices] range;
-            //var hostArrays: [gpuDevices][1..0] etype; // GPU host arrays are empty until initialized
-            /* The GPU arrays (host + device array) for each device */
-            var deviceArrays: [gpuDevices] shared GPUArray?;
-
-            proc createDeviceArrays(a: [?aD] ?etype) {
-                deviceChunks = computeChunks(aD.dim(0), nGPUs);
-                var tmpDeviceArrays: [gpuDevices] shared GPUArray?;
-                record Lambda {
-                    proc this(lo: int, hi: int, N: int) {
-                        var deviceId: int(32);
-                        GetDevice(deviceId);
-                        tmpDeviceArrays[deviceId] = new shared GPUArray(a.localSlice(lo .. hi));
-                        tmpDeviceArrays[deviceId]!.toDevice();
-                    }
-                }
-                var createDeviceArrayCallback = new Lambda();
-                var lD = aD.localSubdomain();
-                var tD = {lD.low..lD.high};
-                forall i in GPU(tD, createDeviceArrayCallback) {
-                    writeln("Should not reach this point!");
-                    exit(1);
-                }
-                for deviceId in gpuDevices do deviceArrays[deviceId] = tmpDeviceArrays[deviceId];
-            }
-
-            proc toDevice(deviceId: int(32)) {
-                if (!isCurrent) {
-                    deviceArrays[deviceId]!.toDevice();
-                    isCurrent = true;
-                }
-            }
-
-            proc fromDevice(deviceId: int(32)) {
-                deviceArrays[deviceId].fromDevice();
-            }
-        }
-
-        var deviceCache: owned DeviceCache?;
         
         /* only used with bigint pdarrays */
         var max_bits = -1;
@@ -278,14 +236,17 @@ module MultiTypeSymEntry
 
         :arg etype: type to be instantiated
         :type etype: type
+
+        :arg GPU: bool whether to allocate the array in GPU unified memory
         */
-        proc init(len: int, type etype) {
+        proc init(len: int, type etype, param GPU:bool = false) {
             super.init(etype, len);
             this.entryType = SymbolEntryType.PrimitiveTypedArraySymEntry;
             assignableTypes.add(this.entryType);
 
             this.etype = etype;
-            this.a = makeDistArray(size, etype);
+            this.GPU = GPU;
+            this.a = makeDistArray(size, etype, GPU);
         }
 
         /*
@@ -300,28 +261,9 @@ module MultiTypeSymEntry
             assignableTypes.add(this.entryType);
 
             this.etype = etype;
+            this.GPU = false;
             this.a = a;
             this.max_bits=max_bits;
-        }
-
-        proc toDevice(deviceId: int(32)) {
-            deviceCache!.toDevice(deviceId);
-        }
-
-        proc fromDevice(deviceId: int(32)) {
-            deviceCache!.fromDevice(deviceId);
-        }
-
-        proc getDeviceArray(deviceId: int(32)) {
-            return deviceCache!.deviceArrays[deviceId]!.borrow();
-        }
-
-        // TODO find a thread-safe way of doing this on demand
-        proc createDeviceCache() {
-            if (deviceCache == nil) {
-                deviceCache = new DeviceCache();
-                deviceCache!.createDeviceArrays(a);
-            }
         }
 
         /*
@@ -332,7 +274,7 @@ module MultiTypeSymEntry
         :type a: [] ?etype
         */
         proc init(a: [?D] ?etype) where MyDmap != Dmap.defaultRectangular && a.isDefaultRectangular() {
-            this.init(D.size, etype);
+            this.init(D.size, etype, GPU=false);
             this.a = a;
         }
 
@@ -341,12 +283,6 @@ module MultiTypeSymEntry
         */
         proc deinit() {
             if logLevel == LogLevel.DEBUG {writeln("deinit SymEntry");try! stdout.flush();}
-            /*
-            for deviceId in gpuDevices {
-                if (! is_c_nil(deviceArrays.dPtr())) then
-                    deviceArrays.free();
-            }
-            */
         }
         
         override proc writeThis(f) throws {

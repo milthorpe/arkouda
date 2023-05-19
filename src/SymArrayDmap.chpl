@@ -8,8 +8,7 @@ module SymArrayDmap
      */
     enum Dmap {defaultRectangular, blockDist};
 
-    private param defaultDmap = if CHPL_COMM == "none" then Dmap.defaultRectangular
-                                                       else Dmap.blockDist;
+    private param defaultDmap = if CHPL_COMM == "none" then Dmap.defaultRectangular else Dmap.blockDist;
     /*
     How domains/arrays are distributed. Defaults to :enum:`Dmap.defaultRectangular` if
     :param:`CHPL_COMM=none`, otherwise defaults to :enum:`Dmap.blockDist`.
@@ -17,6 +16,8 @@ module SymArrayDmap
     config param MyDmap:Dmap = defaultDmap;
 
     public use BlockDist;
+    public use ReplicatedDist;
+    public use GPUUnifiedDist;
 
     /* 
     Makes a domain distributed according to :param:`MyDmap`.
@@ -24,7 +25,26 @@ module SymArrayDmap
     :arg size: size of domain
     :type size: int
     */
-    proc makeDistDom(size:int) {
+    proc makeDistDom(size:int, param GPU:bool = false) where GPU == true {
+        select MyDmap
+        {
+            when Dmap.defaultRectangular {
+                return {0..#size} dmapped GPUUnified(boundingBox={0..#size});
+            }
+            when Dmap.blockDist {
+                if size > 0 {
+                    return {0..#size} dmapped GPUUnified(boundingBox={0..#size});
+                }
+                // fix the annoyance about boundingBox being enpty
+                else {return {0..#0} dmapped GPUUnified(boundingBox={0..0});}
+            }
+            otherwise {
+                halt("Unsupported distribution " + MyDmap:string);
+            }
+        }
+    }
+
+    proc makeDistDom(size:int, param GPU:bool = false) {
         select MyDmap
         {
             when Dmap.defaultRectangular {
@@ -54,8 +74,8 @@ module SymArrayDmap
 
     :returns: [] ?etype
     */
-    proc makeDistArray(size:int, type etype) {
-        var a: [makeDistDom(size)] etype;
+    proc makeDistArray(size:int, type etype, param GPU:bool = false) {
+        var a: [makeDistDom(size, GPU)] etype;
         return a;
     }
 
@@ -67,8 +87,8 @@ module SymArrayDmap
 
     :returns: type
     */
-    proc makeDistDomType(size: int) type {
-        return makeDistDom(size).type;
+    proc makeDistDomType(size: int, param GPU:bool = false) type {
+        return makeDistDom(size, GPU).type;
     }
 
 }
