@@ -9,7 +9,7 @@ module MultiTypeSymEntry
     use AryUtil;
 
     use GPUAPI;
-    use GPUIterator;
+    use CTypes;
 
     public use NumPyDType;
     public use SymArrayDmap;
@@ -18,15 +18,6 @@ module MultiTypeSymEntry
     private config const logLevel = ServerConfig.logLevel;
     private config const logChannel = ServerConfig.logChannel;
     const genLogger = new Logger(logLevel, logChannel);
-
-    var gpuDevices = 0..#GPUIterator.nGPUs;
-
-    proc computeChunks(r: range, numChunks) where r.stridable == false {
-        var chunks: [gpuDevices] range;
-        const numElems = r.size;
-        const elemsPerChunk = numElems/numChunks;
-        return [myID in gpuDevices] if (myID != numChunks - 1) then (r.low + elemsPerChunk * myID .. #elemsPerChunk) else (r.low + elemsPerChunk * myID .. r.high);
-    }
 
     /**
      * Internal Types we can use to build our Symbol type hierarchy.
@@ -276,6 +267,17 @@ module MultiTypeSymEntry
         proc init(a: [?D] ?etype) where MyDmap != Dmap.defaultRectangular && a.isDefaultRectangular() {
             this.init(D.size, etype, GPU=false);
             this.a = a;
+        }
+
+        proc prefetchLocalDataToDevice(lo: int, hi: int, deviceId: int(32)) {
+            if GPU {
+                PrefetchToDevice(c_ptrTo(a.localSlice(a.localSubdomain())), lo*c_sizeof(etype), (hi+1)*c_sizeof(etype), deviceId);
+            }
+        }
+
+        proc c_ptrToLocalData(lo: int) {
+            const localDom = a.localSubdomain();
+            return c_ptrTo(a.localSlice(localDom)[localDom.dim(0).first+lo]);
         }
 
         /*
