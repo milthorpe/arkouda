@@ -47,46 +47,49 @@ module CUBHistogram {
     }
 
     // TODO update HistogramMsg to call the SymEntry version of this proc
-    proc cubHistogram(a: [?aD] ?t, aMin: t, aMax: t, bins: int, binWidth: real) {
-        var aEntry = new SymEntry(a);
-        return cubHistogram(aEntry, aMin, aMax, bins, binWidth);
+    proc cubHistogram(samples: [?aD] ?t, sampleMin: t, sampleMax: t, bins: int, binWidth: real) {
+        var samplesEntry = new SymEntry(samples);
+        return cubHistogram(samplesEntry, sampleMin, sampleMax, bins, binWidth);
     }
 
-    proc cubHistogram(e: SymEntry, aMin: ?etype, aMax: etype, bins: int, binWidth: real) {
-        e.createDeviceCache();
+    proc cubHistogram(ref samples: SymEntry, sampleMin: ?etype, sampleMax: etype, bins: int, binWidth: real) {
+        var hist: [0..#bins] int;
+        ref a = samples.a;
+        coforall loc in a.targetLocales() with (+ reduce hist) do on loc {
+            // each device computes its histogram in a separate array
+            var deviceHistograms: [0..#nGPUs][0..#bins] int;
 
-        // each device computes its histogram in a separate array
-        var deviceHistograms: [0..#nGPUs][0..#bins] int;
+            // TODO: proper lambda functions break Chapel compiler
+            record Lambda {
+                proc this(lo: int, hi: int, N: int) {
+                    var deviceId: int(32);
+                    GetDevice(deviceId);
+                    samples.prefetchLocalDataToDevice(lo, hi, deviceId);
+                    cubHistogram(samples.etype, samples.c_ptrToLocalData(lo), deviceHistograms[deviceId], sampleMin, sampleMax, N, deviceId);
+                }
+            }
+            // get local domain's indices
+            var lD = a.localSubdomain();
+            // calc task's indices from local domain's indices
+            var tD = {lD.low..lD.high};
+            var cubHistogramCallback = new Lambda();
+            forall i in GPU(tD, cubHistogramCallback) {
+                writeln("Should not reach this point!");
+                exit(1);
+            }
 
-        // TODO: proper lambda functions break Chapel compiler
-        record Lambda {
-            proc this(lo: int, hi: int, N: int) {
-                var deviceId: int(32);
-                GetDevice(deviceId);
-                cubHistogram(e.etype, e.getDeviceArray(deviceId).dPtr(), deviceHistograms[deviceId], aMin, aMax, N, deviceId);
+            if histogramReduceOnGPU || disableMultiGPUs || nGPUs == 1 {
+                // no need to merge devices
+                hist += deviceHistograms[0];
+            } else {
+                hist += (+ reduce deviceHistograms);
             }
         }
-        // get local domain's indices
-        var lD = e.a.domain.localSubdomain();
-        // calc task's indices from local domain's indices
-        var tD = {lD.low..lD.high};
-        var cubHistogramCallback = new Lambda();
-        forall i in GPU(tD, cubHistogramCallback) {
-            writeln("Should not reach this point!");
-            exit(1);
-        }
-        e.deviceCache!.isCurrent = true;
-
-        if histogramReduceOnGPU || disableMultiGPUs || nGPUs == 1 {
-            // no need to merge
-            return deviceHistograms[0];
-        } else {
-            return + reduce deviceHistograms;
-        }
+        return hist;
     }
 
     // TODO update HistogramMsg to call the SymEntry version of this proc
-    proc cubHistogramUnified(arr: GPUUnifiedArray, aMin: ?t, aMax: t, bins: int, binWidth: real) {
+    proc cubHistogramUnified(arr: GPUUnifiedArray, sampleMin: ?t, sampleMax: t, bins: int, binWidth: real) {
         // each device computes its histogram in a separate array
         var deviceHistograms: [0..#nGPUs][0..#bins] int;
 
@@ -96,7 +99,7 @@ module CUBHistogram {
                 var deviceId: int(32);
                 GetDevice(deviceId);
                 arr.prefetchToDevice(lo, hi, deviceId);
-                cubHistogram(t, arr.dPtr(lo), deviceHistograms[deviceId], aMin, aMax, N, deviceId);
+                cubHistogram(t, arr.dPtr(lo), deviceHistograms[deviceId], sampleMin, sampleMax, N, deviceId);
             }
         }
         var tD = arr.a.domain.localSubdomain();
