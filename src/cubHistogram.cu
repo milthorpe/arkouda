@@ -1,5 +1,6 @@
 #include <cub/cub.cuh>
 #include <stdio.h>
+#include "cuda_error_check.h"
 
 using namespace cub;
 
@@ -11,14 +12,14 @@ template <typename T> void cubHistogram(const T *d_samples, unsigned long long i
   CubDebugExit(cub::DeviceHistogram::HistogramEven(d_temp_storage, temp_storage_bytes,
       d_samples, d_histogram, num_levels, lower_bound, upper_bound, N, 0, false));
   // Allocate temporary storage
-  cudaMalloc(&d_temp_storage, temp_storage_bytes);
+  CudaSafeCall(cudaMalloc(&d_temp_storage, temp_storage_bytes));
   //CubDebugExit(g_allocator.DeviceAllocate(&d_temp_storage, temp_storage_bytes));
 
   // Compute histograms
   CubDebugExit(cub::DeviceHistogram::HistogramEven(d_temp_storage, temp_storage_bytes,
     d_samples, d_histogram, num_levels, lower_bound, upper_bound, N, 0, false));
 
-  if (d_temp_storage) cudaFree(d_temp_storage);
+  if (d_temp_storage) CudaSafeCall(cudaFree(d_temp_storage));
   //if (d_temp_storage) CubDebugExit(g_allocator.DeviceFree(d_temp_storage));
 }
 
