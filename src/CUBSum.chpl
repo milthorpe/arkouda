@@ -55,12 +55,12 @@ module CUBSum {
                     var localDom = a.localSubdomain();
                     var deviceId: int(32);
                     GetDevice(deviceId);
-                    PrefetchToDevice(c_ptrTo(a.localSlice(localDom)), lo*c_sizeof(e.etype), (hi+1)*c_sizeof(e.etype), deviceId); 
+                    e.prefetchLocalDataToDevice(lo, hi, deviceId);
                     var timer: stopwatch;
                     if logSumKernelTime {
                         timer.start();
                     }
-                    deviceSum[deviceId] = cubSumDevice(e.etype, c_ptrTo(a.localSlice(localDom)(localDom.dim(0).first+lo)), N, deviceId);
+                    deviceSum[deviceId] = cubSumDevice(e.etype, e.c_ptrToLocalData(lo), N, deviceId);
                     if logSumKernelTime {
                         timer.stop();
                         if deviceId == 0 then writef("%10.3dr", timer.elapsed()*1000.0);
@@ -68,7 +68,7 @@ module CUBSum {
                 }
             }
             // get local domain's indices
-            var lD = e.a.domain.localSubdomain();
+            var lD = a.localSubdomain();
             // calc task's indices from local domain's indices
             var tD = {lD.low..lD.high};
             var cubSumCallback = new Lambda();
