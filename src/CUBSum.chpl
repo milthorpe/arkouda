@@ -43,7 +43,6 @@ module CUBSum {
     }
 
     proc cubSum(ref e: SymEntry) {
-        
         var sum: e.etype = 0;
         ref a = e.a;
         coforall loc in a.targetLocales() with (+ reduce sum) do on loc {

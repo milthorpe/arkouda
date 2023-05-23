@@ -40,36 +40,41 @@ module CUBMin {
         return cubMin(aEntry);
     }
 
-    proc cubMin(e: SymEntry) {
-        e.createDeviceCache();
+    proc cubMin(ref e: SymEntry) {
+        var min: e.etype = 0;
+        ref a = e.a;
+        coforall loc in a.targetLocales() with (+ reduce min) do on loc {
+            var deviceMin: [0..#nGPUs] e.etype;
 
-        var deviceMin: [0..#nGPUs] e.etype;
+            // TODO: proper lambda functions break Chapel compiler
+            record Lambda {
+                proc this(lo: int, hi: int, N: int) {
+                    var localDom = a.localSubdomain();
+                    var deviceId: int(32);
+                    GetDevice(deviceId);
+                    e.prefetchLocalDataToDevice(lo, hi, deviceId);
+                    deviceMin[deviceId] = cubMinDevice(e.etype, e.c_ptrToLocalData(lo), N, deviceId);
+                }
+            }
+            // get local domain's indices
+            var lD = a.localSubdomain();
+            // calc task's indices from local domain's indices
+            var tD = {lD.low..lD.high};
+            var cubMinCallback = new Lambda();
 
-        // TODO: proper lambda functions break Chapel compiler
-        record Lambda {
-            proc this(lo: int, hi: int, N: int) {
-                var deviceId: int(32);
-                GetDevice(deviceId);
-                e.toDevice(deviceId);
-                deviceMin[deviceId] = cubMinDevice(e.etype, e.getDeviceArray(deviceId).dPtr(), N, deviceId);
+            forall i in GPU(tD, cubMinCallback) {
+                writeln("Should not reach this point!");
+                exit(1);
+            }
+
+            if minReduceOnGPU || disableMultiGPUs || nGPUs == 1 {
+                // no need to merge
+                min += deviceMin[0];
+            } else {
+                min += (+ reduce deviceMin);
             }
         }
-        // get local domain's indices
-        var lD = e.a.domain.localSubdomain();
-        // calc task's indices from local domain's indices
-        var tD = {lD.low..lD.high};
-        var cubMinCallback = new Lambda();
-        forall i in GPU(tD, cubMinCallback) {
-            writeln("Should not reach this point!");
-            exit(1);
-        }
-
-        if minReduceOnGPU || disableMultiGPUs || nGPUs == 1 {
-            // no need to merge
-            return deviceMin[0];
-        }
-
-        return min reduce deviceMin;
+        return min;
     }
 
     proc cubMinUnified(arr: GPUUnifiedArray) {
