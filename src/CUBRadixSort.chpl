@@ -6,6 +6,7 @@ module CUBRadixSort {
     use KWayMerge;
     use Time;
 
+    config param logSortKernelTime = false;
     config param cubRadixSortVerbose = false;
 
     extern proc cubSortKeys_int32(keys_in: c_void_ptr, keys_out: c_void_ptr, N: c_size_t);
@@ -115,15 +116,15 @@ module CUBRadixSort {
         }
     }
 
-    private proc cubSortKeysMergeOnHost(type t, devA: GPUArray, devAOut: GPUArray, N: int) {
+    private proc cubSortKeysMergeOnHost(type t, devInPtr: c_void_ptr, devAOut: GPUArray, N: int) {
         if t == int(32) {
-            cubSortKeys_int32(devA.dPtr(), devAOut.dPtr(), N: c_size_t);
+            cubSortKeys_int32(devInPtr, devAOut.dPtr(), N: c_size_t);
         } else if t == int(64) {
-            cubSortKeys_int64(devA.dPtr(), devAOut.dPtr(), N: c_size_t);
+            cubSortKeys_int64(devInPtr, devAOut.dPtr(), N: c_size_t);
         } else if t == real(32) {
-            cubSortKeys_float(devA.dPtr(), devAOut.dPtr(), N: c_size_t);
+            cubSortKeys_float(devInPtr, devAOut.dPtr(), N: c_size_t);
         } else if t == real(64) {
-            cubSortKeys_double(devA.dPtr(), devAOut.dPtr(), N: c_size_t);
+            cubSortKeys_double(devInPtr, devAOut.dPtr(), N: c_size_t);
         }
         DeviceSynchronize();
 
@@ -132,28 +133,28 @@ module CUBRadixSort {
         }
     }
 
-    private proc cubSortKeysMergeOnGPU(type t, devA: GPUArray, N: int, deviceBuffers: c_void_ptr) {
+    private proc cubSortKeysMergeOnGPU(type t, devInPtr: c_void_ptr, N: int, deviceBuffers: c_void_ptr) {
         if t == int(32) {
-            sortToDeviceBuffer_int32(devA.dPtr(), deviceBuffers, N);
+            sortToDeviceBuffer_int32(devInPtr, deviceBuffers, N);
         } else if t == int(64) {
-            sortToDeviceBuffer_int64(devA.dPtr(), deviceBuffers, N);
+            sortToDeviceBuffer_int64(devInPtr, deviceBuffers, N);
         } else if t == real(32) {
-            sortToDeviceBuffer_float(devA.dPtr(), deviceBuffers, N);
+            sortToDeviceBuffer_float(devInPtr, deviceBuffers, N);
         } else if t == real(64) {
-            sortToDeviceBuffer_double(devA.dPtr(), deviceBuffers, N);
+            sortToDeviceBuffer_double(devInPtr, deviceBuffers, N);
         }
     }
 
-    private proc cubSortPairs(type t, devA: GPUArray, devAOut: GPUArray, devRanksIn: GPUArray, devRanksOut: GPUArray, N: int) {
+    private proc cubSortPairs(type t, devInPtr: c_void_ptr, devAOut: GPUArray, devRanksIn: GPUArray, devRanksOut: GPUArray, N: int) {
         devRanksIn.toDevice();
         if t == int(32) {
-            cubSortPairs_int32(devA.dPtr(), devAOut.dPtr(), devRanksIn.dPtr(), devRanksOut.dPtr(), N: c_size_t);
+            cubSortPairs_int32(devInPtr, devAOut.dPtr(), devRanksIn.dPtr(), devRanksOut.dPtr(), N: c_size_t);
         } else if t == int(64) {
-            cubSortPairs_int64(devA.dPtr(), devAOut.dPtr(), devRanksIn.dPtr(), devRanksOut.dPtr(), N: c_size_t);
+            cubSortPairs_int64(devInPtr, devAOut.dPtr(), devRanksIn.dPtr(), devRanksOut.dPtr(), N: c_size_t);
         } else if t == real(32) {
-            cubSortPairs_float(devA.dPtr(), devAOut.dPtr(), devRanksIn.dPtr(), devRanksOut.dPtr(), N: c_size_t);
+            cubSortPairs_float(devInPtr, devAOut.dPtr(), devRanksIn.dPtr(), devRanksOut.dPtr(), N: c_size_t);
         } else if t == real(64) {
-            cubSortPairs_double(devA.dPtr(), devAOut.dPtr(), devRanksIn.dPtr(), devRanksOut.dPtr(), N: c_size_t);
+            cubSortPairs_double(devInPtr, devAOut.dPtr(), devRanksIn.dPtr(), devRanksOut.dPtr(), N: c_size_t);
         }
         DeviceSynchronize();
         
@@ -164,16 +165,16 @@ module CUBRadixSort {
     }
 
     proc setupPeerAccess() {
-        var devices = [deviceId in 0..#nGPUs] deviceId:int(32);
-        forall i in 0..#nGPUs {
-            SetDevice(i:int(32));
-            enablePeerAccess(devices, nGPUs);
+        var allDevices = devices;
+        forall i in allDevices {
+            SetDevice(i);
+            enablePeerAccess(allDevices, nGPUs);
         }
     }
 
     // TODO update SortMsg to call the SymEntry version of this proc
     proc cubRadixSortLSD_keys(a: [?aD] ?t, mergeOnGPU: bool = false) {
-        var aEntry = new SymEntry(a);
+        var aEntry = new SymEntry(a, GPU=true);
         if mergeOnGPU then
             return cubRadixSortLSDKeysMergeOnGPU(aEntry);
         else
@@ -182,7 +183,7 @@ module CUBRadixSort {
 
     // TODO update ArgSortMsg to call the SymEntry version of this proc
     proc cubRadixSortLSD_ranks(a: [?aD] ?t) {
-        var aEntry = new SymEntry(a);
+        var aEntry = new SymEntry(a, GPU=true);
         var ranksEntry = cubRadixSortLSD_ranks(aEntry);
         var ranks = ranksEntry.a;
         return ranks;
@@ -192,30 +193,40 @@ module CUBRadixSort {
        radix sort a block distributed array,
        returning a sorted array, without updating the input
      */
-    proc cubRadixSortLSDKeysMergeOnHost(aEntry: SymEntry) {
-        aEntry.createDeviceCache();
-
-        var a = aEntry.a;
+    proc cubRadixSortLSDKeysMergeOnHost(e: SymEntry) {
+        if !e.GPU then throw new owned Error("cubRadixSortLSDKeysMergeOnHost called on non-GPU SymEntry");
+        ref a = e.a;
         var aD = a.domain;
-        type t = aEntry.etype;
+        type t = e.etype;
+
+        var timer: stopwatch;
+        if logSortKernelTime {
+            timer.start();
+        }
 
         var aOut: [aD] t;
+
+        if logSortKernelTime {
+            timer.stop();
+            writef("create aOut %10.3dr\n", timer.elapsed()*1000.0);
+            timer.clear();
+            timer.start();
+        }
 
         // TODO: proper lambda functions break Chapel compiler
         record Lambda {
             proc this(lo: int, hi: int, N: int) {
                 var deviceId: int(32);
                 GetDevice(deviceId);
+                e.prefetchLocalDataToDevice(lo, hi, deviceId);
                 if (cubRadixSortVerbose) {
                     var count: int(32);
                     GetDeviceCount(count);
                     writeln("In cubSortKeysCallback, launching the CUDA kernel with a range of ", lo, "..", hi, " (Size: ", N, "), GPU", deviceId, " of ", count, " @", here);
                 }
-                aEntry.toDevice(deviceId);
-                var devA = aEntry.getDeviceArray(deviceId);
                 // these are temporary arrays that do not need to be cached on SymEntry
                 var devAOut = new GPUArray(aOut.localSlice(lo .. hi));
-                cubSortKeysMergeOnHost(t, devA, devAOut, N);
+                cubSortKeysMergeOnHost(t, e.c_ptrToLocalData(lo), devAOut, N);
             }
         }
         // get local domain's indices
@@ -226,6 +237,13 @@ module CUBRadixSort {
         forall i in GPU(tD, cubSortKeysCallback) {
             writeln("Should not reach this point!");
             exit(1);
+        }
+
+        if logSortKernelTime {
+            timer.stop();
+            writef("sort %10.3dr\n", timer.elapsed()*1000.0);
+            timer.clear();
+            timer.start();
         }
 
         if disableMultiGPUs || nGPUs == 1 {
@@ -235,55 +253,59 @@ module CUBRadixSort {
             // merge sorted chunks
             var merged: [aD] t;
             mergeSortedKeys(aOut, merged, nGPUs);
+            if logSortKernelTime {
+                timer.stop();
+                writef("merge on host %10.3dr\n", timer.elapsed()*1000.0);
+                timer.clear();
+                timer.start();
+            }
             return merged;
         }
     }
 
-    proc cubRadixSortLSDKeysMergeOnGPU(aEntry: SymEntry) {
-        //var timer: Timer;
-        //timer.start();
-
-        aEntry.createDeviceCache();
-
-        //timer.stop();
-        //writef("create device cache %10.3dr\n", timer.elapsed(TimeUnits.milliseconds));
-        //timer.clear();
-        //timer.start();
-
-        var a = aEntry.a;
+    proc cubRadixSortLSDKeysMergeOnGPU(e: SymEntry) {
+        if !e.GPU then  throw new owned Error("cubRadixSortLSDKeysMergeOnGPU called on non-GPU SymEntry");
+        ref a = e.a;
         var aD = a.domain;
-        type t = aEntry.etype;
+        type t = e.etype;
+        var allDevices = GPUIterator.devices;
 
-        var aOut: [aD] t;
-        var devices = [deviceId in 0..#nGPUs] deviceId:int(32);
-        var deviceBuffers: c_void_ptr;
-        if t == int(32) {
-            deviceBuffers = createDeviceBuffers_int32(a.size, devices, devices.size: int(32));
-        } else if t == int(64) {
-            deviceBuffers = createDeviceBuffers_int64(a.size, devices, devices.size: int(32));
-        } else if t == real(32) {
-            deviceBuffers = createDeviceBuffers_float(a.size, devices, devices.size: int(32));
-        } else if t == real(64) {
-            deviceBuffers = createDeviceBuffers_double(a.size, devices, devices.size: int(32));
+        var timer: stopwatch;
+        if logSortKernelTime {
+            timer.start();
         }
 
-        //timer.stop();
-        //writef("create device buffers %10.3dr\n", timer.elapsed(TimeUnits.milliseconds));
-        //timer.clear();
-        //timer.start();
+        var aOut: [aD] t;
+        var deviceBuffers: c_void_ptr;
+        if t == int(32) {
+            deviceBuffers = createDeviceBuffers_int32(a.size, allDevices, allDevices.size: int(32));
+        } else if t == int(64) {
+            deviceBuffers = createDeviceBuffers_int64(a.size, allDevices, allDevices.size: int(32));
+        } else if t == real(32) {
+            deviceBuffers = createDeviceBuffers_float(a.size, allDevices, allDevices.size: int(32));
+        } else if t == real(64) {
+            deviceBuffers = createDeviceBuffers_double(a.size, allDevices, allDevices.size: int(32));
+        }
+
+        if logSortKernelTime {
+            timer.stop();
+            writef("create device buffers %10.3dr\n", timer.elapsed()*1000.0);
+            timer.clear();
+            timer.start();
+        }
 
         // TODO: proper lambda functions break Chapel compiler
         record Lambda {
             proc this(lo: int, hi: int, N: int) {
                 var deviceId: int(32);
                 GetDevice(deviceId);
+                e.prefetchLocalDataToDevice(lo, hi, deviceId);
                 if (cubRadixSortVerbose) {
                     var count: int(32);
                     GetDeviceCount(count);
-                    writeln("In cubSortKeysCallback, launching the CUDA kernel with a range of ", lo, "..", hi, " (Size: ", N, "), GPU", deviceId, " of ", count, " @", here);
+                    writeln("In cubSortKeysCallback, launching the CUDA kernel on dev ptr ", e.c_ptrToLocalData(lo), " with a range of ", lo, "..", hi, " (Size: ", N, "), GPU", deviceId, " of ", count, " @", here);
                 }
-                var devA = aEntry.getDeviceArray(deviceId);
-                cubSortKeysMergeOnGPU(t, devA, N, deviceBuffers);
+                cubSortKeysMergeOnGPU(t, e.c_ptrToLocalData(lo), N, deviceBuffers);
             }
         }
         // get local domain's indices
@@ -296,17 +318,21 @@ module CUBRadixSort {
             exit(1);
         }
 
-        //timer.stop();
-        //writef("sort %10.3dr\n", timer.elapsed(TimeUnits.milliseconds));
-        //timer.clear();
-        //timer.start();
+        if logSortKernelTime {
+            timer.stop();
+            writef("sort %10.3dr\n", timer.elapsed()*1000.0);
+            timer.clear();
+            timer.start();
+        }
 
-        mergePartitions(t, deviceBuffers, devices);
+        mergePartitions(t, deviceBuffers, allDevices);
 
-        //timer.stop();
-        //writef("merge %10.3dr\n", timer.elapsed(TimeUnits.milliseconds));
-        //timer.clear();
-        //timer.start();
+        if logSortKernelTime {
+            timer.stop();
+            writef("merge on GPU %10.3dr\n", timer.elapsed()*1000.0);
+            timer.clear();
+            timer.start();
+        }
 
         record Lambda2 {
             proc this(lo: int, hi: int, N: int) {
@@ -321,15 +347,18 @@ module CUBRadixSort {
                 }
             }
         }
-        var syncAndCopyBack = new Lambda2();
-        forall i in GPU(tD, syncAndCopyBack) {
+        var copyBack = new Lambda2();
+        forall i in GPU(tD, copyBack) {
             writeln("Should not reach this point!");
             exit(1);
         }
-        //timer.stop();
-        //writef("copy back %10.3dr\n", timer.elapsed(TimeUnits.milliseconds));
-        //timer.clear();
-        //timer.start();
+
+        if logSortKernelTime {
+            timer.stop();
+            writef("copy back %10.3dr\n", timer.elapsed()*1000.0);
+            timer.clear();
+            timer.start();
+        }
 
         if t == int(32) {
             destroyDeviceBuffers_int32(deviceBuffers);
@@ -341,8 +370,10 @@ module CUBRadixSort {
             destroyDeviceBuffers_double(deviceBuffers);
         }
 
-        //timer.stop();
-        //writef("destroy %10.3dr\n", timer.elapsed(TimeUnits.milliseconds));
+        if logSortKernelTime {
+            timer.stop();
+            writef("destroy %10.3dr\n", timer.elapsed()*1000.0);
+        }
 
         return aOut;
     }
@@ -350,12 +381,10 @@ module CUBRadixSort {
     /* Radix Sort Least Significant Digit
        radix sort a block distributed array
        returning a permutation vector as a block distributed array */
-    proc cubRadixSortLSD_ranks(aEntry: SymEntry) {
-        aEntry.createDeviceCache();
-
-        var a = aEntry.a;
+    proc cubRadixSortLSD_ranks(e: SymEntry) {
+        ref a = e.a;
         var aD = a.domain;
-        type t = aEntry.etype;
+        type t = e.etype;
 
         var ranksIn: [aD] int = [rank in aD] rank;
         var aOut: [aD] t;
@@ -368,18 +397,17 @@ module CUBRadixSort {
             proc this(lo: int, hi: int, N: int) {
                 var deviceId: int(32);
                 GetDevice(deviceId);
+                e.prefetchLocalDataToDevice(lo, hi, deviceId);
                 if (cubRadixSortVerbose) {
                     var count: int(32);
                     GetDeviceCount(count);
                     writeln("In cubSortPairsCallback, launching the CUDA kernel with a range of ", lo, "..", hi, " (Size: ", N, "), GPU", deviceId, " of ", count, " @", here);
                 }
-                aEntry.toDevice(deviceId);
-                var devA = aEntry.getDeviceArray(deviceId);
                 var devRanksOut = ranksEntry.getDeviceArray(deviceId);
                 // these are temporary arrays that do not need to be cached on SymEntry
                 var devAOut = new GPUArray(aOut.localSlice(lo .. hi));
                 var devRanksIn = new GPUArray(ranksIn.localSlice(lo .. hi));
-                cubSortPairs(t, devA, devAOut, devRanksIn, devRanksOut, N);
+                cubSortPairs(t, e.c_ptrToLocalData(lo), devAOut, devRanksIn, devRanksOut, N);
             }
         }
         // get local domain's indices
