@@ -42,7 +42,7 @@ module CUBSum {
         return cubSum(aEntry);
     }
 
-    proc cubSum(ref e: SymEntry) {
+    proc cubSum(ref e: SymEntry) where e.GPU == true {
         var sum: e.etype = 0;
         ref a = e.a;
         coforall loc in a.targetLocales() with (+ reduce sum) do on loc {

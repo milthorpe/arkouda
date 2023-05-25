@@ -263,8 +263,7 @@ module CUBRadixSort {
         }
     }
 
-    proc cubRadixSortLSDKeysMergeOnGPU(e: SymEntry) {
-        if !e.GPU then  throw new owned Error("cubRadixSortLSDKeysMergeOnGPU called on non-GPU SymEntry");
+    proc cubRadixSortLSDKeysMergeOnGPU(e: SymEntry) where e.GPU == true {
         ref a = e.a;
         var aD = a.domain;
         type t = e.etype;

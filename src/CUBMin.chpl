@@ -40,7 +40,7 @@ module CUBMin {
         return cubMin(aEntry);
     }
 
-    proc cubMin(ref e: SymEntry) {
+    proc cubMin(ref e: SymEntry) where e.GPU == true {
         var min: e.etype = 0;
         ref a = e.a;
         coforall loc in a.targetLocales() with (+ reduce min) do on loc {

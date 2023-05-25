@@ -40,7 +40,7 @@ module CUBMax {
         return cubMax(aEntry);
     }
 
-    proc cubMax(ref e: SymEntry) {
+    proc cubMax(ref e: SymEntry) where e.GPU == true {
         var max: e.etype = 0;
         ref a = e.a;
         coforall loc in a.targetLocales() with (+ reduce max) do on loc {
