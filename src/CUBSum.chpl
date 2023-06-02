@@ -42,6 +42,7 @@ module CUBSum {
         return cubSum(aEntry);
     }
 
+    /** Perform a sum over an Arkouda array in unified memory */
     proc cubSum(ref e: SymEntry) where e.GPU == true {
         var sum: e.etype = 0;
         ref a = e.a;
@@ -51,7 +52,6 @@ module CUBSum {
             // TODO: proper lambda functions break Chapel compiler
             record Lambda {
                 proc this(lo: int, hi: int, N: int) {
-                    var localDom = a.localSubdomain();
                     var deviceId: int(32);
                     GetDevice(deviceId);
                     e.prefetchLocalDataToDevice(lo, hi, deviceId);
@@ -66,13 +66,49 @@ module CUBSum {
                     }
                 }
             }
-            // get local domain's indices
-            var lD = a.localSubdomain();
-            // calc task's indices from local domain's indices
-            var tD = {lD.low..lD.high};
-            var cubSumCallback = new Lambda();
 
-            forall i in GPU(tD, cubSumCallback) {
+            var cubSumCallback = new Lambda();
+            forall i in GPU(a.localSubdomain(), cubSumCallback) {
+                writeln("Should not reach this point!");
+                exit(1);
+            }
+
+            if sumReduceOnGPU || disableMultiGPUs || nGPUs == 1 {
+                // no need to merge
+                sum += deviceSum[0];
+            } else {
+                sum += (+ reduce deviceSum);
+            }
+        }
+        return sum;
+    }
+
+    proc cubSumGPUArray(a: [?D] ?etype){
+        var sum: etype = 0;
+        coforall loc in a.targetLocales() with (+ reduce sum) do on loc {
+            var deviceSum: [0..#nGPUs] etype;
+
+            // TODO: proper lambda functions break Chapel compiler
+            record Lambda {
+                proc this(lo: int, hi: int, N: int) {
+                    var devA = new GPUArray(a.localSlice(lo..hi));
+                    devA.toDevice();
+                    var deviceId: int(32);
+                    GetDevice(deviceId);
+                    var timer: stopwatch;
+                    if logSumKernelTime {
+                        timer.start();
+                    }
+                    deviceSum[deviceId] = cubSumDevice(etype, devA.dPtr(), N, deviceId);
+                    if logSumKernelTime {
+                        timer.stop();
+                        if deviceId == 0 then writef("%10.3dr", timer.elapsed()*1000.0);
+                    }
+                }
+            }
+
+            var cubSumCallback = new Lambda();
+            forall i in GPU(a.localSubdomain(), cubSumCallback) {
                 writeln("Should not reach this point!");
                 exit(1);
             }
@@ -109,11 +145,9 @@ module CUBSum {
         }
         // get local domain's indices
         var lD = arr.a.domain.localSubdomain();
-        // calc task's indices from local domain's indices
-        var tD = {lD.low..lD.high};
         var cubSumCallback = new Lambda();
 
-        forall i in GPU(tD, cubSumCallback) {
+        forall i in GPU(lD, cubSumCallback) {
             writeln("Should not reach this point!");
             exit(1);
         }
