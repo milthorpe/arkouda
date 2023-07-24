@@ -1,4 +1,4 @@
-#include <cub/cub.cuh>
+#include <hipcub/hipcub.hpp>
 #include <stdio.h>
 #include "cuda_error_check.h"
 
@@ -13,12 +13,14 @@ template <typename T> void cubSum(const T *d_in, T *d_out, int64_t num_items) {
   CubDebugExit(DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items));
 
   // Allocate temporary storage
-  CudaSafeCall(cudaMalloc(&d_temp_storage, temp_storage_bytes));
+  //CudaSafeCall(cudaMalloc(&d_temp_storage, temp_storage_bytes));
+  CubDebugExit(g_allocator.DeviceAllocate(&d_temp_storage, temp_storage_bytes));
 
   // Compute Sum
   CubDebugExit(DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items));
 
-  CudaSafeCall(cudaFree(d_temp_storage));
+  //CudaSafeCall(cudaFree(d_temp_storage));
+  if (d_temp_storage) CubDebugExit(g_allocator.DeviceFree(d_temp_storage));
 }
 
 extern "C" {

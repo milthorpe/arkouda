@@ -1,4 +1,4 @@
-#include "nccl.h"
+#include "rccl/rccl.h"
 #include <stdio.h>
 
 #define NCCLCHECK(cmd) do {                         \
