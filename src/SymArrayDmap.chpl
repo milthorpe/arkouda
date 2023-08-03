@@ -17,7 +17,7 @@ module SymArrayDmap
 
     public use BlockDist;
     public use ReplicatedDist;
-    public use GPUUnifiedDist;
+    use GPUUnifiedDist;
 
     /* 
     Makes a domain distributed according to :param:`MyDmap`.

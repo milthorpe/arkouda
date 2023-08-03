@@ -8,7 +8,7 @@ module CUBSum {
     use Time;
 
     config var logSumKernelTime = false;
-    config const sumReduceOnGPU = true;
+    config const sumReduceOnGPU = false;
 
     extern proc cubSum_int32(input: c_void_ptr, output: c_void_ptr, num_items: c_size_t);
     extern proc cubSum_int64(input: c_void_ptr, output: c_void_ptr, num_items: c_size_t);
@@ -62,7 +62,7 @@ module CUBSum {
                     deviceSum[deviceId] = cubSumDevice(e.etype, e.c_ptrToLocalData(lo), N, deviceId);
                     if logSumKernelTime {
                         timer.stop();
-                        if deviceId == 0 then writef("%10.3dr", timer.elapsed()*1000.0);
+                        if here.id == 0 && deviceId == 0 then writef("%10.3dr", timer.elapsed()*1000.0);
                     }
                 }
             }
@@ -102,7 +102,7 @@ module CUBSum {
                     deviceSum[deviceId] = cubSumDevice(etype, devA.dPtr(), N, deviceId);
                     if logSumKernelTime {
                         timer.stop();
-                        if deviceId == 0 then writef("%10.3dr", timer.elapsed()*1000.0);
+                        if here.id == 0 && deviceId == 0 then writef("%10.3dr", timer.elapsed()*1000.0);
                     }
                 }
             }
@@ -139,7 +139,7 @@ module CUBSum {
                 deviceSum[deviceId] = cubSumDevice(arr.etype, arr.dPtr(lo), N, deviceId);
                 if logSumKernelTime {
                     timer.stop();
-                    if deviceId == 0 then writef("%10.3dr", timer.elapsed()*1000.0);
+                    if here.id == 0 && deviceId == 0 then writef("%10.3dr", timer.elapsed()*1000.0);
                 }
             }
         }
