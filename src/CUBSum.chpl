@@ -8,7 +8,8 @@ module CUBSum {
     use Time;
 
     config var logSumKernelTime = false;
-    config const sumReduceOnGPU = false;
+    config const sumReduceOnGPU = true;
+    config const sumPrefetchUnified = true;
 
     extern proc cubSum_int32(input: c_void_ptr, output: c_void_ptr, num_items: c_size_t);
     extern proc cubSum_int64(input: c_void_ptr, output: c_void_ptr, num_items: c_size_t);
@@ -54,7 +55,8 @@ module CUBSum {
                 proc this(lo: int, hi: int, N: int) {
                     var deviceId: int(32);
                     GetDevice(deviceId);
-                    e.prefetchLocalDataToDevice(lo, hi, deviceId);
+                    if (sumPrefetchUnified) then
+                        e.prefetchLocalDataToDevice(lo, hi, deviceId);
                     var timer: stopwatch;
                     if logSumKernelTime {
                         timer.start();
@@ -131,7 +133,8 @@ module CUBSum {
             proc this(lo: int, hi: int, N: int) {
                 var deviceId: int(32);
                 GetDevice(deviceId);
-                arr.prefetchToDevice(lo, hi, deviceId);
+                if (sumPrefetchUnified) then
+                    arr.prefetchToDevice(lo, hi, deviceId);
                 var timer: stopwatch;
                 if logSumKernelTime {
                     timer.start();

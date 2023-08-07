@@ -8,6 +8,7 @@ module CUBHistogram {
     use Time;
 
     config param histogramReduceOnGPU = true;
+    config param histogramPrefetchUnified = true;
 
     extern proc cubHistogram_int32(samples: c_void_ptr, histogram: c_void_ptr, num_levels: int, lower_bound: int(32), upper_bound: int(32), N: int);
     extern proc cubHistogram_int64(samples: c_void_ptr, histogram: c_void_ptr, num_levels: int, lower_bound: int(64), upper_bound: int(64), N: int);
@@ -64,7 +65,8 @@ module CUBHistogram {
                 proc this(lo: int, hi: int, N: int) {
                     var deviceId: int(32);
                     GetDevice(deviceId);
-                    samples.prefetchLocalDataToDevice(lo, hi, deviceId);
+                    if histogramPrefetchUnified then
+                        samples.prefetchLocalDataToDevice(lo, hi, deviceId);
                     cubHistogram(samples.etype, samples.c_ptrToLocalData(lo), deviceHistograms[deviceId], sampleMin, sampleMax, N, deviceId);
                 }
             }
@@ -98,7 +100,8 @@ module CUBHistogram {
             proc this(lo: int, hi: int, N: int) {
                 var deviceId: int(32);
                 GetDevice(deviceId);
-                arr.prefetchToDevice(lo, hi, deviceId);
+                if histogramPrefetchUnified then
+                    arr.prefetchToDevice(lo, hi, deviceId);
                 cubHistogram(t, arr.dPtr(lo), deviceHistograms[deviceId], sampleMin, sampleMax, N, deviceId);
             }
         }
