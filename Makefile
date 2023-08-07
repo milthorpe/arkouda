@@ -319,20 +319,6 @@ endif
 ARKOUDA_SOURCES = $(shell find $(ARKOUDA_SOURCE_DIR)/ -type f -name '*.chpl')
 ARKOUDA_MAIN_SOURCE := $(ARKOUDA_SOURCE_DIR)/$(ARKOUDA_MAIN_MODULE).chpl
 
-<<<<<<< HEAD
-CUDA_SOURCES = $(shell find $(ARKOUDA_SOURCE_DIR)/ -type f -name '*.cu')
-CUDA_HEADERS=$(CUDA_SOURCES:.cu=.h)
-CUDA_OBJECTS=$(CUDA_SOURCES:.cu=.cu.o)
-
-%.cu.o:	%.cu
-	nvcc -c $< -o $@
-
-ifndef CHPL_GPU_HOME
-$(error CHPL_GPU_HOME not defined)
-endif
-
-GPU_FLAGS=-M $(CHPL_GPU_HOME)/modules $(CHPL_GPU_HOME)/include/GPUAPI.h $(CUDA_HEADERS) -I$(ZMQ_DIR)/include -I$(HDF5_DIR)/include -I$(ARROW_DIR)/include -L$(CHPL_GPU_HOME)/lib -L$(CHPL_GPU_HOME)/lib64 -lGPUAPICUDA_static -L$(CUDA_ROOT_DIR)/lib -lcudart
-
 ifeq ($(shell expr $(CHPL_MINOR) \> 31),1)
 	CHPL_COMPAT_FLAGS += -sbigintInitThrows=true
 	ARKOUDA_COMPAT_MODULES += -M $(ARKOUDA_SOURCE_DIR)/compat/gt-131
