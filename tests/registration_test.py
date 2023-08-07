@@ -509,6 +509,7 @@ class RegistrationTest(ArkoudaTest):
         s.register("seriesTest")
         self.assertTrue(s.is_registered())
 
+        ak.clear()
         s2 = Series.attach("seriesTest")
         self.assertListEqual(s2.values.to_list(), s.values.to_list())
         sEq = s2.index == s.index
@@ -518,6 +519,7 @@ class RegistrationTest(ArkoudaTest):
         s = ak.array(["abc", "123", "abc"])
         sGroup = ak.GroupBy(s)
         sGroup.register("stringsTest")
+        ak.clear()
         sAttach = ak.GroupBy.attach("stringsTest")
 
         # Verify the attached GroupBy's components equal the original components
@@ -531,10 +533,104 @@ class RegistrationTest(ArkoudaTest):
         self.assertIsInstance(sAttach.segments, ak.pdarray)
         self.assertIsInstance(sAttach.unique_keys, ak.Strings)
 
+    def test_string_property_accessor(self):
+        # Verify s can be attached then accessed
+        cleanup()
+        s = ak.array(["one", "two", "three", "123"])
+        s.register("sname")
+        ak.clear()
+        sAttach = ak.Strings.attach("sname")
+        self.assertListEqual(s.to_list(), sAttach.to_list())
+        s.get_bytes()
+        self.assertTrue(s._bytes is not None)
+        s.get_offsets()
+        self.assertTrue(s._offsets is not None)
+        self.assertListEqual(s.to_list(), sAttach.to_list())
+        self.assertListEqual(s.get_bytes().to_list(), sAttach.get_bytes().to_list())
+        self.assertListEqual(s.get_offsets().to_list(), sAttach.get_offsets().to_list())
+
+        # Verify s can be accessed then attached
+        cleanup()
+        s = ak.array(["one", "two", "three", "123"])
+        s.register("sname")
+        ak.clear()
+        s.get_offsets()
+        self.assertTrue(s._offsets is not None)
+        s.get_bytes()
+        self.assertTrue(s._bytes is not None)
+        sAttach = ak.Strings.attach("sname")
+        self.assertListEqual(s.to_list(), sAttach.to_list())
+        self.assertListEqual(s.get_bytes().to_list(), sAttach.get_bytes().to_list())
+        self.assertListEqual(s.get_offsets().to_list(), sAttach.get_offsets().to_list())
+
+        # Testing for registration after being accessed and being removed after unregistering s
+        # Also tests for correct values in accessed arrays
+        cleanup()
+        s = ak.array(["one", "two", "three", "123"])
+        s.register("sname")
+        ak.clear()
+        self.assertTrue(len(ak.list_registry()) == 1)
+
+        sbytes = s.get_bytes()
+        bytes_answers = ak.array(
+            [111, 110, 101, 0, 116, 119, 111, 0, 116, 104, 114, 101, 101, 0, 49, 50, 51, 0]
+        )
+        self.assertListEqual(sbytes.to_list(), bytes_answers.to_list())
+        self.assertTrue(len(ak.list_registry()) == 2)
+
+        soffsets = s.get_offsets()
+        offsets_answers = ak.array([0, 4, 8, 14])
+        self.assertListEqual(soffsets.to_list(), offsets_answers.to_list())
+        self.assertTrue(len(ak.list_registry()) == 3)
+
+        s.unregister()
+        self.assertTrue(len(ak.list_registry()) == 0)
+
+        # Tests for unregistering each property and after clearing we can still access them
+        cleanup()
+        s = ak.array(["one", "two", "three", "123"])
+        s.register("sname")
+        sbytes = s.get_bytes()
+        soffsets = s.get_offsets()
+        self.assertTrue(len(ak.list_registry()) == 3)
+        sbytes.unregister()
+        self.assertTrue(len(ak.list_registry()) == 2)
+        self.assertTrue(sbytes.name not in ak.list_registry())
+        soffsets.unregister()
+        self.assertTrue(len(ak.list_registry()) == 1)
+        self.assertTrue(soffsets.name not in ak.list_registry())
+
+        ak.clear()
+        sbytes = s.get_bytes()
+        soffsets = s.get_offsets()
+        self.assertTrue(len(ak.list_registry()) == 3)
+        self.assertTrue(sbytes.name in ak.list_registry())
+        self.assertTrue(soffsets.name in ak.list_registry())
+
+        # Tests that s does not get registered if a is accessed
+        cleanup()
+        s = ak.array(["one", "two", "three", "123"])
+        self.assertTrue(len(ak.list_registry()) == 0)
+        s.get_bytes()
+        self.assertTrue(len(ak.list_registry()) == 0)
+        s.get_offsets()
+        self.assertTrue(len(ak.list_registry()) == 0)
+
+        # Test to ensure we do not create a duplicate pdarrays after repeated accessing
+        cleanup()
+        s = ak.array(["one", "two", "three", "123"])
+        s.get_bytes()
+        self.assertTrue(len(ak.list_symbol_table()) == 2)
+        s.get_offsets()
+        self.assertTrue(len(ak.list_symbol_table()) == 3)
+        s.get_offsets()
+        self.assertTrue(len(ak.list_symbol_table()) == 3)
+
     def test_pdarray_groupby_attach(self):
         a = ak.randint(0, 10, 10)
         aGroup = ak.GroupBy(a)
         aGroup.register("pdarray_test")
+        ak.clear()
         aAttach = ak.GroupBy.attach("pdarray_test")
 
         # Verify the attached GroupBy's components equal the original components
@@ -553,6 +649,7 @@ class RegistrationTest(ArkoudaTest):
         cat = ak.Categorical(c)
         catGroup = ak.GroupBy(cat)
         catGroup.register("categorical_test")
+        ak.clear()
         catAttach = ak.GroupBy.attach("categorical_test")
 
         # Verify the attached GroupBy's components equal the original components
@@ -573,6 +670,7 @@ class RegistrationTest(ArkoudaTest):
         lx = [a, b, c]
         group = ak.GroupBy(lx)
         group.register("sequenceTest")
+        ak.clear()
         seqAttach = ak.GroupBy.attach("sequenceTest")
 
         # Verify the attached GroupBy's components equal the original components for each key
@@ -651,6 +749,7 @@ class RegistrationTest(ArkoudaTest):
         # Register DataFrame with name 'DataFrame_test'
         df.register("DataFrame_test")
         self.assertTrue(df.is_registered())
+        ak.clear()
 
         # Attach registered DataFrame 'DataFrame_test' into variable dfa and assert the original and
         # attached versions of the DataFrame are equal
@@ -667,14 +766,14 @@ class RegistrationTest(ArkoudaTest):
         df.unregister()
         self.assertFalse(df.is_registered())
 
-    def test_register_attach(self):
+    def test_segarray_register_attach(self):
         a = [1, 2, 3]
         b = [6, 7, 8]
 
-        segarr = ak.segarray(ak.array([0, len(a)]), ak.array(a + b))
+        segarr = ak.SegArray(ak.array([0, len(a)]), ak.array(a + b))
         # register the seg array
         segarr.register("segarrtest")
-
+        ak.clear()
         segarr_2 = ak.SegArray.attach("segarrtest")
 
         self.assertEqual(segarr.size, segarr_2.size)
@@ -687,13 +786,14 @@ class RegistrationTest(ArkoudaTest):
         segarr.unregister()
         self.assertFalse(segarr.is_registered())
 
-    def test_unregister_by_name(self):
+    def test_segarray_unregister_by_name(self):
         a = [1, 2, 3]
         b = [6, 7, 8]
 
-        segarr = ak.segarray(ak.array([0, len(a)]), ak.array(a + b))
+        segarr = ak.SegArray(ak.array([0, len(a)]), ak.array(a + b))
         # register the seg array
         segarr.register("segarr_unreg_name_test")
+        ak.clear()
 
         # Verify is_registered
         self.assertTrue(segarr.is_registered())
@@ -721,11 +821,18 @@ class RegistrationTest(ArkoudaTest):
         cat = None
         self.assertEqual(len(ak.list_symbol_table()), 0)
 
-        seg = ak.segarray(
+        seg = ak.SegArray(
             ak.array([0, 6, 8]), ak.array([10, 11, 12, 13, 14, 15, 20, 21, 30, 31, 32, 33])
         )
         self.assertTrue(len(ak.list_symbol_table()) > 0)
         seg = None
+        self.assertEqual(len(ak.list_symbol_table()), 0)
+
+        str_seg = ak.SegArray(
+            ak.array([0, 6, 8]), ak.array([10, 11, 12, 13, 14, 15, 20, 21, 30, 31, 32, 33])
+        )
+        self.assertTrue(len(ak.list_symbol_table()) > 0)
+        str_seg = None
         self.assertEqual(len(ak.list_symbol_table()), 0)
 
         g = ak.GroupBy(
@@ -740,7 +847,7 @@ class RegistrationTest(ArkoudaTest):
                 "pda": ak.arange(3),
                 "s": ak.array(["a", "b", "c"]),
                 "cat": ak.Categorical(ak.array(["a", "b", "c"])),
-                "seg": ak.segarray(
+                "seg": ak.SegArray(
                     ak.array([0, 6, 8]), ak.array([10, 11, 12, 13, 14, 15, 20, 21, 30, 31, 32, 33])
                 ),
             }

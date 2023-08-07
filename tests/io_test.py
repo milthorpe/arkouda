@@ -6,10 +6,10 @@ from typing import List, Mapping, Union
 
 import h5py
 import numpy as np
-import pytest
 from base_test import ArkoudaTest
 from context import arkouda as ak
 
+import pytest
 from arkouda import io_util
 
 """
@@ -91,7 +91,6 @@ class IOTest(ArkoudaTest):
             ak.to_hdf(columns=columns, prefix_path=prefix_path, names=names)
 
     def testSaveAllLoadAllWithDict(self):
-
         """
         Creates 2..n files from an input columns dict depending upon the number of
         arkouda_server locales, retrieves all datasets and correspoding pdarrays,
@@ -666,6 +665,57 @@ class IOTest(ArkoudaTest):
             self.assertEqual(18446744073709551500, pda2[0])
             self.assertListEqual(pda2.to_list(), npa1.tolist())
 
+    def testBigIntHdf5(self):
+        # pdarray
+        a = ak.arange(3, dtype=ak.bigint)
+        a += 2**200
+        a.max_bits = 201
+
+        with tempfile.TemporaryDirectory(dir=IOTest.io_test_dir) as tmp_dirname:
+            a.to_hdf(f"{tmp_dirname}/bigint_test", dataset="bigint_test")
+            rd_a = ak.read_hdf(f"{tmp_dirname}/bigint_test*")
+            self.assertListEqual(a.to_list(), rd_a.to_list())
+            self.assertEqual(a.max_bits, rd_a.max_bits)
+
+        # arrayview
+        a = ak.arange(27, dtype=ak.bigint)
+        a += 2**200
+        a.max_bits = 201
+
+        av = a.reshape((3, 3, 3))
+
+        with tempfile.TemporaryDirectory(dir=IOTest.io_test_dir) as tmp_dirname:
+            av.to_hdf(f"{tmp_dirname}/bigint_test")
+            rd_av = ak.read_hdf(f"{tmp_dirname}/bigint_test*")
+            self.assertIsInstance(rd_av, ak.ArrayView)
+            self.assertListEqual(av.base.to_list(), rd_av.base.to_list())
+            self.assertEqual(av.base.max_bits, rd_av.base.max_bits)
+
+        # groupby
+        a = ak.arange(5, dtype=ak.bigint)
+        g = ak.GroupBy(a)
+        with tempfile.TemporaryDirectory(dir=IOTest.io_test_dir) as tmp_dirname:
+            g.to_hdf(f"{tmp_dirname}/bigint_test")
+            rd_g = ak.read_hdf(f"{tmp_dirname}/bigint_test*")
+            self.assertIsInstance(rd_g, ak.GroupBy)
+            self.assertListEqual(g.keys.to_list(), rd_g.keys.to_list())
+            self.assertListEqual(g.unique_keys.to_list(), rd_g.unique_keys.to_list())
+            self.assertListEqual(g.permutation.to_list(), rd_g.permutation.to_list())
+            self.assertListEqual(g.segments.to_list(), rd_g.segments.to_list())
+
+        # bigint segarray
+        a = ak.arange(10, dtype=ak.bigint)
+        a += 2**200
+        a.max_bits = 212
+        s = ak.arange(0, 10, 2)
+        sa = ak.SegArray(s, a)
+        with tempfile.TemporaryDirectory(dir=IOTest.io_test_dir) as tmp_dirname:
+            sa.to_hdf(f"{tmp_dirname}/bigint_test")
+            rd_sa = ak.read_hdf(f"{tmp_dirname}/bigint_test*")
+            self.assertIsInstance(rd_sa, ak.SegArray)
+            self.assertListEqual(sa.values.to_list(), rd_sa.values.to_list())
+            self.assertListEqual(sa.segments.to_list(), rd_sa.segments.to_list())
+
     def testUint64ToFromArray(self):
         """
         Test conversion to and from numpy array / pdarray using unsigned 64bit integer (uint64)
@@ -709,7 +759,7 @@ class IOTest(ArkoudaTest):
     def test_multi_dim_rdwr(self):
         arr = ak.ArrayView(ak.arange(27), ak.array([3, 3, 3]))
         with tempfile.TemporaryDirectory(dir=IOTest.io_test_dir) as tmp_dirname:
-            arr.to_hdf(tmp_dirname + "/multi_dim_test", dset="MultiDimObj", mode="append")
+            arr.to_hdf(tmp_dirname + "/multi_dim_test", dataset="MultiDimObj", mode="append")
             # load data back
             read_arr = ak.read_hdf(tmp_dirname + "/multi_dim_test*", datasets="MultiDimObj")
             self.assertTrue(np.array_equal(arr.to_ndarray(), read_arr.to_ndarray()))
@@ -812,7 +862,7 @@ class IOTest(ArkoudaTest):
         segments = ak.array([0, len(a), len(a) + len(b)])
         dtype = ak.dtypes.int64
         akflat = ak.array(flat, dtype)
-        segarr = ak.segarray(segments, akflat)
+        segarr = ak.SegArray(segments, akflat)
 
         with tempfile.TemporaryDirectory(dir=IOTest.io_test_dir) as tmp_dirname:
             segarr.to_hdf(f"{tmp_dirname}/segarray_int")
@@ -824,7 +874,7 @@ class IOTest(ArkoudaTest):
         # uint64 test
         dtype = ak.dtypes.uint64
         akflat = ak.array(flat, dtype)
-        segarr = ak.segarray(segments, akflat)
+        segarr = ak.SegArray(segments, akflat)
 
         with tempfile.TemporaryDirectory(dir=IOTest.io_test_dir) as tmp_dirname:
             segarr.to_hdf(f"{tmp_dirname}/segarray_uint")
@@ -836,7 +886,7 @@ class IOTest(ArkoudaTest):
         # float64 test
         dtype = ak.dtypes.float64
         akflat = ak.array(flat, dtype)
-        segarr = ak.segarray(segments, akflat)
+        segarr = ak.SegArray(segments, akflat)
 
         with tempfile.TemporaryDirectory(dir=IOTest.io_test_dir) as tmp_dirname:
             segarr.to_hdf(f"{tmp_dirname}/segarray_float")
@@ -848,7 +898,7 @@ class IOTest(ArkoudaTest):
         # bool test
         dtype = ak.dtypes.bool
         akflat = ak.array(flat, dtype)
-        segarr = ak.segarray(segments, akflat)
+        segarr = ak.SegArray(segments, akflat)
 
         with tempfile.TemporaryDirectory(dir=IOTest.io_test_dir) as tmp_dirname:
             segarr.to_hdf(f"{tmp_dirname}/segarray_bool")
@@ -867,14 +917,55 @@ class IOTest(ArkoudaTest):
         segments = ak.array([0, len(a), len(a) + len(b)])
         dtype = ak.dtypes.int64
         akflat = ak.array(flat, dtype)
-        segarr = ak.segarray(segments, akflat)
+        segarr = ak.SegArray(segments, akflat)
 
-        s = ak.array(["abc","def","ghi"])
+        s = ak.array(["abc", "def", "ghi"])
         df = ak.DataFrame([segarr, s])
         with tempfile.TemporaryDirectory(dir=IOTest.io_test_dir) as tmp_dirname:
             df.to_hdf(f"{tmp_dirname}/dataframe_segarr")
             df_load = ak.DataFrame.load(f"{tmp_dirname}/dataframe_segarr")
             self.assertTrue(df.to_pandas().equals(df_load.to_pandas()))
+
+    def test_hdf_groupby(self):
+        # test for categorical and multiple keys
+        string = ak.array(["a", "b", "a", "b", "c"])
+        cat = ak.Categorical(string)
+        cat_from_codes = ak.Categorical.from_codes(
+            codes=ak.array([0, 1, 0, 1, 2]), categories=ak.array(["a", "b", "c"])
+        )
+        cat_grouping = ak.GroupBy([cat, cat_from_codes])
+        with tempfile.TemporaryDirectory(dir=IOTest.io_test_dir) as tmp_dirname:
+            cat_grouping.to_hdf(f"{tmp_dirname}/cat_test")
+            cg_load = ak.read(f"{tmp_dirname}/cat_test*")
+            self.assertEqual(len(cg_load.keys), len(cat_grouping.keys))
+            self.assertListEqual(cg_load.permutation.to_list(), cat_grouping.permutation.to_list())
+            self.assertListEqual(cg_load.segments.to_list(), cat_grouping.segments.to_list())
+            self.assertListEqual(cg_load._uki.to_list(), cat_grouping._uki.to_list())
+            for k, kload in zip(cat_grouping.keys, cg_load.keys):
+                self.assertListEqual(k.to_list(), kload.to_list())
+
+        # test Strings GroupBy
+        str_grouping = ak.GroupBy(string)
+        with tempfile.TemporaryDirectory(dir=IOTest.io_test_dir) as tmp_dirname:
+            str_grouping.to_hdf(f"{tmp_dirname}/str_test")
+            str_load = ak.read(f"{tmp_dirname}/str_test*")
+            self.assertEqual(len(str_load.keys), len(str_grouping.keys))
+            self.assertListEqual(str_load.permutation.to_list(), str_grouping.permutation.to_list())
+            self.assertListEqual(str_load.segments.to_list(), str_grouping.segments.to_list())
+            self.assertListEqual(str_load._uki.to_list(), str_grouping._uki.to_list())
+            self.assertListEqual(str_grouping.keys.to_list(), str_load.keys.to_list())
+
+        # test pdarray GroupBy
+        pda = ak.array([0, 1, 2, 0, 2])
+        g = ak.GroupBy(pda)
+        with tempfile.TemporaryDirectory(dir=IOTest.io_test_dir) as tmp_dirname:
+            g.to_hdf(f"{tmp_dirname}/pd_test")
+            g_load = ak.read(f"{tmp_dirname}/pd_test*")
+            self.assertEqual(len(g_load.keys), len(g.keys))
+            self.assertListEqual(g_load.permutation.to_list(), g.permutation.to_list())
+            self.assertListEqual(g_load.segments.to_list(), g.segments.to_list())
+            self.assertListEqual(g_load._uki.to_list(), g._uki.to_list())
+            self.assertListEqual(g_load.keys.to_list(), g.keys.to_list())
 
     def test_hdf_overwrite_pdarray(self):
         # test repack with a single object
@@ -893,7 +984,7 @@ class IOTest(ArkoudaTest):
             # ensure that the column was actually overwritten
             self.assertLess(new_size, orig_size)
             data = ak.read_hdf(f"{tmp_dirname}/pda_test_*")
-            self.assertListEqual(data['array'].to_list(), c.to_list())
+            self.assertListEqual(data["array"].to_list(), c.to_list())
 
         # test with repack off - file should get larger
         b = ak.arange(1000)
@@ -909,7 +1000,9 @@ class IOTest(ArkoudaTest):
             new_size = sum(os.path.getsize(f) for f in f_list)
 
             # ensure that the column was actually overwritten
-            self.assertGreaterEqual(new_size, orig_size)  # ensure that overwritten data mem is not released
+            self.assertGreaterEqual(
+                new_size, orig_size
+            )  # ensure that overwritten data mem is not released
             data = ak.read_hdf(f"{tmp_dirname}/pda_test_*")
             self.assertListEqual(data["array"].to_list(), c.to_list())
 
@@ -964,16 +1057,20 @@ class IOTest(ArkoudaTest):
             self.assertListEqual(data["test_set"].to_list(), c.to_list())
 
     def test_hdf_overwrite_dataframe(self):
-        df = ak.DataFrame({
-            "a": ak.arange(1000),
-            "b": ak.random_strings_uniform(0, 16, 1000),
-            "c": ak.arange(1000, dtype=bool),
-            "d": ak.randint(0, 50, 1000)
-        })
-        odf = ak.DataFrame({
-            "b": ak.randint(0, 25, 50),
-            "c": ak.arange(50, dtype=bool),
-        })
+        df = ak.DataFrame(
+            {
+                "a": ak.arange(1000),
+                "b": ak.random_strings_uniform(0, 16, 1000),
+                "c": ak.arange(1000, dtype=bool),
+                "d": ak.randint(0, 50, 1000),
+            }
+        )
+        odf = ak.DataFrame(
+            {
+                "b": ak.randint(0, 25, 50),
+                "c": ak.arange(50, dtype=bool),
+            }
+        )
         with tempfile.TemporaryDirectory(dir=IOTest.io_test_dir) as tmp_dirname:
             df.to_hdf(f"{tmp_dirname}/df_test")
             f_list = glob.glob(f"{tmp_dirname}/df_test_*")
@@ -1007,8 +1104,8 @@ class IOTest(ArkoudaTest):
             self.assertListEqual(data["d"].to_list(), df["d"].to_list())
 
     def test_overwrite_segarray(self):
-        sa1 = ak.segarray(ak.arange(0, 1000, 5), ak.arange(1000))
-        sa2 = ak.segarray(ak.arange(0, 100, 5), ak.arange(100))
+        sa1 = ak.SegArray(ak.arange(0, 1000, 5), ak.arange(1000))
+        sa2 = ak.SegArray(ak.arange(0, 100, 5), ak.arange(100))
         with tempfile.TemporaryDirectory(dir=IOTest.io_test_dir) as tmp_dirname:
             sa1.to_hdf(f"{tmp_dirname}/segarray_test")
             sa1.to_hdf(f"{tmp_dirname}/segarray_test", dataset="seg2", mode="append")
@@ -1050,14 +1147,15 @@ class IOTest(ArkoudaTest):
             data = ak.read_hdf(f"{tmp_dirname}/array_view_test_*")
             self.assertListEqual(av2.to_list(), data.to_list())
 
-
     def test_overwrite(self):
-        df = ak.DataFrame({
-            "a": ak.arange(1000),
-            "b": ak.random_strings_uniform(0, 16, 1000),
-            "c": ak.arange(1000, dtype=bool),
-            "d": ak.randint(0, 50, 1000)
-        })
+        df = ak.DataFrame(
+            {
+                "a": ak.arange(1000),
+                "b": ak.random_strings_uniform(0, 16, 1000),
+                "c": ak.arange(1000, dtype=bool),
+                "d": ak.randint(0, 50, 1000),
+            }
+        )
         replace = {
             "b": ak.randint(0, 25, 50),
             "c": ak.arange(50, dtype=bool),
@@ -1106,6 +1204,116 @@ class IOTest(ArkoudaTest):
             f2_size = sum(os.path.getsize(f) for f in f_list)
 
             self.assertEqual(f1_size, f2_size)
+
+    def test_segarray_str_hdf5(self):
+        words = ak.array(["one,two,three", "uno,dos,tres"])
+        strs, segs = words.split(",", return_segments=True)
+
+        x = ak.SegArray(segs, strs)
+        with tempfile.TemporaryDirectory(dir=IOTest.io_test_dir) as tmp_dirname:
+            x.to_hdf(f"{tmp_dirname}/test_file")
+            rd = ak.read_hdf(f"{tmp_dirname}/test_file*")
+            self.assertIsInstance(rd, ak.SegArray)
+            self.assertListEqual(x.segments.to_list(), rd.segments.to_list())
+            self.assertListEqual(x.values.to_list(), rd.values.to_list())
+
+    def test_snapshot(self):
+        from pandas.testing import assert_frame_equal
+        df = ak.DataFrame(
+            {
+                "int_col": ak.arange(10),
+                "uint_col": ak.array([i + 2**63 for i in range(10)], dtype=ak.uint64),
+                "float_col": ak.linspace(-3.5, 3.5, 10),
+                "bool_col": ak.randint(0, 2, 10, dtype=ak.bool),
+                "bigint_col": ak.array([i + 2**200 for i in range(10)], dtype=ak.bigint),
+                "segarr_col": ak.SegArray(ak.arange(0, 20, 2), ak.randint(0, 3, 20)),
+                "str_col": ak.random_strings_uniform(0, 3, 10),
+            }
+        )
+        df_str_idx = df.copy()
+        df_str_idx._set_index(["A" + str(i) for i in range(len(df))])
+        col_order = df.columns
+        df_ref = df.to_pandas()
+        df_str_idx_ref = df_str_idx.to_pandas(retain_index=True)
+        a = ak.randint(0, 10, 100)
+        a_ref = a.to_list()
+        s = ak.random_strings_uniform(0, 5, 50)
+        s_ref = s.to_list()
+        c = ak.Categorical(s)
+        c_ref = c.to_list()
+        g = ak.GroupBy(a)
+        g_ref = {
+            "perm": g.permutation.to_list(),
+            "keys": g.keys.to_list(),
+            "segments": g.segments.to_list(),
+        }
+
+        with tempfile.TemporaryDirectory(dir=IOTest.io_test_dir) as tmp_dirname:
+            ak.snapshot(f"{tmp_dirname}/arkouda_snapshot_test")
+            # delete variables
+            del df
+            del df_str_idx
+            del a
+            del s
+            del c
+            del g
+
+            # verify no longer in the namespace
+            with self.assertRaises(NameError):
+                self.assertTrue(not df)
+            with self.assertRaises(NameError):
+                self.assertTrue(not df_str_idx)
+            with self.assertRaises(NameError):
+                self.assertTrue(not a)
+            with self.assertRaises(NameError):
+                self.assertTrue(not s)
+            with self.assertRaises(NameError):
+                self.assertTrue(not c)
+            with self.assertRaises(NameError):
+                self.assertTrue(not g)
+
+            # restore the variables
+            data = ak.restore(f"{tmp_dirname}/arkouda_snapshot_test")
+            for vn in ["df", "df_str_idx", "a", "s", "c", "g"]:
+                # ensure all variable names returned
+                self.assertTrue(vn in data.keys())
+
+            # validate that restored variables are correct
+            self.assertTrue(
+                assert_frame_equal(df_ref[col_order], data["df"].to_pandas(retain_index=True)[col_order]) is None
+            )
+            self.assertTrue(
+                assert_frame_equal(df_str_idx_ref[col_order], data["df_str_idx"].to_pandas(retain_index=True)[col_order]) is None
+            )
+            self.assertListEqual(a_ref, data["a"].to_list())
+            self.assertListEqual(s_ref, data["s"].to_list())
+            self.assertListEqual(c_ref, data["c"].to_list())
+            self.assertListEqual(g_ref["perm"], data["g"].permutation.to_list())
+            self.assertListEqual(g_ref["keys"], data["g"].keys.to_list())
+            self.assertListEqual(g_ref["segments"], data["g"].segments.to_list())
+
+    def test_segarr_edge(self):
+        """
+        This test was added specifically for issue #2612.
+        Pierce will be adding testing to the new framework for this.
+        """
+        df = ak.DataFrame({
+            "c_11": ak.SegArray(ak.array([0, 2, 3, 3]), ak.array(["a", "b", "", "c", "d", "e", "f", "g", "h", "i"]))
+        })
+        with tempfile.TemporaryDirectory(dir=IOTest.io_test_dir) as tmp_dirname:
+            df.to_hdf(f"{tmp_dirname}/seg_test")
+
+            rd_data = ak.read_hdf(f"{tmp_dirname}/seg_test*")
+            self.assertListEqual(df["c_11"].to_list(), rd_data.to_list())
+
+        df = ak.DataFrame({"c_2": ak.SegArray(ak.array([0, 9, 14]), ak.arange(-10, 10))})
+        with tempfile.TemporaryDirectory(dir=IOTest.io_test_dir) as tmp_dirname:
+            df.to_hdf(f"{tmp_dirname}/seg_test")
+
+            # only verifying the read is successful
+            rd_arr = ak.read_hdf(filenames=[f"{tmp_dirname}/seg_test_LOCALE0000", f"{tmp_dirname}/seg_test_MISSING"],
+                                 strict_types=False, allow_errors=True)
+
 
     def tearDown(self):
         super(IOTest, self).tearDown()

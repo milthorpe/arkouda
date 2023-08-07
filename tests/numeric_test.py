@@ -174,14 +174,14 @@ class NumericTest(ArkoudaTest):
             ak.abs([range(0, 10)])
 
     def testCumSum(self):
-        na = np.linspace(1, 10, 10)
+        na = np.linspace(1, 10)
         pda = ak.array(na)
 
         self.assertTrue(np.allclose(np.cumsum(na), ak.cumsum(pda).to_ndarray()))
 
         # Test uint case
-        na = np.linspace(1, 10, 10, "uint64")
-        pda = ak.cast(pda, ak.uint64)
+        na = np.arange(1, 10, dtype="uint64")
+        pda = ak.array(na)
 
         self.assertTrue(np.allclose(np.cumsum(na), ak.cumsum(pda).to_ndarray()))
 
@@ -197,20 +197,399 @@ class NumericTest(ArkoudaTest):
             ak.cumprod([range(0, 10)])
 
     def testSin(self):
-        na = np.linspace(1, 10, 10)
+        na = np.arange(0, 10, dtype="int64")
         pda = ak.array(na)
-
         self.assertTrue(np.allclose(np.sin(na), ak.sin(pda).to_ndarray()))
+
+        na = np.arange(0, 10, dtype="uint64")
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.sin(na), ak.sin(pda).to_ndarray()))
+
+        na = np.linspace(0, 10)
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.sin(na), ak.sin(pda).to_ndarray()))
+
         with self.assertRaises(TypeError):
-            ak.cos([range(0, 10)])
+            ak.sin([range(0, 10)])
 
     def testCos(self):
-        na = np.linspace(1, 10, 10)
+        na = np.arange(0, 10, dtype="int64")
         pda = ak.array(na)
-
         self.assertTrue(np.allclose(np.cos(na), ak.cos(pda).to_ndarray()))
+
+        na = np.arange(0, 10, dtype="uint64")
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.cos(na), ak.cos(pda).to_ndarray()))
+
+        na = np.linspace(0, 10)
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.cos(na), ak.cos(pda).to_ndarray()))
+
         with self.assertRaises(TypeError):
             ak.cos([range(0, 10)])
+
+    def testTan(self):
+        na = np.arange(0, 10, dtype="int64")
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.tan(na), ak.tan(pda).to_ndarray()))
+
+        na = np.arange(0, 10, dtype="uint64")
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.tan(na), ak.tan(pda).to_ndarray()))
+
+        na = np.linspace(0, 10)
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.tan(na), ak.tan(pda).to_ndarray()))
+
+        with self.assertRaises(TypeError):
+            ak.tan([range(0, 10)])
+
+    def testArcsin(self):
+        na = np.arange(-1, 2, dtype="int64")
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.arcsin(na), ak.arcsin(pda).to_ndarray()))
+
+        na = np.arange(0, 2, dtype="uint64")
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.arcsin(na), ak.arcsin(pda).to_ndarray()))
+
+        na = np.linspace(-1, 1)
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.arcsin(na), ak.arcsin(pda).to_ndarray()))
+
+        with self.assertRaises(TypeError):
+            ak.arcsin([range(0, 10)])
+
+    def testArccos(self):
+        na = np.arange(-1, 2, dtype="int64")
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.arccos(na), ak.arccos(pda).to_ndarray()))
+
+        na = np.arange(0, 2, dtype="uint64")
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.arccos(na), ak.arccos(pda).to_ndarray()))
+
+        na = np.linspace(-1, 1)
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.arccos(na), ak.arccos(pda).to_ndarray()))
+
+        with self.assertRaises(TypeError):
+            ak.arccos([range(0, 10)])
+
+    def testArctan(self):
+        na = np.arange(0, 10, dtype="int64")
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.arctan(na), ak.arctan(pda).to_ndarray()))
+
+        na = np.arange(0, 10, dtype="uint64")
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.arctan(na), ak.arctan(pda).to_ndarray()))
+
+        na = np.linspace(0, 10)
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.arctan(na), ak.arctan(pda).to_ndarray()))
+
+        with self.assertRaises(TypeError):
+            ak.arctan([range(0, 10)])
+
+        # Edge case: infinities
+        na = np.array([np.inf, -np.inf])
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.arctan(na), ak.arctan(pda).to_ndarray(), equal_nan=True))
+
+    def testArctan2(self):
+        na1_int = np.arange(10, 0, -1, dtype="int64")
+        pda1_int = ak.array(na1_int)
+        # this also checks that a divide by zero error is properly handled
+        na2_int = np.arange(0, 10, dtype="int64")
+        pda2_int = ak.array(na2_int)
+
+        na1_uint = np.arange(10, 0, -1, dtype="uint64")
+        pda1_uint = ak.array(na1_uint)
+        na2_uint = np.arange(0, 10, dtype="uint64")
+        pda2_uint = ak.array(na2_uint)
+
+        na1_float = np.linspace(0, 1, 10)
+        pda1_float = ak.array(na1_float)
+        na2_float = np.linspace(0, 10, 10)
+        pda2_float = ak.array(na2_float)
+
+        # vector-vector case
+        self.assertTrue(
+            np.allclose(np.arctan2(na1_int, na2_int), ak.arctan2(pda1_int, pda2_int).to_ndarray())
+        )
+        self.assertTrue(
+            np.allclose(np.arctan2(na1_int, na2_uint), ak.arctan2(pda1_int, pda2_uint).to_ndarray())
+        )
+        self.assertTrue(
+            np.allclose(np.arctan2(na1_int, na2_float), ak.arctan2(pda1_int, pda2_float).to_ndarray())
+        )
+
+        self.assertTrue(
+            np.allclose(np.arctan2(na1_uint, na2_int), ak.arctan2(pda1_uint, pda2_int).to_ndarray())
+        )
+        self.assertTrue(
+            np.allclose(np.arctan2(na1_uint, na2_uint), ak.arctan2(pda1_uint, pda2_uint).to_ndarray())
+        )
+        self.assertTrue(
+            np.allclose(np.arctan2(na1_uint, na2_float), ak.arctan2(pda1_uint, pda2_float).to_ndarray())
+        )
+
+        self.assertTrue(
+            np.allclose(np.arctan2(na1_float, na2_int), ak.arctan2(pda1_float, pda2_int).to_ndarray())
+        )
+        self.assertTrue(
+            np.allclose(np.arctan2(na1_float, na2_uint), ak.arctan2(pda1_float, pda2_uint).to_ndarray())
+        )
+        self.assertTrue(
+            np.allclose(
+                np.arctan2(na1_float, na2_float), ak.arctan2(pda1_float, pda2_float).to_ndarray()
+            )
+        )
+
+        with self.assertRaises(TypeError):
+            ak.arctan2([range(0, 10)], [range(0, 10)])
+
+        # vector-scalar case
+        denom = np.array([5]).astype(np.uint)  # work around to get a scalar uint
+
+        self.assertTrue(np.allclose(np.arctan2(na1_int, 5), ak.arctan2(pda1_int, 5).to_ndarray()))
+        self.assertTrue(
+            np.allclose(np.arctan2(na1_int, denom[0]), ak.arctan2(pda1_int, denom[0]).to_ndarray())
+        )
+        self.assertTrue(np.allclose(np.arctan2(na1_int, 5.0), ak.arctan2(pda1_int, 5.0).to_ndarray()))
+
+        self.assertTrue(np.allclose(np.arctan2(na1_uint, 5), ak.arctan2(pda1_uint, 5).to_ndarray()))
+        self.assertTrue(
+            np.allclose(np.arctan2(na1_uint, denom[0]), ak.arctan2(pda1_uint, denom[0]).to_ndarray())
+        )
+        self.assertTrue(np.allclose(np.arctan2(na1_uint, 5.0), ak.arctan2(pda1_uint, 5.0).to_ndarray()))
+
+        self.assertTrue(np.allclose(np.arctan2(na1_float, 5), ak.arctan2(pda1_float, 5).to_ndarray()))
+        self.assertTrue(
+            np.allclose(np.arctan2(na1_float, denom[0]), ak.arctan2(pda1_float, denom[0]).to_ndarray())
+        )
+        self.assertTrue(
+            np.allclose(np.arctan2(na1_float, 5.0), ak.arctan2(pda1_float, 5.0).to_ndarray())
+        )
+
+        with self.assertRaises(TypeError):
+            ak.arctan2([range(0, 10)], 5)
+        with self.assertRaises(TypeError):
+            ak.arctan2([range(0, 10)], denom[0])
+        with self.assertRaises(TypeError):
+            ak.arctan2([range(0, 10)], 5.0)
+
+        # scalar-vector case
+        num = np.array([1]).astype(np.uint)  # work around to get a scalar uint
+
+        self.assertTrue(np.allclose(np.arctan2(1, na2_int), ak.arctan2(1, pda2_int).to_ndarray()))
+        self.assertTrue(np.allclose(np.arctan2(1, na2_uint), ak.arctan2(1, pda2_uint).to_ndarray()))
+        self.assertTrue(np.allclose(np.arctan2(1, na2_float), ak.arctan2(1, pda2_float).to_ndarray()))
+
+        self.assertTrue(
+            np.allclose(np.arctan2(num[0], na2_int), ak.arctan2(num[0], pda2_int).to_ndarray())
+        )
+        self.assertTrue(
+            np.allclose(np.arctan2(num[0], na2_uint), ak.arctan2(num[0], pda2_uint).to_ndarray())
+        )
+        self.assertTrue(
+            np.allclose(np.arctan2(num[0], na2_float), ak.arctan2(num[0], pda2_float).to_ndarray())
+        )
+
+        self.assertTrue(np.allclose(np.arctan2(1.0, na2_int), ak.arctan2(1.0, pda2_int).to_ndarray()))
+        self.assertTrue(np.allclose(np.arctan2(1.0, na2_uint), ak.arctan2(1.0, pda2_uint).to_ndarray()))
+        self.assertTrue(
+            np.allclose(np.arctan2(1.0, na2_float), ak.arctan2(1.0, pda2_float).to_ndarray())
+        )
+
+        with self.assertRaises(TypeError):
+            ak.arctan2(5, 10)
+        with self.assertRaises(TypeError):
+            ak.arctan2(1, [range(0, 10)])
+        with self.assertRaises(TypeError):
+            ak.arctan2(num[0], [range(0, 10)])
+        with self.assertRaises(TypeError):
+            ak.arctan2(1.0, [range(0, 10)])
+
+        # Edge case: Infinities and Zeros
+        na1 = np.array([np.inf, -np.inf])
+        pda1 = ak.array(na1)
+        na2 = np.array([1, 10])
+        pda2 = ak.array(na2)
+
+        self.assertTrue(
+            np.allclose(np.arctan2(na1, na2), ak.arctan2(pda1, pda2).to_ndarray(), equal_nan=True)
+        )
+        self.assertTrue(
+            np.allclose(np.arctan2(na2, na1), ak.arctan2(pda2, pda1).to_ndarray(), equal_nan=True)
+        )
+        self.assertTrue(
+            np.allclose(np.arctan2(na1, 5), ak.arctan2(pda1, 5).to_ndarray(), equal_nan=True)
+        )
+        self.assertTrue(
+            np.allclose(np.arctan2(5, na1), ak.arctan2(5, pda1).to_ndarray(), equal_nan=True)
+        )
+        self.assertTrue(
+            np.allclose(np.arctan2(na1, 0), ak.arctan2(pda1, 0).to_ndarray(), equal_nan=True)
+        )
+        self.assertTrue(
+            np.allclose(np.arctan2(0, na1), ak.arctan2(0, pda1).to_ndarray(), equal_nan=True)
+        )
+
+    def testSinh(self):
+        na = np.arange(0, 10, dtype="int64")
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.sinh(na), ak.sinh(pda).to_ndarray()))
+
+        na = np.arange(0, 10, dtype="uint64")
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.sinh(na), ak.sinh(pda).to_ndarray()))
+
+        na = np.linspace(0, 10)
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.sinh(na), ak.sinh(pda).to_ndarray()))
+
+        with self.assertRaises(TypeError):
+            ak.sinh([range(0, 10)])
+
+        # Edge case: infinities
+        na = np.array([np.inf, -np.inf])
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.sinh(na), ak.sinh(pda).to_ndarray(), equal_nan=True))
+
+    def testCosh(self):
+        na = np.arange(0, 10, dtype="int64")
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.cosh(na), ak.cosh(pda).to_ndarray()))
+
+        na = np.arange(0, 10, dtype="uint64")
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.cosh(na), ak.cosh(pda).to_ndarray()))
+
+        na = np.linspace(0, 10)
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.cosh(na), ak.cosh(pda).to_ndarray()))
+
+        with self.assertRaises(TypeError):
+            ak.cosh([range(0, 10)])
+
+        # Edge case: infinities
+        na = np.array([np.inf, -np.inf])
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.cosh(na), ak.cosh(pda).to_ndarray(), equal_nan=True))
+
+    def testTanh(self):
+        na = np.arange(0, 10, dtype="int64")
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.tanh(na), ak.tanh(pda).to_ndarray()))
+
+        na = np.arange(0, 10, dtype="uint64")
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.tanh(na), ak.tanh(pda).to_ndarray()))
+
+        na = np.linspace(0, 10)
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.tanh(na), ak.tanh(pda).to_ndarray()))
+
+        with self.assertRaises(TypeError):
+            ak.tanh([range(0, 10)])
+
+        # Edge case: infinities
+        na = np.array([np.inf, -np.inf])
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.tanh(na), ak.tanh(pda).to_ndarray(), equal_nan=True))
+
+    def testArcsinh(self):
+        na = np.arange(0, 10, dtype="int64")
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.arcsinh(na), ak.arcsinh(pda).to_ndarray()))
+
+        na = np.arange(0, 10, dtype="uint64")
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.arcsinh(na), ak.arcsinh(pda).to_ndarray()))
+
+        na = np.linspace(0, 10)
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.arcsinh(na), ak.arcsinh(pda).to_ndarray()))
+
+        with self.assertRaises(TypeError):
+            ak.arcsinh([range(0, 10)])
+
+        # Edge case: infinities
+        na = np.array([np.inf, -np.inf])
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.arcsinh(na), ak.arcsinh(pda).to_ndarray(), equal_nan=True))
+
+    def testArccosh(self):
+        na = np.arange(1, 10, dtype="int64")
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.arccosh(na), ak.arccosh(pda).to_ndarray()))
+
+        na = np.arange(1, 10, dtype="uint64")
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.arccosh(na), ak.arccosh(pda).to_ndarray()))
+
+        na = np.linspace(1, 10)
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.arccosh(na), ak.arccosh(pda).to_ndarray()))
+
+        with self.assertRaises(TypeError):
+            ak.arccosh([range(0, 10)])
+
+        # Edge case: infinities
+        na = np.array([1, np.inf])
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.arccosh(na).tolist(), ak.arccosh(pda).to_list(), equal_nan=True))
+        self.assertTrue(np.allclose(np.arccosh(na), ak.arccosh(pda).to_ndarray(), equal_nan=True))
+
+    def testArctanh(self):
+        na = np.arange(-1, 2, dtype="int64")
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.arctanh(na), ak.arctanh(pda).to_ndarray()))
+
+        na = np.arange(0, 2, dtype="uint64")
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.arctanh(na), ak.arctanh(pda).to_ndarray()))
+
+        na = np.linspace(-1, 1)
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.arctanh(na), ak.arctanh(pda).to_ndarray()))
+
+        with self.assertRaises(TypeError):
+            ak.arctanh([range(0, 10)])
+
+    def testRad2deg(self):
+        na = np.arange(0, 10, dtype="int64")
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.rad2deg(na), ak.rad2deg(pda).to_ndarray()))
+
+        na = np.arange(0, 10, dtype="uint64")
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.rad2deg(na), ak.rad2deg(pda).to_ndarray()))
+
+        na = np.linspace(0, 10)
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.rad2deg(na), ak.rad2deg(pda).to_ndarray()))
+
+        with self.assertRaises(TypeError):
+            ak.rad2deg([range(0, 10)])
+
+    def testDeg2rad(self):
+        na = np.arange(0, 10, dtype="int64")
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.deg2rad(na), ak.deg2rad(pda).to_ndarray()))
+
+        na = np.arange(0, 10, dtype="uint64")
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.deg2rad(na), ak.deg2rad(pda).to_ndarray()))
+
+        na = np.linspace(0, 10)
+        pda = ak.array(na)
+        self.assertTrue(np.allclose(np.deg2rad(na), ak.deg2rad(pda).to_ndarray()))
+
+        with self.assertRaises(TypeError):
+            ak.deg2rad([range(0, 10)])
 
     def testHash(self):
         h1, h2 = ak.hash(ak.arange(10))
@@ -226,6 +605,97 @@ class NumericTest(ArkoudaTest):
         h = ak.hash(ak.linspace(0, 10, 10))
         self.assertEqual(h[0].dtype, ak.uint64)
         self.assertEqual(h[1].dtype, ak.uint64)
+
+        # test strings hash
+        s = ak.random_strings_uniform(4, 8, 10)
+        h1, h2 = ak.hash(s)
+        rh1, rh2 = ak.hash(s[rev])
+        self.assertListEqual(h1.to_list(), rh1[rev].to_list())
+        self.assertListEqual(h2.to_list(), rh2[rev].to_list())
+
+        # verify all the ways to hash strings match
+        h3, h4 = ak.hash([s])
+        self.assertListEqual(h1.to_list(), h3.to_list())
+        self.assertListEqual(h2.to_list(), h4.to_list())
+        h5, h6 = s.hash()
+        self.assertListEqual(h1.to_list(), h5.to_list())
+        self.assertListEqual(h2.to_list(), h6.to_list())
+
+        # test segarray hash with int and string values
+        # along with strings, categorical, and pdarrays
+        segs = ak.array([0, 3, 6, 9])
+        vals = ak.array([0, 1, 2, 3, 4, 5, 0, 1, 2, 5, 5, 5, 5])
+        sa = ak.SegArray(segs, vals)
+        str_vals = ak.array([f"str {i}" for i in vals.to_list()])
+        str_sa = ak.SegArray(segs, str_vals)
+        a = ak.array([-10, 4, -10, 17])
+        bi = a + 2**200
+        s = ak.array([f"str {i}" for i in a.to_list()])
+        c = ak.Categorical(s)
+        for h in [
+            sa,
+            str_sa,
+            [sa, a],
+            [str_sa, a],
+            [str_sa, bi],
+            [sa, str_sa],
+            [sa, str_sa, c],
+            [sa, bi, str_sa, c],
+            [s, sa, str_sa],
+            [str_sa, s, sa, a],
+            [c, str_sa, s, sa, a],
+            [bi, c, str_sa, s, sa, a],
+        ]:
+            h1, h2 = ak.hash(h)
+            if isinstance(h, ak.SegArray):
+                # verify all the ways to hash segarrays match
+                h3, h4 = ak.hash([h])
+                self.assertListEqual(h1.to_list(), h3.to_list())
+                self.assertListEqual(h2.to_list(), h4.to_list())
+                h5, h6 = h.hash()
+                self.assertListEqual(h1.to_list(), h5.to_list())
+                self.assertListEqual(h2.to_list(), h6.to_list())
+            # the first and third position are identical and should hash to the same thing
+            self.assertEqual(h1[0], h1[2])
+            self.assertEqual(h2[0], h2[2])
+            # make sure the last position didn't get zeroed out by XOR
+            self.assertNotEqual(h1[3], 0)
+            self.assertNotEqual(h2[3], 0)
+
+        sa = ak.SegArray(ak.array([0, 2]), ak.array([1, 1, 2, 2]))
+        h1, h2 = sa.hash()
+        # verify these segments don't collide (this is why we rehash)
+        self.assertNotEqual(h1[0], h1[1])
+        self.assertNotEqual(h2[0], h2[1])
+
+        # test categorical hash
+        categories, codes = ak.array([f"str {i}" for i in range(3)]), ak.randint(0, 3, 10**5)
+        my_cat = ak.Categorical.from_codes(codes=codes, categories=categories)
+        h1, h2 = ak.hash(my_cat)
+        rev = ak.arange(10**5)[::-1]
+        rh1, rh2 = ak.hash(my_cat[rev])
+        self.assertListEqual(h1.to_list(), rh1[rev].to_list())
+        self.assertListEqual(h2.to_list(), rh2[rev].to_list())
+
+        # verify all the ways to hash Categoricals match
+        h3, h4 = ak.hash([my_cat])
+        self.assertListEqual(h1.to_list(), h3.to_list())
+        self.assertListEqual(h2.to_list(), h4.to_list())
+        h5, h6 = my_cat.hash()
+        self.assertListEqual(h1.to_list(), h5.to_list())
+        self.assertListEqual(h2.to_list(), h6.to_list())
+
+        # verify it matches hashing the categories and then indexing with codes
+        sh1, sh2 = my_cat.categories.hash()
+        h7, h8 = sh1[my_cat.codes], sh2[my_cat.codes]
+        self.assertListEqual(h1.to_list(), h7.to_list())
+        self.assertListEqual(h2.to_list(), h8.to_list())
+
+        # verify all the ways to hash bigint pdarrays match
+        h1, h2 = ak.hash(bi)
+        h3, h4 = ak.hash([bi])
+        self.assertListEqual(h1.to_list(), h3.to_list())
+        self.assertListEqual(h2.to_list(), h4.to_list())
 
     def testValueCounts(self):
         pda = ak.ones(100, dtype=ak.int64)

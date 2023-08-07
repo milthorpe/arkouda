@@ -8,14 +8,15 @@ module BinOp
   use Logging;
   use Message;
   use BitOps;
-  use BigInteger;
+
+  use ArkoudaBigIntCompat;
 
   private config const logLevel = ServerConfig.logLevel;
   private config const logChannel = ServerConfig.logChannel;
   const omLogger = new Logger(logLevel, logChannel);
 
   /*
-  Helper function to ensure that floor division cases are handled in accordance with numpy
+    Helper function to ensure that floor division cases are handled in accordance with numpy
   */
   inline proc floorDivisionHelper(numerator: ?t, denom: ?t2): real {
     if (numerator == 0 && denom == 0) || (isinf(numerator) && (denom != 0 || isinf(denom))){
@@ -27,6 +28,25 @@ module BinOp
     else {
       return floor(numerator/denom);
     }
+  }
+
+  /*
+    Helper function to ensure that mod cases are handled in accordance with numpy
+  */
+  inline proc modHelper(dividend: ?t, divisor: ?t2): real {
+    extern proc fmod(x: real, y: real): real;
+
+    var res = fmod(dividend, divisor);
+    // to convert fmod (truncated) results into mod (floored) results
+    // when the dividend and divsor have opposite signs,
+    // we add the divsor into the result
+    // except for when res == 0 (divsor even divides dividend)
+    // see https://en.wikipedia.org/wiki/Modulo#math_1 for more information
+    if res != 0 && (((dividend < 0) && (divisor > 0)) || ((dividend > 0) && (divisor < 0))) {
+      // we do + either way because we want to shift up for positive divisors and shift down for negative
+      res += divisor;
+    }
+    return res;
   }
 
   /*
@@ -154,7 +174,7 @@ module BinOp
           }
         }
       }
-      var repMsg = "created %s".format(st.attrib(rname));
+      var repMsg = "created %s".doFormat(st.attrib(rname));
       return new MsgTuple(repMsg, MsgType.NORMAL);
     }
     // Since we know that both `l` and `r` are of type `int` and that
@@ -241,7 +261,7 @@ module BinOp
           }   
         }
       }
-      var repMsg = "created %s".format(st.attrib(rname));
+      var repMsg = "created %s".doFormat(st.attrib(rname));
       return new MsgTuple(repMsg, MsgType.NORMAL);
     }
     else if (e.etype == int && r.etype == uint) ||
@@ -271,7 +291,7 @@ module BinOp
           return new MsgTuple(errorMsg, MsgType.ERROR);
         }
       }
-      var repMsg = "created %s".format(st.attrib(rname));
+      var repMsg = "created %s".doFormat(st.attrib(rname));
       return new MsgTuple(repMsg, MsgType.NORMAL);
     } else if (l.etype == uint && r.etype == int) ||
               (l.etype == int && r.etype == uint) {
@@ -288,7 +308,7 @@ module BinOp
           return new MsgTuple(errorMsg, MsgType.ERROR); 
         }   
       }
-      var repMsg = "created %s".format(st.attrib(rname));
+      var repMsg = "created %s".doFormat(st.attrib(rname));
       return new MsgTuple(repMsg, MsgType.NORMAL);
     }
     // If either RHS or LHS type is real, the same operations are supported and the
@@ -318,7 +338,10 @@ module BinOp
             e.a= l.a**r.a;
           }
           when "%" {
-            e.a = AutoMath.mod(l.a, r.a);
+            ref ea = e.a;
+            ref la = l.a;
+            ref ra = r.a;
+            [(ei,li,ri) in zip(ea,la,ra)] ei = modHelper(li, ri);
           }
           otherwise {
             var errorMsg = notImplementedError(pn,l.dtype,op,r.dtype);
@@ -326,7 +349,7 @@ module BinOp
             return new MsgTuple(errorMsg, MsgType.ERROR);
           }
         }
-      var repMsg = "created %s".format(st.attrib(rname));
+      var repMsg = "created %s".doFormat(st.attrib(rname));
       return new MsgTuple(repMsg, MsgType.NORMAL);
     } else if ((l.etype == uint && r.etype == real) || (l.etype == real && r.etype == uint)) {
       select op {
@@ -352,7 +375,10 @@ module BinOp
             e.a= l.a:real**r.a:real;
           }
           when "%" {
-            e.a = AutoMath.mod(l.a:real, r.a:real);
+            ref ea = e.a;
+            ref la = l.a;
+            ref ra = r.a;
+            [(ei,li,ri) in zip(ea,la,ra)] ei = modHelper(li, ri);
           }
           otherwise {
             var errorMsg = notImplementedError(pn,l.dtype,op,r.dtype);
@@ -360,7 +386,7 @@ module BinOp
             return new MsgTuple(errorMsg, MsgType.ERROR);
           }
         }
-      var repMsg = "created %s".format(st.attrib(rname));
+      var repMsg = "created %s".doFormat(st.attrib(rname));
       return new MsgTuple(repMsg, MsgType.NORMAL);
     } else if ((l.etype == int && r.etype == bool) || (l.etype == bool && r.etype == int)) {
       select op {
@@ -382,7 +408,7 @@ module BinOp
             return new MsgTuple(errorMsg, MsgType.ERROR);
           }
         }
-      var repMsg = "created %s".format(st.attrib(rname));
+      var repMsg = "created %s".doFormat(st.attrib(rname));
       return new MsgTuple(repMsg, MsgType.NORMAL);
     } else if ((l.etype == uint && r.etype == bool) || (l.etype == bool && r.etype == uint)) {
       select op {
@@ -401,7 +427,7 @@ module BinOp
             return new MsgTuple(errorMsg, MsgType.ERROR);
           }
         }
-      var repMsg = "created %s".format(st.attrib(rname));
+      var repMsg = "created %s".doFormat(st.attrib(rname));
       return new MsgTuple(repMsg, MsgType.NORMAL);  
     } else if ((l.etype == real && r.etype == bool) || (l.etype == bool && r.etype == real)) {
       select op {
@@ -420,7 +446,7 @@ module BinOp
             return new MsgTuple(errorMsg, MsgType.ERROR);
           }
         }
-      var repMsg = "created %s".format(st.attrib(rname));
+      var repMsg = "created %s".doFormat(st.attrib(rname));
       return new MsgTuple(repMsg, MsgType.NORMAL);
     }
     var errorMsg = notImplementedError(pn,l.dtype,op,r.dtype);
@@ -528,7 +554,7 @@ module BinOp
           }
         }
       }
-      var repMsg = "created %s".format(st.attrib(rname));
+      var repMsg = "created %s".doFormat(st.attrib(rname));
       return new MsgTuple(repMsg, MsgType.NORMAL);
     }
     // Since we know that both `l` and `r` are of type `int` and that
@@ -606,7 +632,7 @@ module BinOp
             
         }
       }
-      var repMsg = "created %s".format(st.attrib(rname));
+      var repMsg = "created %s".doFormat(st.attrib(rname));
       return new MsgTuple(repMsg, MsgType.NORMAL);
     }
     else if (e.etype == int && val.type == uint) ||
@@ -640,7 +666,7 @@ module BinOp
           return new MsgTuple(errorMsg, MsgType.ERROR);
         }
       }
-      var repMsg = "created %s".format(st.attrib(rname));
+      var repMsg = "created %s".doFormat(st.attrib(rname));
       return new MsgTuple(repMsg, MsgType.NORMAL);
     }
     // If either RHS or LHS type is real, the same operations are supported and the
@@ -669,7 +695,9 @@ module BinOp
             e.a= l.a**val;
           }
           when "%" {
-            e.a = AutoMath.mod(l.a, val);
+            ref ea = e.a;
+            ref la = l.a;
+            [(ei,li) in zip(ea,la)] ei = modHelper(li, val);
           }
           otherwise {
             var errorMsg = notImplementedError(pn,l.dtype,op,dtype);
@@ -677,9 +705,27 @@ module BinOp
             return new MsgTuple(errorMsg, MsgType.ERROR);
           }
         }
-      var repMsg = "created %s".format(st.attrib(rname));
+      var repMsg = "created %s".doFormat(st.attrib(rname));
       return new MsgTuple(repMsg, MsgType.NORMAL);
-    } else if ((l.etype == uint && val.type == real) || (l.etype == real && val.type == uint)) {
+    }
+    else if e.etype == real && ((l.etype == uint && val.type == int) || (l.etype == int && val.type == uint)) {
+      select op {
+          when "+" {
+            e.a = l.a: real + val: real;
+          }
+          when "-" {
+            e.a = l.a: real - val: real;
+          }
+          otherwise {
+            var errorMsg = notImplementedError(pn,l.dtype,op,dtype);
+            omLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
+            return new MsgTuple(errorMsg, MsgType.ERROR);
+          }
+        }
+      var repMsg = "created %s".doFormat(st.attrib(rname));
+      return new MsgTuple(repMsg, MsgType.NORMAL);
+    }
+    else if ((l.etype == uint && val.type == real) || (l.etype == real && val.type == uint)) {
       select op {
           when "+" {
             e.a = l.a: real + val: real;
@@ -702,7 +748,9 @@ module BinOp
             e.a= l.a: real**val: real;
           }
           when "%" {
-            e.a = AutoMath.mod(l.a:real, val:real);
+            ref ea = e.a;
+            ref la = l.a;
+            [(ei,li) in zip(ea,la)] ei = modHelper(li, val);
           }
           otherwise {
             var errorMsg = notImplementedError(pn,l.dtype,op,dtype);
@@ -710,7 +758,7 @@ module BinOp
             return new MsgTuple(errorMsg, MsgType.ERROR);
           }
         }
-      var repMsg = "created %s".format(st.attrib(rname));
+      var repMsg = "created %s".doFormat(st.attrib(rname));
       return new MsgTuple(repMsg, MsgType.NORMAL);
     } else if ((l.etype == int && val.type == bool) || (l.etype == bool && val.type == int)) {
       select op {
@@ -732,7 +780,7 @@ module BinOp
             return new MsgTuple(errorMsg, MsgType.ERROR);
           }
         }
-      var repMsg = "created %s".format(st.attrib(rname));
+      var repMsg = "created %s".doFormat(st.attrib(rname));
       return new MsgTuple(repMsg, MsgType.NORMAL);
     } else if ((l.etype == real && val.type == bool) || (l.etype == bool && val.type == real)) {
       select op {
@@ -751,7 +799,7 @@ module BinOp
             return new MsgTuple(errorMsg, MsgType.ERROR);
           }
         }
-      var repMsg = "created %s".format(st.attrib(rname));
+      var repMsg = "created %s".doFormat(st.attrib(rname));
       return new MsgTuple(repMsg, MsgType.NORMAL);
     }
     var errorMsg = unrecognizedTypeError(pn, "("+dtype2str(l.dtype)+","+dtype2str(dtype)+")");
@@ -859,7 +907,7 @@ module BinOp
           }
         }
       }
-      var repMsg = "created %s".format(st.attrib(rname));
+      var repMsg = "created %s".doFormat(st.attrib(rname));
       return new MsgTuple(repMsg, MsgType.NORMAL);
     }
     // Since we know that both `l` and `r` are of type `int` and that
@@ -942,31 +990,33 @@ module BinOp
             
         }
       }
-      var repMsg = "created %s".format(st.attrib(rname));
+      var repMsg = "created %s".doFormat(st.attrib(rname));
       return new MsgTuple(repMsg, MsgType.NORMAL);
-    } else if (val.type == int && r.etype == uint) {
+    }
+    else if (e.etype == int && val.type == uint) ||
+            (e.etype == uint && val.type == int) {
       select op {
         when ">>" {
           ref ea = e.a;
           ref ra = r.a;
-          [(ei,ri) in zip(ea,ra)] if ri:uint < 64 then ei = val:uint >> ri:uint;
+          [(ei,ri) in zip(ea,ra)] if ri:uint < 64 then ei = val:r.etype >> ri;
         }
         when "<<" {
           ref ea = e.a;
           ref ra = r.a;
-          [(ei,ri) in zip(ea,ra)] if ri:uint < 64 then ei = val:uint << ri:uint;
+          [(ei,ri) in zip(ea,ra)] if ri:uint < 64 then ei = val:r.etype << ri;
         }
         when ">>>" {
-          e.a = rotr(val:uint, r.a:uint);
+          e.a = rotr(val:r.etype, r.a);
         }
         when "<<<" {
-          e.a = rotl(val:uint, r.a:uint);
+          e.a = rotl(val:r.etype, r.a);
         }
         when "+" {
-          e.a = val:uint + r.a:uint;
+          e.a = val:r.etype + r.a;
         }
         when "-" {
-          e.a = val:uint - r.a:uint;
+          e.a = val:r.etype - r.a;
         }
         otherwise {
           var errorMsg = notImplementedError(pn,dtype,op,r.dtype);
@@ -974,7 +1024,7 @@ module BinOp
           return new MsgTuple(errorMsg, MsgType.ERROR);
         }
       }
-      var repMsg = "created %s".format(st.attrib(rname));
+      var repMsg = "created %s".doFormat(st.attrib(rname));
       return new MsgTuple(repMsg, MsgType.NORMAL);
     }
     // If either RHS or LHS type is real, the same operations are supported and the
@@ -1003,7 +1053,9 @@ module BinOp
             e.a= val**r.a;
           }
           when "%" {
-            e.a = AutoMath.mod(val, r.a);
+            ref ea = e.a;
+            ref ra = r.a;
+            [(ei,ri) in zip(ea,ra)] ei = modHelper(val:real, ri);
           }
           otherwise {
             var errorMsg = notImplementedError(pn,dtype,op,r.dtype);
@@ -1011,9 +1063,27 @@ module BinOp
             return new MsgTuple(errorMsg, MsgType.ERROR);
           }
         }
-      var repMsg = "created %s".format(st.attrib(rname));
+      var repMsg = "created %s".doFormat(st.attrib(rname));
       return new MsgTuple(repMsg, MsgType.NORMAL);
-    } else if ((r.etype == uint && val.type == real) || (r.etype == real && val.type == uint)) {
+    }
+    else if e.etype == real && ((r.etype == uint && val.type == int) || (r.etype == int && val.type == uint)) {
+      select op {
+          when "+" {
+            e.a = val:real + r.a:real;
+          }
+          when "-" {
+            e.a = val:real - r.a:real;
+          }
+          otherwise {
+            var errorMsg = notImplementedError(pn,dtype,op,r.dtype);
+            omLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
+            return new MsgTuple(errorMsg, MsgType.ERROR);
+          }
+        }
+      var repMsg = "created %s".doFormat(st.attrib(rname));
+      return new MsgTuple(repMsg, MsgType.NORMAL);
+    }
+    else if ((r.etype == uint && val.type == real) || (r.etype == real && val.type == uint)) {
       select op {
           when "+" {
             e.a = val:real + r.a:real;
@@ -1036,7 +1106,9 @@ module BinOp
             e.a= val:real**r.a:real;
           }
           when "%" {
-            e.a = AutoMath.mod(val:real, r.a:real);
+            ref ea = e.a;
+            ref ra = r.a;
+            [(ei,ri) in zip(ea,ra)] ei = modHelper(val:real, ri);
           }
           otherwise {
             var errorMsg = notImplementedError(pn,dtype,op,r.dtype);
@@ -1044,7 +1116,7 @@ module BinOp
             return new MsgTuple(errorMsg, MsgType.ERROR);
           }
         }
-      var repMsg = "created %s".format(st.attrib(rname));
+      var repMsg = "created %s".doFormat(st.attrib(rname));
       return new MsgTuple(repMsg, MsgType.NORMAL);
     } else if ((r.etype == int && val.type == bool) || (r.etype == bool && val.type == int)) {
       select op {
@@ -1066,7 +1138,7 @@ module BinOp
             return new MsgTuple(errorMsg, MsgType.ERROR);
           }
         }
-      var repMsg = "created %s".format(st.attrib(rname));
+      var repMsg = "created %s".doFormat(st.attrib(rname));
       return new MsgTuple(repMsg, MsgType.NORMAL);
     } else if ((r.etype == real && val.type == bool) || (r.etype == bool && val.type == real)) {
       select op {
@@ -1085,7 +1157,7 @@ module BinOp
             return new MsgTuple(errorMsg, MsgType.ERROR);
           }
         }
-      var repMsg = "created %s".format(st.attrib(rname));
+      var repMsg = "created %s".doFormat(st.attrib(rname));
       return new MsgTuple(repMsg, MsgType.NORMAL);
     }
     var errorMsg = unrecognizedTypeError(pn, "("+dtype2str(dtype)+","+dtype2str(r.dtype)+")");
@@ -1103,7 +1175,7 @@ module BinOp
     }
     ref la = l.a;
     ref ra = r.a;
-    var tmp = if l.etype == bigint then la else if l.etype == bool then la:int:bigint else la:bigint;
+    var tmp = if l.etype == bigint then la else la:bigint;
     // these cases are not mutually exclusive,
     // so we have a flag to track if tmp is ever populated
     var visted = false;
@@ -1160,23 +1232,34 @@ module BinOp
         select op {
           when "<<" {
             forall (t, ri) in zip(tmp, ra) with (var local_max_size = max_size) {
-              t <<= ri;
               if has_max_bits {
-                t &= local_max_size;
+                if ri >= max_bits {
+                  t = 0;
+                }
+                else {
+                  t <<= ri;
+                  t &= local_max_size;
+                }
+              }
+              else {
+                t <<= ri;
               }
             }
             visted = true;
           }
           when ">>" {
-            // workaround for right shift until chapel issue #21206
-            // makes it into a release, eventually we can just do
-            // tmp = la >> ra;
             forall (t, ri) in zip(tmp, ra) with (var local_max_size = max_size) {
-              var dB = 1:bigint;
-              dB <<= ri;
-              t /= dB;
               if has_max_bits {
-                t &= local_max_size;
+                if ri >= max_bits {
+                  t = 0;
+                }
+                else {
+                  rightShiftEq(t, ri);
+                  t &= local_max_size;
+                }
+              }
+              else {
+                rightShiftEq(t, ri);
               }
             }
             visted = true;
@@ -1185,31 +1268,14 @@ module BinOp
             if !has_max_bits {
               throw new Error("Must set max_bits to rotl");
             }
-            // should be as simple as the below, see issue #2006
-            // return (la << ra) | (la >> (max_bits - ra));
             var botBits = la;
-            if r.etype == int {
-              // cant just do botBits >>= shift_amt;
-              forall (t, ri, bot_bits) in zip(tmp, ra, botBits) with (var local_max_size = max_size) {
-                var modded_shift = if r.etype == int then ri % max_bits else ri % max_bits:uint;
-                t <<= modded_shift;
-                var div_by = 1:bigint;
-                var shift_amt = max_bits - modded_shift;
-                div_by <<= shift_amt;
-                bot_bits /= div_by;
-                t += bot_bits;
-                t &= local_max_size;
-              }
-            }
-            else {
-              forall (t, ri, bot_bits) in zip(tmp, ra, botBits) with (var local_max_size = max_size) {
-                var modded_shift = if r.etype == int then ri % max_bits else ri % max_bits:uint;
-                t <<= modded_shift;
-                var shift_amt = max_bits:uint - modded_shift;
-                bot_bits >>= shift_amt;
-                t += bot_bits;
-                t &= local_max_size;
-              }
+            forall (t, ri, bot_bits) in zip(tmp, ra, botBits) with (var local_max_size = max_size) {
+              var modded_shift = if r.etype == int then ri % max_bits else ri % max_bits:uint;
+              t <<= modded_shift;
+              var shift_amt = if r.etype == int then max_bits - modded_shift else max_bits:uint - modded_shift;
+              rightShiftEq(bot_bits, shift_amt);
+              t += bot_bits;
+              t &= local_max_size;
             }
             visted = true;
           }
@@ -1217,15 +1283,10 @@ module BinOp
             if !has_max_bits {
               throw new Error("Must set max_bits to rotr");
             }
-            // should be as simple as the below, see issue #2006
-            // return (la >> ra) | (la << (max_bits - ra));
-            // cant just do tmp >>= ra;
             var topBits = la;
             forall (t, ri, tB) in zip(tmp, ra, topBits) with (var local_max_size = max_size) {
               var modded_shift = if r.etype == int then ri % max_bits else ri % max_bits:uint;
-              var div_by = 1:bigint;
-              div_by <<= modded_shift;
-              t /= div_by;
+              rightShiftEq(t, modded_shift);
               var shift_amt = if r.etype == int then max_bits - modded_shift else max_bits:uint - modded_shift;
               tB <<= shift_amt;
               t += tB;
@@ -1255,7 +1316,7 @@ module BinOp
           // we can't use ei = li % ri because this can result in negatives
           forall (t, ri) in zip(tmp, ra) with (var local_max_size = max_size) {
             if ri != 0 {
-              t.mod(t, ri);
+              mod(t, t, ri);
             }
             else {
               t = 0:bigint;
@@ -1272,7 +1333,7 @@ module BinOp
           }
           if has_max_bits {
             forall (t, ri) in zip(tmp, ra) with (var local_max_size = max_size) {
-              t.powMod(t, ri, local_max_size + 1);
+              powMod(t, t, ri, local_max_size + 1);
             }
           }
           else {
@@ -1360,7 +1421,7 @@ module BinOp
       max_size -= 1;
     }
     ref la = l.a;
-    var tmp = if l.etype == bigint then la else if l.etype == bool then la:int:bigint else la:bigint;
+    var tmp = if l.etype == bigint then la else la:bigint;
     // these cases are not mutually exclusive,
     // so we have a flag to track if tmp is ever populated
     var visted = false;
@@ -1416,22 +1477,33 @@ module BinOp
         // can't shift a bigint by a bigint
         select op {
           when "<<" {
-            forall t in tmp with (var local_val = val, var local_max_size = max_size) {
-              t <<= local_val;
-              if has_max_bits {
-                t &= local_max_size;
+            if has_max_bits && val >= max_bits {
+              forall t in tmp with (var local_zero = 0:bigint) {
+                t = local_zero;
+              }
+            }
+            else {
+              forall t in tmp with (var local_val = val, var local_max_size = max_size) {
+                t <<= local_val;
+                if has_max_bits {
+                  t &= local_max_size;
+                }
               }
             }
             visted = true;
           }
           when ">>" {
-            // workaround for right shift until chapel issue #21206
-            // makes it into a release, eventually we can just do
-            // tmp = la >> ra;
-            forall t in tmp with (var dB = (1:bigint) << val, var local_max_size = max_size) {
-              t /= dB;
-              if has_max_bits {
-                t &= local_max_size;
+            if has_max_bits && val >= max_bits {
+              forall t in tmp with (var local_zero = 0:bigint) {
+                t = local_zero;
+              }
+            }
+            else {
+              forall t in tmp with (var local_max_size = max_size) {
+                rightShiftEq(t, val);
+                if has_max_bits {
+                  t &= local_max_size;
+                }
               }
             }
             visted = true;
@@ -1440,31 +1512,14 @@ module BinOp
             if !has_max_bits {
               throw new Error("Must set max_bits to rotl");
             }
-            // should be as simple as the below, see issue #2006
-            // return (la << val) | (la >> (max_bits - val));
             var botBits = la;
-            if val.type == int {
-              var modded_shift = val % max_bits;
-              var shift_amt = max_bits - modded_shift;
-              // cant just do botBits >>= shift_amt;
-              forall (t, bot_bits) in zip(tmp, botBits) with (var local_val = modded_shift, var local_shift_amt = shift_amt, var local_max_size = max_size) {
-                t <<= local_val;
-                var div_by = 1:bigint;
-                div_by <<= local_shift_amt;
-                bot_bits /= div_by;
-                t += bot_bits;
-                t &= local_max_size;
-              }
-            }
-            else {
-              var modded_shift = val % max_bits:uint;
-              var shift_amt = max_bits:uint - modded_shift;
-              forall (t, bot_bits) in zip(tmp, botBits) with (var local_val = modded_shift, var local_shift_amt = shift_amt, var local_max_size = max_size) {
-                t <<= local_val;
-                bot_bits >>= local_shift_amt;
-                t += bot_bits;
-                t &= local_max_size;
-              }
+            var modded_shift = if val.type == int then val % max_bits else val % max_bits:uint;
+            var shift_amt = if val.type == int then max_bits - modded_shift else max_bits:uint - modded_shift;
+            forall (t, bot_bits) in zip(tmp, botBits) with (var local_val = modded_shift, var local_shift_amt = shift_amt, var local_max_size = max_size) {
+              t <<= local_val;
+              rightShiftEq(bot_bits, local_shift_amt);
+              t += bot_bits;
+              t &= local_max_size;
             }
             visted = true;
           }
@@ -1472,16 +1527,11 @@ module BinOp
             if !has_max_bits {
               throw new Error("Must set max_bits to rotr");
             }
-            // should be as simple as the below, see issue #2006
-            // return (la >> val) | (la << (max_bits - val));
-            // cant just do tmp >>= ra;
             var topBits = la;
             var modded_shift = if val.type == int then val % max_bits else val % max_bits:uint;
             var shift_amt = if val.type == int then max_bits - modded_shift else max_bits:uint - modded_shift;
             forall (t, tB) in zip(tmp, topBits) with (var local_val = modded_shift, var local_shift_amt = shift_amt, var local_max_size = max_size) {
-              var div_by = 1:bigint;
-              div_by <<= local_val;
-              t /= div_by;
+              rightShiftEq(t, local_val);
               tB <<= local_shift_amt;
               t += tB;
               t &= local_max_size;
@@ -1510,7 +1560,7 @@ module BinOp
           // we can't use ei = li % val because this can result in negatives
           forall t in tmp with (var local_val = val, var local_max_size = max_size) {
             if local_val != 0 {
-              t.mod(t, local_val);
+              mod(t, t, local_val);
             }
             else {
               t = 0:bigint;
@@ -1527,7 +1577,7 @@ module BinOp
           }
           if has_max_bits {
             forall t in tmp with (var local_val = val, var local_max_size = max_size) {
-              t.powMod(t, local_val, local_max_size + 1);
+              powMod(t, t, local_val, local_max_size + 1);
             }
           }
           else {
@@ -1631,8 +1681,7 @@ module BinOp
     }
     ref ra = r.a;
     var tmp = makeDistArray(ra.size, bigint);
-    // TODO we have to cast to bigint until chape issue #21290 is resolved, see issue #2007
-    tmp = if val.type == bool then val:int:bigint else val:bigint;
+    tmp = val:bigint;
     // these cases are not mutually exclusive,
     // so we have a flag to track if tmp is ever populated
     var visted = false;
@@ -1689,23 +1738,34 @@ module BinOp
         select op {
           when "<<" {
             forall (t, ri) in zip(tmp, ra) with (var local_max_size = max_size) {
-              t <<= ri;
               if has_max_bits {
-                t &= local_max_size;
+                if ri >= max_bits {
+                  t = 0;
+                }
+                else {
+                  t <<= ri;
+                  t &= local_max_size;
+                }
+              }
+              else {
+                t <<= ri;
               }
             }
             visted = true;
           }
           when ">>" {
-            // workaround for right shift until chapel issue #21206
-            // makes it into a release, eventually we can just do
-            // tmp = val >> ra;
             forall (t, ri) in zip(tmp, ra) with (var local_max_size = max_size) {
-              var dB = 1:bigint;
-              dB <<= ri;
-              t /= dB;
               if has_max_bits {
-                t &= local_max_size;
+                if ri >= max_bits {
+                  t = 0;
+                }
+                else {
+                  rightShiftEq(t, ri);
+                  t &= local_max_size;
+                }
+              }
+              else {
+                rightShiftEq(t, ri);
               }
             }
             visted = true;
@@ -1714,32 +1774,15 @@ module BinOp
             if !has_max_bits {
               throw new Error("Must set max_bits to rotl");
             }
-            // should be as simple as the below, see issue #2006
-            // return (la << ra) | (la >> (max_bits - ra));
             var botBits = makeDistArray(ra.size, bigint);
             botBits = val;
-            if r.etype == int {
-              // cant just do botBits >>= shift_amt;
-              forall (t, ri, bot_bits) in zip(tmp, ra, botBits) with (var local_max_size = max_size) {
-                var modded_shift = if r.etype == int then ri % max_bits else ri % max_bits:uint;
-                t <<= modded_shift;
-                var div_by = 1:bigint;
-                var shift_amt = max_bits - modded_shift;
-                div_by <<= shift_amt;
-                bot_bits /= div_by;
-                t += bot_bits;
-                t &= local_max_size;
-              }
-            }
-            else {
-              forall (t, ri, bot_bits) in zip(tmp, ra, botBits) with (var local_max_size = max_size) {
-                var modded_shift = if r.etype == int then ri % max_bits else ri % max_bits:uint;
-                t <<= modded_shift;
-                var shift_amt = max_bits:uint - modded_shift;
-                bot_bits >>= shift_amt;
-                t += bot_bits;
-                t &= local_max_size;
-              }
+            forall (t, ri, bot_bits) in zip(tmp, ra, botBits) with (var local_max_size = max_size) {
+              var modded_shift = if r.etype == int then ri % max_bits else ri % max_bits:uint;
+              t <<= modded_shift;
+              var shift_amt = if r.etype == int then max_bits - modded_shift else max_bits:uint - modded_shift;
+              rightShiftEq(bot_bits, shift_amt);
+              t += bot_bits;
+              t &= local_max_size;
             }
             visted = true;
           }
@@ -1747,16 +1790,11 @@ module BinOp
             if !has_max_bits {
               throw new Error("Must set max_bits to rotr");
             }
-            // should be as simple as the below, see issue #2006
-            // return (la >> ra) | (la << (max_bits - ra));
-            // cant just do tmp >>= ra;
             var topBits = makeDistArray(ra.size, bigint);
             topBits = val;
             forall (t, ri, tB) in zip(tmp, ra, topBits) with (var local_max_size = max_size) {
               var modded_shift = if r.etype == int then ri % max_bits else ri % max_bits:uint;
-              var div_by = 1:bigint;
-              div_by <<= modded_shift;
-              t /= div_by;
+              rightShiftEq(t, modded_shift);
               var shift_amt = if r.etype == int then max_bits - modded_shift else max_bits:uint - modded_shift;
               tB <<= shift_amt;
               t += tB;
@@ -1784,7 +1822,7 @@ module BinOp
         when "%" { // modulo
           forall (t, ri) in zip(tmp, ra) with (var local_max_size = max_size) {
             if ri != 0 {
-              t.mod(t, ri);
+              mod(t, t, ri);
             }
             else {
               t = 0:bigint;
@@ -1801,7 +1839,7 @@ module BinOp
           }
           if has_max_bits {
             forall (t, ri) in zip(tmp, ra) with (var local_max_size = max_size) {
-              t.powMod(t, ri, local_max_size + 1);
+              powMod(t, t, ri, local_max_size + 1);
             }
           }
           else {

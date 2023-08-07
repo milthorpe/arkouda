@@ -1,9 +1,10 @@
 module Codecs {
-  use CTypes;
   use idna;
   use iconv;
 
   use AryUtil;
+
+  use ArkoudaCTypesCompat;
   
   proc encodeStr(obj: c_ptr(uint(8)), inBufSize: int, outBufSize: int, toEncoding: string = "UTF-8", fromEncoding: string = "UTF-8"): [] uint(8) throws {
     if toEncoding == "IDNA" {
@@ -75,7 +76,7 @@ module Codecs {
         return tmp.size+1;
       } else if fromEncoding == "IDNA" {
         // Check valid round trip characters
-        var validChars = idn2_lookup_u8(obj, c_nil, 0);
+        var validChars = idn2_lookup_u8(obj, nil, 0);
         if validChars != 0 {
           return 1;
         }

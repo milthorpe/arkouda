@@ -19,6 +19,7 @@ module UniqueMsg
     use ServerErrors;
     use Logging;
     use Message;
+    use GenSymIO;
 
     use MultiTypeSymbolTable;
     use MultiTypeSymEntry;
@@ -29,6 +30,8 @@ module UniqueMsg
     use Unique;
     use SipHash;
     use CommAggregation;
+    use SegmentedArray;
+    use HashMsg;
     
     private config const logLevel = ServerConfig.logLevel;
     private config const logChannel = ServerConfig.logChannel;
@@ -83,8 +86,8 @@ module UniqueMsg
       // For each input array, gather unique values
       for (name, objtype, i) in zip(names, types, 0..) {
         var newName = st.nextName();
-        select objtype {
-          when "pdarray", "Categorical" {
+        select objtype.toUpper(): ObjType {
+          when ObjType.PDARRAY, ObjType.CATEGORICAL {
             var g = getGenericTypedArrayEntry(name, st);
             // Gathers unique values, stores in SymTab, and returns repMsg chunk
             proc gatherHelper(type t) throws {
@@ -114,12 +117,12 @@ module UniqueMsg
               }
             }
           }
-          when "str" {
+          when ObjType.STRINGS {
             var (myNames, _) = name.splitMsgToTuple('+', 2);
             var g = getSegString(myNames, st);
             var (uSegs, uVals) = g[gatherInds];
             var newStringsObj = getSegString(uSegs, uVals, st);
-            repMsg += "created " + st.attrib(newStringsObj.name) + "+created bytes.size %t".format(newStringsObj.nBytes);
+            repMsg += "created " + st.attrib(newStringsObj.name) + "+created bytes.size %?".doFormat(newStringsObj.nBytes);
           }
         }
       }
@@ -247,40 +250,58 @@ module UniqueMsg
         return (r1, r2);
       }
       for (name, objtype, i) in zip(names, types, 0..) {
-        select objtype {
-          when "pdarray", "Categorical" {
+        select objtype.toUpper(): ObjType {
+          when ObjType.PDARRAY {
             var g = getGenericTypedArrayEntry(name, st);
             select g.dtype {
               when DType.Int64 {
                 var e = toSymEntry(g, int);
-                forall (h, x) in zip(hashes, e.a) {
+                ref ea = e.a;
+                forall (h, x) in zip(hashes, ea) {
                   h ^= rotl(sipHash128(x), i);
                 }
               }
               when DType.UInt64 {
                 var e = toSymEntry(g, uint);
-                forall (h, x) in zip(hashes, e.a) {
+                ref ea = e.a;
+                forall (h, x) in zip(hashes, ea) {
                   h ^= rotl(sipHash128(x), i);
                 }
               }
               when DType.Float64 {
                 var e = toSymEntry(g, real);
-                forall (h, x) in zip(hashes, e.a) {
+                ref ea = e.a;
+                forall (h, x) in zip(hashes, ea) {
                   h ^= rotl(sipHash128(x), i);
                 }
               }
               when DType.Bool {
                 var e = toSymEntry(g, bool);
-                forall (h, x) in zip(hashes, e.a) {
+                ref ea = e.a;
+                forall (h, x) in zip(hashes, ea) {
                   h ^= rotl((0:uint, x:uint), i);
                 }
               }
             }
           }
-          when "str" {
+          when ObjType.STRINGS {
             var (myNames, _) = name.splitMsgToTuple('+', 2);
             var g = getSegString(myNames, st);
             hashes ^= rotl(g.siphash(), i);
+          }
+          when ObjType.SEGARRAY {
+            var segComps = jsonToMap(name);
+            var (upper, lower) = segarrayHash(segComps["segments"], segComps["values"], segComps["valObjType"], st);
+            forall (h, u, l) in zip(hashes, upper, lower) {
+              h ^= rotl((u,l), i);
+            }
+          }
+          when ObjType.CATEGORICAL {
+            var catComps = jsonToMap(name);
+            var (upper, lower) = categoricalHash(catComps["categories"], catComps["codes"], st);
+            forall (h, u, l) in zip(hashes, upper, lower) {
+              h ^= rotl((u,l), i);
+            }
           }
         }
       }

@@ -6,16 +6,29 @@ module ServerConfig
     use SymArrayDmap only makeDistDom;
 
     public use IO;
-    private use CTypes;
+    public use ArkoudaIOCompat;
 
     use ServerErrorStrings;
     use Reflection;
     use ServerErrors;
     use Logging;
+    use MemoryMgmt;
 
     use ArkoudaFileCompat;
+    private use ArkoudaCTypesCompat;
     
     enum Deployment {STANDARD,KUBERNETES}
+
+    enum ObjType {
+      UNKNOWN=-1,
+      ARRAYVIEW=0,
+      PDARRAY=1,
+      STRINGS=2,
+      SEGARRAY=3,
+      CATEGORICAL=4,
+      GROUPBY=5,
+      DATAFRAME=6
+    };
     
     /*
     Type of deployment, which currently is either STANDARD, meaning
@@ -38,6 +51,11 @@ module ServerConfig
     Global log channel flag that defaults to LogChannel.CONSOLE
     */
     config var logChannel = LogChannel.CONSOLE;
+    
+    /*
+    Indicates whether arkouda_server commands should be logged.
+    */
+    config var logCommands = false;
 
     /*
     Port for zeromq
@@ -125,10 +143,11 @@ module ServerConfig
     private config const lLevel = ServerConfig.logLevel;
     
     private config const lChannel = ServerConfig.logChannel;
+
     const scLogger = new Logger(lLevel,lChannel);
    
     proc createConfig() {
-        use CTypes;
+        use ArkoudaCTypesCompat;
 
         class LocaleConfig {
             const id: int;
@@ -177,8 +196,8 @@ module ServerConfig
         const cfg = new owned Config(
             arkoudaVersion = (ServerConfig.arkoudaVersion:string),
             chplVersion = chplVersion,
-            ZMQVersion = try! "%i.%i.%i".format(Zmajor, Zminor, Zmicro),
-            HDF5Version = try! "%i.%i.%i".format(H5major, H5minor, H5micro),
+            ZMQVersion = try! "%i.%i.%i".doFormat(Zmajor, Zminor, Zmicro),
+            HDF5Version = try! "%i.%i.%i".doFormat(H5major, H5minor, H5micro),
             serverHostname = serverHostname,
             ServerPort = ServerPort,
             numLocales = numLocales,
@@ -195,7 +214,7 @@ module ServerConfig
             autoShutdown = autoShutdown,
             serverInfoNoSplash = serverInfoNoSplash
         );
-        return try! "%jt".format(cfg);
+        return try! formatJson(cfg);
 
     }
     private var cfgStr = createConfig();
@@ -216,7 +235,7 @@ module ServerConfig
     chpl_comm_regMemHeapInfo if using a fixed heap, otherwise physical memory
     */ 
     proc getPhysicalMemHere() {
-        use Memory.Diagnostics, CTypes;
+        use ArkoudaMemDiagnosticsCompat, ArkoudaCTypesCompat;
         extern proc chpl_comm_regMemHeapInfo(start: c_ptr(c_void_ptr), size: c_ptr(c_size_t)): void;
         var unused: c_void_ptr;
         var heap_size: c_size_t;
@@ -242,7 +261,7 @@ module ServerConfig
     Get the memory used on this locale
     */
     proc getMemUsed() {
-        use Memory.Diagnostics;
+        use ArkoudaMemDiagnosticsCompat;
         return memoryUsed();
     }
 
@@ -267,22 +286,11 @@ module ServerConfig
     proc overMemLimit(additionalAmount:int) throws {
         // must set config var "-smemTrack=true"(compile time) or "--memTrack=true" (run time)
         // to use memoryUsed() procedure from Chapel's Memory module
-        if (memTrack) {
-            // this is a per locale total
-            var total = getMemUsed() + (additionalAmount:uint / numLocales:uint);
-            if (trace) {
-                if (total > memHighWater) {
-                    memHighWater = total;
-                    scLogger.info(getModuleName(),getRoutineName(),getLineNumber(),
-                    "memory high watermark = %i memory limit = %i percentage used = %i%%".format(
-                           memHighWater:uint * numLocales:uint, 
-                           getMemLimit():uint * numLocales:uint,
-                           AutoMath.round((memHighWater:real / (getMemLimit():real * numLocales)) * 100):uint));
-                }
-            }
+        proc checkStaticMemoryLimit(total: real) {
             if total > getMemLimit() {
-                var msg = "Error: Operation would exceed memory limit ("
-                                             +total:string+","+getMemLimit():string+")";
+                var pct = AutoMath.round((total:real / getMemLimit():real * 100):uint);
+                var msg = "cmd requiring %i bytes of memory exceeds %i limit with projected pct memory used of %i%%".doFormat(
+                                   total, getMemLimit(), pct);
                 scLogger.error(getModuleName(),getRoutineName(),getLineNumber(), msg);  
                 throw getErrorWithContext(
                           msg=msg,
@@ -290,6 +298,60 @@ module ServerConfig
                           routineName=getRoutineName(),
                           moduleName=getModuleName(),
                           errorClass="ErrorWithContext");                                        
+            }        
+        }
+        
+        if (memTrack) {
+            // this is a per locale total
+            var total = getMemUsed() + (additionalAmount:uint / numLocales:uint);
+            if (trace) {
+                if (total > memHighWater) {
+                    memHighWater = total;
+                    scLogger.info(getModuleName(),getRoutineName(),getLineNumber(),
+                    "memory high watermark = %i memory limit = %i projected pct memory used of %i%%".doFormat(
+                           memHighWater:uint * numLocales:uint, 
+                           getMemLimit():uint * numLocales:uint,
+                           AutoMath.round((memHighWater:real * numLocales / 
+                                         (getMemLimit():real * numLocales)) * 100):uint));
+                }
+            }
+            
+            /*
+             * If the MemoryMgmt.memMgmtType is STATIC (default), use the memory management logic based upon
+             * a percentage of the locale0 host machine physical memory. 
+             *
+             * If DYNAMIC, use the new dynamic memory mgmt capability in the MemoryMgmt module that first determines 
+             * for each locale if there's sufficient space within the memory currently allocated to the Arkouda 
+             * Chapel process to accommodate the projected memory required by the cmd. If not, then MemoryMgmt 
+             * checks the available memory on each locale to see if more can be allocated to the Arkouda-Chapel process.
+             * If the answer is no on any locale, the cmd is not executed and MemoryMgmt logs the corresponding locales
+             * server-side. More detailed client-side reporting can be implemented in a later version. 
+             */
+            if memMgmtType == MemMgmtType.STATIC {
+                if total > getMemLimit() {
+                    var pct = AutoMath.round((total:real / getMemLimit():real * 100):uint);
+                    var msg = "cmd requiring %i bytes of memory exceeds %i limit with projected pct memory used of %i%%".doFormat(
+                                   total, getMemLimit(), pct);
+                    scLogger.error(getModuleName(),getRoutineName(),getLineNumber(), msg);  
+                    throw getErrorWithContext(
+                              msg=msg,
+                              lineNumber=getLineNumber(),
+                              routineName=getRoutineName(),
+                              moduleName=getModuleName(),
+                              errorClass="ErrorWithContext");                                        
+                }
+            } else {
+                if !isMemAvailable(additionalAmount) {
+                    var msg = "cmd requiring %i more bytes of memory exceeds available memory on one or more locales".doFormat(
+                                                                                                     additionalAmount);
+                    scLogger.error(getModuleName(),getRoutineName(),getLineNumber(), msg);  
+                    throw getErrorWithContext(
+                              msg=msg,
+                              lineNumber=getLineNumber(),
+                              routineName=getRoutineName(),
+                              moduleName=getModuleName(),
+                              errorClass="ErrorWithContext");                                     
+                }
             }
         }
     }

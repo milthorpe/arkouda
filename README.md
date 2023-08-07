@@ -2,7 +2,7 @@
   <img src="pictures/arkouda_wide_marker1.png"/>
 </p>
 
-<h2 align="center">Arkouda (αρκούδα) :bear:</br>Interactive Data Analytics at Supercomputing Scale</br>a Python API powered by Chapel</h2>
+<h2 align="center">Arkouda (αρκούδα) :bear:</br>Interactive Data Analytics at Supercomputing Scale</h2>
 
 <p align="center">
 <a href="https://github.com/Bears-R-Us/arkouda/actions/workflows/CI.yml"><img alt="Actions Status" src="https://github.com/Bears-R-Us/arkouda/workflows/CI/badge.svg"></a>
@@ -21,12 +21,6 @@
 [Arkouda Gitter channel](https://gitter.im/ArkoudaProject/community)
 
 [Chapel Gitter channel](https://gitter.im/chapel-lang/chapel)
-
-## Arkouda Weekly Call
-We have a weekly zoom call to talk about what is going on with Arkouda development and people's general desires.
-Anyone with an interest in Arkouda is invited, come join in the discussion!
-Here is a link to the [Arkouda Weekly Call Repo](https://github.com/Bears-R-Us/ArkoudaWeeklyCall)
-the [README.md](https://github.com/Bears-R-Us/ArkoudaWeeklyCall/blob/main/README.md) there contains the meeting details.
 
 ## Talks on Arkouda
 
@@ -105,6 +99,7 @@ This yielded a >20TB dataframe in Arkouda.
    - [Running the arkouda_server From a Script](#run-server-script)
    - [Sanity check](#run-ak-sanity)
    - [Token-Based Authentication](#run-ak-token-auth)
+   - [Setting Per-Locale Memory and CPU Core Limits](#set-locale-memory-cpu-core-limits)
    - [Connecting to Arkouda](#run-ak-connect)
 5. [Logging](#log-ak)
 6. [Type Checking in Arkouda](#typecheck-ak)
@@ -185,8 +180,6 @@ Memory tracking is turned on by default now, you can run server with memory trac
 ./arkouda_server --memTrack=false
 ```
 
-For situations where it is desirable to limit the amount of memory allocated to each locale, the `--memMax=$MEM_MAX_IN_BYTES` flag sets the max per-locale memory in bytes. 
-
 By default, the server listens on port `5555`. This value can be overridden with the command-line flag 
 `--ServerPort=1234`
 
@@ -251,6 +244,29 @@ tokens.txt file.
 In situations where a user-specified token string is preferred, this can be specified in the ARKOUDA_SERVER_TOKEN environment variable. As is the case with an Arkouda-generated token, the user-supplied token
 is saved to the .arkouda/tokens.txt file for re-use.
 
+<a id="set-locale-memory-cpu-core-limits"></a>
+### Setting Per-Locale Memory and CPU Core Limits <sup><sup><sub><a href="#toc">toc</a></sub></sup></sup>
+
+By default, each Arkouda locale utilizes all available memory and CPU cores on the host machine. However, it is possible to set per-locale limits for both memory as well as CPU cores. 
+
+The max number of CPU cores utilized by each locale is set via the CHPL_RT_NUM_THREADS_PER_LOCALE environment variable. An example below sets the maximum number of cores for each locale to 16:
+
+```
+export CHPL_RT_NUM_THREADS_PER_LOCALE=16
+```
+
+The max memory utilized by each locale can be set in one of two ways: percentage of physical memory or a limit set in bytes. By default, the max per-locale memory is set to ninety (90) percent of the physical memory on each Arkouda locale host. If another percentage is desired, this is set via the --perLocaleMemLimit startup parameter. For example, to set max memory utilized by each locale to seventy (70) percent of physical memory, the Arkouda startup command would be as follows:
+
+```
+./arkouda_server --perLocaleMemLimit=70
+```
+
+In addition, the max per-locale memory can instead be set to an explicit number of bytes via the --memMax startup parameter. For example, to set the max memory utilized by each locale to 100 GB, the Arkouda startup command would be as follows:
+
+```
+./arkouda_server --memMax=100000000000
+```
+
 <a id="run-ak-connect"></a>
 ### Connecting to Arkouda <sup><sup><sub><a href="#toc">toc</a></sub></sup></sup>
 
@@ -286,7 +302,7 @@ for all logged messages. An example is shown below:
 2021-04-15:06:22:59 [MultiTypeSymbolTable] addEntry Line 127 DEBUG [Chapel] adding symbol: id_4 
 ```
 
-### Logging Levels
+### Log Levels
 
 Available logging levels are ERROR, CRITICAL, WARN, INFO, and DEBUG. The default logging level is INFO where all messages at the ERROR, CRITICAL, WARN, and INFO levels are printed. The log level can be set globally by passing in the --logLevel parameter upon arkouda\_server startup. For example, passing the --logLevel=LogLevel.DEBUG parameter as shown below sets the global log level to DEBUG:
 
@@ -302,13 +318,23 @@ In addition to setting the global logging level, the logging level for individua
 
 In this example, the logging level for all other Arkouda modules will be set to the global value WARN.
 
-### Logging Channels
+### Log Channels
 
-Arkouda logs can be written either to the console (default) or to the arkouda.log file located in the Arkouda deployment directory. To enable log output to the arkouda.log file, start Arkouda as follows with the --logChannel flag:
+Arkouda logs can be written either to the console (default) or to the arkouda.log file located in the .arkouda directory. To enable log output to the arkouda.log file, start Arkouda as follows with the --logChannel flag:
 
 ```
 ./arkouda_server --logChannel=LogChannel.FILE
 ```
+
+### Arkouda Command Logging
+
+All incoming Arkouda server commands submitted by the Arkouda client can be logged to the commands.log file located in the .arkouda directory. Arkouda command logging is enabled as follows:
+
+```
+./arkouda_server --logCommands=true
+```
+
+The Arkouda command logging capability has a variety of uses, one of which is replaying analytic or data processing scenarios in either interactive or batch mode. Moreover, a sequence of Arkouda server commands provides the possibility of utilizing Arkouda clients developed in other languages such as Rust or Go. In still another use case, command logging in Arkouda provides a command sequence for starting Arkouda via cron job and processing large amounts of data into Arkouda arrays or dataframes, thereby obviating the need for a user to wait for well-known data processing/analysis steps to complete; this use case is of particular value in situations where the data loading process is particularly time-intensive. Finally, command logging provides a means of integrating a non-interactive Arkouda data processing/analysis sequence into a data science workflow implemented in a framework such as Argo Workflows or Kubeflow.
 
 <a id="typecheck-ak"></a>
 ## Type Checking in Arkouda <sup><sup><sub><a href="#toc">toc</a></sub></sup></sup>
@@ -363,6 +389,7 @@ Beginning after tag `v2019.12.10` versioning is now performed using [Versioneer]
 which determines the version based on the location in `git`.
 
 An example using a hypothetical tag `1.2.3.4`
+
 ```bash
 git checkout 1.2.3.4
 python -m arkouda |tail -n 2

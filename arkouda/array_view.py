@@ -44,8 +44,9 @@ class ArrayView:
         If 'F'/'column_major', read and write data in column_major order
     """
 
+    objType = "ArrayView"
+
     def __init__(self, base: pdarray, shape, order="row_major"):
-        self.objtype = type(self).__name__
         self.shape = array(shape)
         if not isinstance(self.shape, pdarray):
             raise TypeError(f"ArrayView Shape cannot be type {type(self.shape)}. Expecting pdarray.")
@@ -367,8 +368,8 @@ class ArrayView:
 
     def to_hdf(
         self,
-        filepath: str,
-        dset: str = "ArrayView",
+        prefix_path: str,
+        dataset: str = "ArrayView",
         mode: str = "truncate",
         file_type: str = "distribute",
     ):
@@ -377,9 +378,9 @@ class ArrayView:
 
         Parameters
         ----------
-        filepath: str
+        prefix_path: str
             Path to the file to write the dataset to
-        dset: str
+        dataset: str
             Name of the dataset to write
         mode: str (truncate | append)
             Default: truncate
@@ -398,9 +399,9 @@ class ArrayView:
                 "values": self.base,
                 "shape": self.shape,
                 "order": self.order,
-                "filename": filepath,
+                "filename": prefix_path,
                 "file_format": _file_type_to_int(file_type),
-                "dset": dset,
+                "dset": dataset,
                 "write_mode": _mode_str_to_int(mode),
                 "objType": "ArrayView",
             },
@@ -446,7 +447,12 @@ class ArrayView:
         - Because HDF5 deletes do not release memory, this will create a copy of the
           file with the new data
         """
-        from arkouda.io import _get_hdf_filetype, _mode_str_to_int, _file_type_to_int, _repack_hdf
+        from arkouda.io import (
+            _file_type_to_int,
+            _get_hdf_filetype,
+            _mode_str_to_int,
+            _repack_hdf,
+        )
 
         # determine the format (single/distribute) that the file was saved in
         file_type = _get_hdf_filetype(prefix_path + "*")

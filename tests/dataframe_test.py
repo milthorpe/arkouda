@@ -180,7 +180,7 @@ class DataFrameTest(ArkoudaTest):
             "c_2": ak.arange(6, 9, 1),
             "c_3": str_arr,
             "c_4": ak.Categorical(str_arr),
-            "c_5": ak.segarray(ak.array([0, 9, 14]), ak.arange(20)),
+            "c_5": ak.SegArray(ak.array([0, 9, 14]), ak.arange(20)),
             "c_6": ak.arange(2**200, 2**200 + 3),
         }
         akdf = ak.DataFrame(df_dict)
@@ -575,7 +575,7 @@ class DataFrameTest(ArkoudaTest):
             )
 
             # Test for df having seg array col
-            df = ak.DataFrame({"a": ak.arange(10), "b": ak.segarray(ak.arange(10), ak.arange(10))})
+            df = ak.DataFrame({"a": ak.arange(10), "b": ak.SegArray(ak.arange(10), ak.arange(10))})
             df.to_hdf(f"{tmp_dirname}/seg_test.h5")
             self.assertEqual(
                 len(glob.glob(f"{tmp_dirname}/seg_test*.h5")), ak.get_config()["numLocales"]
@@ -587,7 +587,7 @@ class DataFrameTest(ArkoudaTest):
             df_dict = {
                 "c_1": ak.arange(3, 6),
                 "c_2": ak.arange(6, 9),
-                "c_3": ak.segarray(ak.array([0, 9, 14]), ak.arange(20)),
+                "c_3": ak.SegArray(ak.array([0, 9, 14]), ak.arange(20)),
             }
             akdf = ak.DataFrame(df_dict)
             akdf.to_hdf(f"{tmp_dirname}/seg_test.h5")
@@ -641,6 +641,14 @@ class DataFrameTest(ArkoudaTest):
         df = pd.DataFrame({"Test": [2**64 - 1, 0]})
         self.assertEqual(df["Test"].dtype, ak.uint64)
 
+    def test_head_tail_datetime_display(self):
+        # Reproducer for issue #2596
+        values = ak.array([1689221916000000] * 100, dtype=ak.int64)
+        dt = ak.Datetime(values, unit='u')
+        df = ak.DataFrame({"Datetime from Microseconds": dt})
+        # verify _get_head_tail and _get_head_tail_server match
+        self.assertEqual(df._get_head_tail_server().__repr__(), df._get_head_tail().__repr__())
+
     def test_head_tail_resetting_index(self):
         # Test that issue #2183 is resolved
         df = ak.DataFrame({"cnt": ak.arange(65)})
@@ -669,56 +677,45 @@ class DataFrameTest(ArkoudaTest):
 
     def test_ipv4_columns(self):
         # test with single IPv4 column
-        df = ak.DataFrame({
-            'a': ak.arange(10),
-            'b': ak.IPv4(ak.arange(10))
-        })
-        with tempfile.TemporaryDirectory(dir=DataFrameTest.df_test_base_tmp) as tmp_dirname:
-            fname = tmp_dirname + "/ipv4_df"
-            df.to_parquet(fname)
-
-            data = ak.read(fname+"*")
-            rddf = ak.DataFrame({
-                'a': data['a'],
-                'b': ak.IPv4(data['b'])
-            })
-
-            self.assertListEqual(df['a'].to_list(), rddf['a'].to_list())
-            self.assertListEqual(df['b'].to_list(), rddf['b'].to_list())
-
-        # test with multiple
-        df = ak.DataFrame({
-            'a': ak.IPv4(ak.arange(10)),
-            'b': ak.IPv4(ak.arange(10))
-        })
+        df = ak.DataFrame({"a": ak.arange(10), "b": ak.IPv4(ak.arange(10))})
         with tempfile.TemporaryDirectory(dir=DataFrameTest.df_test_base_tmp) as tmp_dirname:
             fname = tmp_dirname + "/ipv4_df"
             df.to_parquet(fname)
 
             data = ak.read(fname + "*")
-            rddf = ak.DataFrame({
-                'a': ak.IPv4(data['a']),
-                'b': ak.IPv4(data['b'])
-            })
+            rddf = ak.DataFrame({"a": data["a"], "b": ak.IPv4(data["b"])})
 
-            self.assertListEqual(df['a'].to_list(), rddf['a'].to_list())
-            self.assertListEqual(df['b'].to_list(), rddf['b'].to_list())
+            self.assertListEqual(df["a"].to_list(), rddf["a"].to_list())
+            self.assertListEqual(df["b"].to_list(), rddf["b"].to_list())
+
+        # test with multiple
+        df = ak.DataFrame({"a": ak.IPv4(ak.arange(10)), "b": ak.IPv4(ak.arange(10))})
+        with tempfile.TemporaryDirectory(dir=DataFrameTest.df_test_base_tmp) as tmp_dirname:
+            fname = tmp_dirname + "/ipv4_df"
+            df.to_parquet(fname)
+
+            data = ak.read(fname + "*")
+            rddf = ak.DataFrame({"a": ak.IPv4(data["a"]), "b": ak.IPv4(data["b"])})
+
+            self.assertListEqual(df["a"].to_list(), rddf["a"].to_list())
+            self.assertListEqual(df["b"].to_list(), rddf["b"].to_list())
 
         # test replacement of IPv4 with uint representation
-        df = ak.DataFrame({
-            'a': ak.IPv4(ak.arange(10))
-        })
-        df['a'] = df['a'].export_uint()
-        self.assertListEqual(ak.arange(10).to_list(), df['a'].to_list())
+        df = ak.DataFrame({"a": ak.IPv4(ak.arange(10))})
+        df["a"] = df["a"].export_uint()
+        self.assertListEqual(ak.arange(10).to_list(), df["a"].to_list())
+
     def test_subset(self):
-        df = ak.DataFrame({
-            'a': ak.arange(100),
-            'b': ak.randint(0, 20, 100),
-            'c': ak.random_strings_uniform(0, 16, 100),
-            'd': ak.randint(25, 75, 100)
-        })
-        df2 = df[['a', 'b']]
-        self.assertListEqual(['a', 'b'], df2.columns)
+        df = ak.DataFrame(
+            {
+                "a": ak.arange(100),
+                "b": ak.randint(0, 20, 100),
+                "c": ak.random_strings_uniform(0, 16, 100),
+                "d": ak.randint(25, 75, 100),
+            }
+        )
+        df2 = df[["a", "b"]]
+        self.assertListEqual(["a", "b"], df2.columns)
         self.assertListEqual(df.index.to_list(), df2.index.to_list())
-        self.assertListEqual(df['a'].to_list(), df2['a'].to_list())
-        self.assertListEqual(df['b'].to_list(), df2['b'].to_list())
+        self.assertListEqual(df["a"].to_list(), df2["a"].to_list())
+        self.assertListEqual(df["b"].to_list(), df2["b"].to_list())

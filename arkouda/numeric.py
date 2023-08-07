@@ -1,3 +1,4 @@
+import json
 from enum import Enum
 from typing import ForwardRef, List, Optional, Tuple, Union
 from typing import cast as type_cast
@@ -11,6 +12,7 @@ from arkouda.dtypes import (
     BigInt,
     DTypes,
     _as_dtype,
+    bigint,
     int_scalars,
     isSupportedNumber,
     numeric_scalars,
@@ -24,6 +26,7 @@ from arkouda.pdarraycreation import array
 from arkouda.strings import Strings
 
 Categorical = ForwardRef("Categorical")
+SegArray = ForwardRef("SegArray")
 
 __all__ = [
     "cast",
@@ -34,6 +37,19 @@ __all__ = [
     "cumprod",
     "sin",
     "cos",
+    "tan",
+    "arcsin",
+    "arccos",
+    "arctan",
+    "arctan2",
+    "sinh",
+    "cosh",
+    "tanh",
+    "arcsinh",
+    "arccosh",
+    "arctanh",
+    "rad2deg",
+    "deg2rad",
     "hash",
     "where",
     "histogram",
@@ -106,10 +122,8 @@ def cast(
 
     if isinstance(pda, pdarray):
         name = pda.name
-        objtype = "pdarray"
     elif isinstance(pda, Strings):
         name = pda.entry.name
-        objtype = "str"
     # typechecked decorator guarantees no other case
 
     dt = _as_dtype(dt)
@@ -118,7 +132,7 @@ def cast(
         cmd=cmd,
         args={
             "name": name,
-            "objType": objtype,
+            "objType": pda.objType,
             "targetDtype": dt.name,
             "opt": errors.name,
         },
@@ -425,15 +439,433 @@ def cos(pda: pdarray) -> pdarray:
 
 
 @typechecked
-def hash(
-    pda: Union[pdarray, List[pdarray]], full: bool = True
-) -> Union[Tuple[pdarray, pdarray], pdarray]:
+def tan(pda: pdarray) -> pdarray:
     """
-    Return an element-wise hash of the array.
+    Return the element-wise tangent of the array.
 
     Parameters
     ----------
-    pda : Union[pdarray, list[pdarray]]
+    pda : pdarray
+
+    Returns
+    -------
+    pdarray
+        A pdarray containing tangent for each element
+        of the original pdarray
+
+    Raises
+    ------
+    TypeError
+        Raised if the parameter is not a pdarray
+    """
+    repMsg = generic_msg(
+        cmd="efunc",
+        args={
+            "func": "tan",
+            "array": pda,
+        },
+    )
+    return create_pdarray(type_cast(str, repMsg))
+
+
+@typechecked
+def arcsin(pda: pdarray) -> pdarray:
+    """
+    Return the element-wise inverse sine of the array. The result is between -pi/2 and pi/2.
+
+    Parameters
+    ----------
+    pda : pdarray
+
+    Returns
+    -------
+    pdarray
+        A pdarray containing inverse sine for each element
+        of the original pdarray
+
+    Raises
+    ------
+    TypeError
+        Raised if the parameter is not a pdarray
+    """
+    repMsg = generic_msg(
+        cmd="efunc",
+        args={
+            "func": "arcsin",
+            "array": pda,
+        },
+    )
+    return create_pdarray(type_cast(str, repMsg))
+
+
+@typechecked
+def arccos(pda: pdarray) -> pdarray:
+    """
+    Return the element-wise inverse cosine of the array. The result is between 0 and pi.
+
+    Parameters
+    ----------
+    pda : pdarray
+
+    Returns
+    -------
+    pdarray
+        A pdarray containing inverse cosine for each element
+        of the original pdarray
+
+    Raises
+    ------
+    TypeError
+        Raised if the parameter is not a pdarray
+    """
+    repMsg = generic_msg(
+        cmd="efunc",
+        args={
+            "func": "arccos",
+            "array": pda,
+        },
+    )
+    return create_pdarray(type_cast(str, repMsg))
+
+
+@typechecked
+def arctan(pda: pdarray) -> pdarray:
+    """
+    Return the element-wise inverse tangent of the array. The result is between -pi/2 and pi/2.
+
+    Parameters
+    ----------
+    pda : pdarray
+
+    Returns
+    -------
+    pdarray
+        A pdarray containing inverse tangent for each element
+        of the original pdarray
+
+    Raises
+    ------
+    TypeError
+        Raised if the parameter is not a pdarray
+    """
+    repMsg = generic_msg(
+        cmd="efunc",
+        args={
+            "func": "arctan",
+            "array": pda,
+        },
+    )
+    return create_pdarray(type_cast(str, repMsg))
+
+
+@typechecked
+def arctan2(num: Union[pdarray, numeric_scalars], denom: Union[pdarray, numeric_scalars]) -> pdarray:
+    """
+    Return the element-wise inverse tangent of the array pair. The result chosen is the
+    signed angle in radians between the ray ending at the origin and passing through the
+    point (1,0), and the ray ending at the origin and passing through the point (denom, num).
+    The result is between -pi and pi.
+
+    Parameters
+    ----------
+    num : Union[numeric_scalars, pdarray]
+        Numerator of the arctan2 argument.
+    denom : Union[numeric_scalars, pdarray]
+        Denominator of the arctan2 argument.
+    Returns
+    -------
+    pdarray
+        A pdarray containing inverse tangent for each corresponding element pair
+        of the original pdarray, using the signed values or the numerator and
+        denominator to get proper placement on unit circle.
+
+    Raises
+    ------
+    TypeError
+        Raised if the parameter is not a pdarray
+    """
+    if not all(isSupportedNumber(arg) or isinstance(arg, pdarray) for arg in [num, denom]):
+        raise TypeError(
+            f"Unsupported types {type(num)} and/or {type(denom)}. Supported "
+            "types are numeric scalars and pdarrays. At least one argument must be a pdarray."
+        )
+    if isSupportedNumber(num) and isSupportedNumber(denom):
+        raise TypeError(
+            f"Unsupported types {type(num)} and/or {type(denom)}. Supported "
+            "types are numeric scalars and pdarrays. At least one argument must be a pdarray."
+        )
+    return create_pdarray(
+        type_cast(
+            str,
+            generic_msg(
+                cmd="efunc2",
+                args={
+                    "func": "arctan2",
+                    "A": num,
+                    "B": denom,
+                },
+            ),
+        )
+    )
+
+
+@typechecked
+def sinh(pda: pdarray) -> pdarray:
+    """
+    Return the element-wise hyperbolic sine of the array.
+
+    Parameters
+    ----------
+    pda : pdarray
+
+    Returns
+    -------
+    pdarray
+        A pdarray containing hyperbolic sine for each element
+        of the original pdarray
+
+    Raises
+    ------
+    TypeError
+        Raised if the parameter is not a pdarray
+    """
+    repMsg = generic_msg(
+        cmd="efunc",
+        args={
+            "func": "sinh",
+            "array": pda,
+        },
+    )
+    return create_pdarray(type_cast(str, repMsg))
+
+
+@typechecked
+def cosh(pda: pdarray) -> pdarray:
+    """
+    Return the element-wise hyperbolic cosine of the array.
+
+    Parameters
+    ----------
+    pda : pdarray
+
+    Returns
+    -------
+    pdarray
+        A pdarray containing hyperbolic cosine for each element
+        of the original pdarray
+
+    Raises
+    ------
+    TypeError
+        Raised if the parameter is not a pdarray
+    """
+    repMsg = generic_msg(
+        cmd="efunc",
+        args={
+            "func": "cosh",
+            "array": pda,
+        },
+    )
+    return create_pdarray(type_cast(str, repMsg))
+
+
+@typechecked
+def tanh(pda: pdarray) -> pdarray:
+    """
+    Return the element-wise hyperbolic tangent of the array.
+
+    Parameters
+    ----------
+    pda : pdarray
+
+    Returns
+    -------
+    pdarray
+        A pdarray containing hyperbolic tangent for each element
+        of the original pdarray
+
+    Raises
+    ------
+    TypeError
+        Raised if the parameter is not a pdarray
+    """
+    repMsg = generic_msg(
+        cmd="efunc",
+        args={
+            "func": "tanh",
+            "array": pda,
+        },
+    )
+    return create_pdarray(type_cast(str, repMsg))
+
+
+@typechecked
+def arcsinh(pda: pdarray) -> pdarray:
+    """
+    Return the element-wise inverse hyperbolic sine of the array.
+
+    Parameters
+    ----------
+    pda : pdarray
+
+    Returns
+    -------
+    pdarray
+        A pdarray containing inverse hyperbolic sine for each element
+        of the original pdarray
+
+    Raises
+    ------
+    TypeError
+        Raised if the parameter is not a pdarray
+    """
+    repMsg = generic_msg(
+        cmd="efunc",
+        args={
+            "func": "arcsinh",
+            "array": pda,
+        },
+    )
+    return create_pdarray(type_cast(str, repMsg))
+
+
+@typechecked
+def arccosh(pda: pdarray) -> pdarray:
+    """
+    Return the element-wise inverse hyperbolic cosine of the array.
+
+    Parameters
+    ----------
+    pda : pdarray
+
+    Returns
+    -------
+    pdarray
+        A pdarray containing inverse hyperbolic cosine for each element
+        of the original pdarray
+
+    Raises
+    ------
+    TypeError
+        Raised if the parameter is not a pdarray
+    """
+    repMsg = generic_msg(
+        cmd="efunc",
+        args={
+            "func": "arccosh",
+            "array": pda,
+        },
+    )
+    return create_pdarray(type_cast(str, repMsg))
+
+
+@typechecked
+def arctanh(pda: pdarray) -> pdarray:
+    """
+    Return the element-wise inverse hyperbolic tangent of the array.
+
+    Parameters
+    ----------
+    pda : pdarray
+
+    Returns
+    -------
+    pdarray
+        A pdarray containing inverse hyperbolic tangent for each element
+        of the original pdarray
+
+    Raises
+    ------
+    TypeError
+        Raised if the parameters are not a pdarray or numeric scalar.
+    """
+    repMsg = generic_msg(
+        cmd="efunc",
+        args={
+            "func": "arctanh",
+            "array": pda,
+        },
+    )
+    return create_pdarray(type_cast(str, repMsg))
+
+
+@typechecked
+def rad2deg(pda: pdarray) -> pdarray:
+    """
+    Converts angles element-wise from radians to degrees.
+
+    Parameters
+    ----------
+    pda : pdarray
+
+    Returns
+    -------
+    pdarray
+        A pdarray containing an angle converted to degrees, from radians, for each element
+        of the original pdarray
+
+    Raises
+    ------
+    TypeError
+        Raised if the parameter is not a pdarray
+    """
+    return 180 * (pda / np.pi)
+
+
+@typechecked
+def deg2rad(pda: pdarray) -> pdarray:
+    """
+    Converts angles element-wise from degrees to radians.
+
+    Parameters
+    ----------
+    pda : pdarray
+
+    Returns
+    -------
+    pdarray
+        A pdarray containing an angle converted to radians, from degrees, for each element
+        of the original pdarray
+
+    Raises
+    ------
+    TypeError
+        Raised if the parameter is not a pdarray
+    """
+    return np.pi * pda / 180
+
+
+def _hash_helper(a):
+    from arkouda import Categorical as Categorical_
+    from arkouda import SegArray as SegArray_
+
+    if isinstance(a, SegArray_):
+        return json.dumps(
+            {"segments": a.segments.name, "values": a.values.name, "valObjType": a.values.objType}
+        )
+    elif isinstance(a, Categorical_):
+        return json.dumps({"categories": a.categories.name, "codes": a.codes.name})
+    else:
+        return a.name
+
+
+# this is # type: ignored and doesn't actually do any type checking
+# the type hints are there as a reference to show which types are expected
+# type validation is done within the function
+def hash(
+    pda: Union[  # type: ignore
+        Union[pdarray, Strings, SegArray, Categorical],
+        List[Union[pdarray, Strings, SegArray, Categorical]],
+    ],
+    full: bool = True,
+) -> Union[Tuple[pdarray, pdarray], pdarray]:
+    """
+    Return an element-wise hash of the array or list of arrays.
+
+    Parameters
+    ----------
+    pda : Union[pdarray, Strings, Segarray, Categorical],
+     List[Union[pdarray, Strings, Segarray, Categorical]]]
 
     full : bool
         This is only used when a single pdarray is passed into hash
@@ -470,34 +902,59 @@ def hash(
     fixed key for the hash, which makes it possible for an
     adversary with control over input to engineer collisions.
 
-    In the case of a list of pdrrays being passed, a non-linear
-    function must be applied to each array since hashes of subsequent
-    arrays cannot be simply XORed because equivalent values will
-    cancel each other out, hence we do a rotation by the ordinal of
-    the array.
+    In the case of a list of pdrrays, Strings, Categoricals, or Segarrays
+    being passed, a non-linear function must be applied to each
+    array since hashes of subsequent arrays cannot be simply XORed
+    because equivalent values will cancel each other out, hence we
+    do a rotation by the ordinal of the array.
     """
-    if isinstance(pda, pdarray):
-        return _hash_single(pda, full)
+    from arkouda import Categorical as Categorical_
+    from arkouda import SegArray as SegArray_
 
-    repMsg = type_cast(
-        str,
-        generic_msg(
-            cmd="efuncArr",
-            args={
-                "nameslist": [n.name for n in pda],
-                "typeslist": [n.objtype for n in pda],
-                "length": len(pda),
-                "size": len(pda[0]),
-            },
-        ),
-    )
-
-    a, b = repMsg.split("+")
-    return create_pdarray(a), create_pdarray(b)
+    if isinstance(pda, (pdarray, Strings, SegArray_, Categorical_)):
+        return _hash_single(pda, full) if isinstance(pda, pdarray) else pda.hash()
+    elif isinstance(pda, List):
+        if any(
+            wrong_type := [not isinstance(a, (pdarray, Strings, SegArray_, Categorical_)) for a in pda]
+        ):
+            raise TypeError(
+                f"Unsupported type {type(pda[np.argmin(wrong_type)])}. Supported types are pdarray,"
+                f" SegArray, Strings, Categoricals, and Lists of these types."
+            )
+        # replace bigint pdarrays with the uint limbs
+        expanded_pda = []
+        for a in pda:
+            if isinstance(a, pdarray) and a.dtype == bigint:
+                expanded_pda.extend(a.bigint_to_uint_arrays())
+            else:
+                expanded_pda.append(a)
+        types_list = [a.objType for a in expanded_pda]
+        names_list = [_hash_helper(a) for a in expanded_pda]
+        rep_msg = type_cast(
+            str,
+            generic_msg(
+                cmd="hashList",
+                args={
+                    "nameslist": names_list,
+                    "typeslist": types_list,
+                    "length": len(expanded_pda),
+                    "size": len(expanded_pda[0]),
+                },
+            ),
+        )
+        hashes = json.loads(rep_msg)
+        return create_pdarray(hashes["upperHash"]), create_pdarray(hashes["lowerHash"])
+    else:
+        raise TypeError(
+            f"Unsupported type {type(pda)}. Supported types are pdarray,"
+            f" SegArray, Strings, Categoricals, and Lists of these types."
+        )
 
 
 @typechecked
 def _hash_single(pda: pdarray, full: bool = True):
+    if pda.dtype == bigint:
+        return hash(pda.bigint_to_uint_arrays())
     repMsg = type_cast(
         str,
         generic_msg(

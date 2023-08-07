@@ -1,6 +1,5 @@
 module AryUtil
 {
-    use CTypes;
     use Random;
     use Reflection;
     use Logging;
@@ -9,6 +8,10 @@ module AryUtil
     use MultiTypeSymEntry;
     use ServerErrors;
     use BitOps;
+    use GenSymIO;
+
+    use ArkoudaPOSIXCompat;
+    use ArkoudaCTypesCompat;
 
     param bitsPerDigit = RSLSD_bitsPerDigit;
     private param numBuckets = 1 << bitsPerDigit; // these need to be const for comms/performance reasons
@@ -32,9 +35,9 @@ module AryUtil
     */
     proc formatAry(A):string throws {
         if A.size <= printThresh {
-            return "%t".format(A);
+            return "%?".doFormat(A);
         } else {
-            return "%t ... %t".format(A[A.domain.low..A.domain.low+2],
+            return "%? ... %?".doFormat(A[A.domain.low..A.domain.low+2],
                                       A[A.domain.high-2..A.domain.high]);
         }
     }
@@ -143,7 +146,7 @@ module AryUtil
     proc validateArraysSameLength(n:int, names:[] string, types: [] string, st: borrowed SymTab) throws {
       // Check that fields contains the stated number of arrays
       if (names.size != n) { 
-          var errorMsg = "Expected %i arrays but got %i".format(n, names.size);
+          var errorMsg = "Expected %i arrays but got %i".doFormat(n, names.size);
           auLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
           throw new owned ErrorWithContext(errorMsg,
                                            getLineNumber(),
@@ -152,7 +155,7 @@ module AryUtil
                                            "ArgumentError");
       }
       if (types.size != n) { 
-          var errorMsg = "Expected %i types but got %i".format(n, types.size);
+          var errorMsg = "Expected %i types but got %i".doFormat(n, types.size);
           auLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
           throw new owned ErrorWithContext(errorMsg,
                                            getLineNumber(),
@@ -166,24 +169,39 @@ module AryUtil
       var hasStr = false;
       for (name, objtype, i) in zip(names, types, 1..) {
         var thisSize: int;
-        select objtype {
-          when "pdarray" {
+        select objtype.toUpper(): ObjType {
+          when ObjType.PDARRAY {
             var g = getGenericTypedArrayEntry(name, st);
             thisSize = g.size;
           }
-          when "str" {
+          when ObjType.STRINGS {
             var (myNames, _) = name.splitMsgToTuple('+', 2);
             var g = getSegStringEntry(myNames, st);
             thisSize = g.size;
             hasStr = true;
           }
-          when "Categorical" {
-            // passed only Categorical.codes.name to be sorted on
-            var g = getGenericTypedArrayEntry(name, st);
-            thisSize = g.size;
+          when ObjType.CATEGORICAL {
+            if st.contains(name) {
+              // passed only Categorical.codes.name to be sorted on
+              var g = getGenericTypedArrayEntry(name, st);
+              thisSize = g.size;
+            }
+            else {
+              var catComps = jsonToMap(name);
+              var codesName = catComps["codes"];
+              var codes = getGenericTypedArrayEntry(codesName, st);
+              thisSize = codes.size;
+            }
+          }
+          when ObjType.SEGARRAY {
+            var segComps = jsonToMap(name);
+            var (segName, valName) = (segComps["segments"], segComps["values"]);
+            var segs = getGenericTypedArrayEntry(segName, st);
+            var vals = getGenericTypedArrayEntry(valName, st);
+            thisSize = segs.size;
           }
           otherwise {
-              var errorMsg = "Unrecognized object type: %s".format(objtype);
+              var errorMsg = "Unrecognized object type: %s".doFormat(objtype);
               auLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);  
               throw new owned ErrorWithContext(errorMsg,
                                                getLineNumber(),
@@ -197,7 +215,7 @@ module AryUtil
             size = thisSize;
         } else {
             if (thisSize != size) { 
-              var errorMsg = "Arrays must all be same size; expected size %t, got size %t".format(size, thisSize);
+              var errorMsg = "Arrays must all be same size; expected size %?, got size %?".doFormat(size, thisSize);
                 auLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
                 throw new owned ErrorWithContext(errorMsg,
                                                  getLineNumber(),
@@ -289,7 +307,7 @@ module AryUtil
     inline proc getDigit(in key: real, rshift: int, last: bool, negs: bool): int {
       const invertSignBit = last && negs;
       var keyu: uint;
-      c_memcpy(c_ptrTo(keyu), c_ptrTo(key), numBytes(key.type));
+      memcpy(c_ptrTo(keyu), c_ptrTo(key), numBytes(key.type).safeCast(c_size_t));
       var signbitSet = keyu >> (numBits(keyu.type)-1) == 1;
       var xor = 0:uint;
       if signbitSet {
@@ -395,17 +413,17 @@ module AryUtil
     record lowLevelLocalizingSlice {
         type t;
         /* Pointer to localized memory */
-        var ptr: c_ptr(t) = c_nil;
+        var ptr: c_ptr(t) = nil;
         /* Do we own the memory? */
         var isOwned: bool = false;
 
-        proc init(A: [] ?t, region: range(stridable=false)) {
+        proc init(A: [] ?t, region: range()) {
             use CommPrimitives;
             use CTypes;
 
             this.t = t;
             if region.isEmpty() {
-                this.ptr = c_nil;
+                this.ptr = nil;
                 this.isOwned = false;
                 return;
             }
@@ -423,7 +441,7 @@ module AryUtil
                 } else {
                     // If data is contiguous on a single remote node,
                     // alloc+bulk GET and return owned c_ptr
-                    this.ptr = c_malloc(t, region.size);
+                    this.ptr = allocate(t, region.size);
                     this.isOwned = true;
                     const byteSize = region.size:c_size_t * c_sizeof(t);
                     GET(ptr, startLocale, getAddr(start), byteSize);
@@ -431,7 +449,7 @@ module AryUtil
             } else {
                 // If data is non-contiguous or split across nodes, get element
                 // at a time and return owned c_ptr (slow, expected to be rare)
-                this.ptr = c_malloc(t, region.size);
+                this.ptr = allocate(t, region.size);
                 this.isOwned = true;
                 for i in 0..<region.size {
                     this.ptr[i] = A[region.low + i];
@@ -441,7 +459,7 @@ module AryUtil
 
         proc deinit() {
             if isOwned {
-                c_free(ptr);
+                deallocate(ptr);
             }
         }
     }

@@ -15,15 +15,14 @@ from arkouda.dtypes import (
     bigint,
 )
 from arkouda.dtypes import dtype as akdtype
+from arkouda.dtypes import float64, get_byteorder, get_server_byteorder
+from arkouda.dtypes import int64 as akint64
 from arkouda.dtypes import (
-    float64,
-    get_byteorder,
-    get_server_byteorder,
-    int64,
     int_scalars,
     isSupportedInt,
     isSupportedNumber,
     numeric_scalars,
+    resolve_scalar_dtype,
 )
 from arkouda.dtypes import uint64 as akuint64
 from arkouda.pdarrayclass import create_pdarray, pdarray
@@ -229,6 +228,7 @@ def array(
                 a = np.array(a)
         except (RuntimeError, TypeError, ValueError):
             raise TypeError("a must be a pdarray, np.ndarray, or convertible to a numpy array")
+
     # Return multi-dimensional arrayview
     if a.ndim != 1:
         # TODO add order
@@ -239,8 +239,10 @@ def array(
                 return flat_a.reshape(a.shape)
         else:
             raise TypeError("Must be an iterable or have a numeric DType")
+
     # Check if array of strings
-    if "U" in a.dtype.kind:
+    # if a.dtype == numpy.object_ need to check first element
+    if "U" in a.dtype.kind or (a.dtype == np.object_ and isinstance(a[0], str)):
         # encode each string and add a null byte terminator
         encoded = [i for i in itertools.chain.from_iterable(map(lambda x: x.encode() + b"\x00", a))]
         nbytes = len(encoded)
@@ -499,10 +501,10 @@ def ones(
 @typechecked
 def full(
     size: Union[int_scalars, str],
-    fill_value: int_scalars,
+    fill_value: Union[int_scalars, str],
     dtype: Union[np.dtype, type, str, BigInt] = float64,
     max_bits: Optional[int] = None,
-) -> pdarray:
+) -> Union[pdarray, Strings]:
     """
     Create a pdarray filled with fill_value.
 
@@ -519,7 +521,7 @@ def full(
 
     Returns
     -------
-    pdarray
+    pdarray or Strings
         array of the requested size and dtype filled with fill_value
 
     Raises
@@ -545,6 +547,9 @@ def full(
     """
     if not np.isscalar(size):
         raise TypeError(f"size must be a scalar, not {size.__class__.__name__}")
+    if isinstance(fill_value, str):
+        return _full_string(size, fill_value)
+
     dtype = akdtype(dtype)  # normalize dtype
     dtype_name = dtype.name if isinstance(dtype, BigInt) else cast(np.dtype, dtype).name
     # check dtype for error
@@ -556,6 +561,30 @@ def full(
     if max_bits:
         a.max_bits = max_bits
     return a
+
+
+@typechecked
+def _full_string(
+    size: Union[int_scalars, str],
+    fill_value: str,
+) -> Strings:
+    """
+    Create a Strings object filled with fill_value.
+
+    Parameters
+    ----------
+    size: int_scalars
+        Size of the array (only rank-1 arrays supported)
+    fill_value: str
+        Value with which the array will be filled
+
+    Returns
+    -------
+    Strings
+        array of the requested size and dtype filled with fill_value
+    """
+    repMsg = generic_msg(cmd="segmentedFull", args={"size": size, "fill_value": fill_value})
+    return Strings.from_return_msg(cast(str, repMsg))
 
 
 @typechecked
@@ -781,21 +810,28 @@ def arange(*args, **kwargs) -> pdarray:
     if stride == 0:
         raise ZeroDivisionError("division by zero")
 
-    dtype = int64 if "dtype" not in kwargs.keys() else kwargs["dtype"]
+    dtype = akint64 if "dtype" not in kwargs.keys() else kwargs["dtype"]
 
     if isSupportedInt(start) and isSupportedInt(stop) and isSupportedInt(stride):
-        if dtype in ["bigint", bigint] or start >= 2**64 or stop >= 2**64:
+        arg_dtypes = [resolve_scalar_dtype(arg) for arg in (start, stop, stride)]
+        max_bits = None
+        arg_dtype = "int64"
+        if dtype in ["bigint", bigint] or "bigint" in arg_dtypes:
             max_bits = None if "max_bits" not in kwargs.keys() else kwargs["max_bits"]
-            # we only return dtype bigint here
-            repMsg = generic_msg(
-                cmd="bigintArange", args={"start": start, "stop": stop, "stride": stride}
-            )
-            return create_pdarray(repMsg, max_bits=max_bits)
-        else:
-            if stride < 0:
-                stop = stop + 2
-            repMsg = generic_msg(cmd="arange", args={"start": start, "stop": stop, "stride": stride})
-            return create_pdarray(repMsg) if dtype == int64 else akcast(create_pdarray(repMsg), dtype)
+            arg_dtype = "bigint"
+        elif "uint64" in arg_dtypes:
+            arg_dtype = "uint64"
+
+        if stride < 0:
+            stop = stop + 2
+        repMsg = generic_msg(
+            cmd="arange", args={"start": start, "stop": stop, "stride": stride, "dtype": arg_dtype}
+        )
+        return (
+            create_pdarray(repMsg, max_bits=max_bits)
+            if dtype == akint64
+            else akcast(create_pdarray(repMsg, max_bits=max_bits), dtype)
+        )
     else:
         raise TypeError(
             f"start,stop,stride must be type int, np.int64, or np.uint64 {start} {stop} {stride}"
@@ -856,7 +892,11 @@ def linspace(start: numeric_scalars, stop: numeric_scalars, length: int_scalars)
 
 @typechecked
 def randint(
-    low: numeric_scalars, high: numeric_scalars, size: int_scalars, dtype=int64, seed: int_scalars = None
+    low: numeric_scalars,
+    high: numeric_scalars,
+    size: int_scalars,
+    dtype=akint64,
+    seed: int_scalars = None,
 ) -> pdarray:
     """
     Generate a pdarray of randomized int, float, or bool values in a

@@ -6,7 +6,7 @@ from arkouda.categorical import Categorical
 from arkouda.client import generic_msg, get_config, get_mem_used
 from arkouda.client_dtypes import BitVector, BitVectorizer, IPv4
 from arkouda.groupbyclass import GroupBy, broadcast
-from arkouda.infoclass import list_symbol_table
+from arkouda.infoclass import list_registry, list_symbol_table
 from arkouda.pdarrayclass import RegistrationError, create_pdarray
 from arkouda.pdarraycreation import arange
 from arkouda.pdarraysetops import unique
@@ -25,7 +25,7 @@ def get_callback(x):
         return type(x)
     elif hasattr(x, "_cast"):
         return x._cast
-    elif type(x) == BitVector:
+    elif isinstance(x, BitVector):
         return BitVectorizer(width=x.width, reverse=x.reverse)
     else:
         return identity
@@ -229,7 +229,10 @@ def attach(name: str, dtype: str = "infer"):
     repType = repMsg.split("+")[0]
 
     if repType == "categorical":
-        return Categorical.from_return_msg(repMsg)
+        build_data = repMsg.split("+", 2)[-1]
+        c = Categorical.from_return_msg(build_data)
+        c.name = name
+        return c
     elif repType == "series":
         from arkouda.series import Series
 
@@ -237,7 +240,7 @@ def attach(name: str, dtype: str = "infer"):
     elif repType == "dataframe":
         from arkouda.dataframe import DataFrame
 
-        return DataFrame.from_return_msg(repMsg)
+        return DataFrame.from_attach_msg(repMsg)
     elif repType == "segarray":
         repMsg = repMsg[len(repType) + 1 :]
         return SegArray.from_return_msg(repMsg)
@@ -245,7 +248,18 @@ def attach(name: str, dtype: str = "infer"):
         dtype = repMsg.split()[2]
         repMsg = repMsg[len(repType) + 1 :]
         if dtype == "str":
-            return Strings.from_return_msg(repMsg)
+            s = Strings.from_return_msg(repMsg)
+            registry = list_registry()
+            bytes_name, offsets_name = f"{name}_bytes", f"{name}_offsets"
+            if bytes_name in registry:
+                s._bytes = create_pdarray(
+                    cast(str, generic_msg(cmd="attach", args={"name": bytes_name}))
+                )
+            if offsets_name in registry:
+                s._offsets = create_pdarray(
+                    cast(str, generic_msg(cmd="attach", args={"name": offsets_name}))
+                )
+            return s
         else:
             return create_pdarray(repMsg)
     else:

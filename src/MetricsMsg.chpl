@@ -8,11 +8,14 @@ module MetricsMsg {
     use MultiTypeSymbolTable;
     use MultiTypeSymEntry;
     use Message;
-    use Memory.Diagnostics;
+    use ArkoudaMemDiagnosticsCompat;
     use NumPyDType;
+    use Map;
     use ArkoudaTimeCompat as Time;
 
+    use ArkoudaListCompat;
     use ArkoudaMapCompat;
+    use ArkoudaIOCompat;
 
     enum MetricCategory{ALL,NUM_REQUESTS,RESPONSE_TIME,AVG_RESPONSE_TIME,TOTAL_RESPONSE_TIME,
                         TOTAL_MEMORY_USED,SYSTEM,SERVER,SERVER_INFO};
@@ -113,9 +116,9 @@ module MetricsMsg {
         var metrics = new map(keyType=User,valType=shared CounterTable);
         var users = new Users();
 
-        proc getUserMetrics(user: User) {
+        proc getUserMetrics(user: User) : borrowed CounterTable {
             if this.metrics.contains(user: User) {
-              return try! this.metrics[user];
+                return try! this.metrics[user];
             } else {
                 var userMetrics = new shared CounterTable();
                 this.metrics.add(user, userMetrics);
@@ -132,7 +135,7 @@ module MetricsMsg {
             var userMetrics = this.getUserMetrics(this.users.getUser(userName));
             var metrics = new list(owned UserMetric?);
             for (metric, value) in userMetrics.items() {
-                metrics.append(new UserMetric(name=metric,
+                metrics.pushBack(new UserMetric(name=metric,
                                               scope=MetricScope.USER,
                                               category=MetricCategory.NUM_REQUESTS,
                                               value=value,
@@ -145,7 +148,7 @@ module MetricsMsg {
             var metrics = new list(owned UserMetric?);
             for userName in this.users.getUserNames() {
                 for metric in this.getPerUserNumRequestsPerCommandMetrics(userName) {
-                    metrics.append(metric);
+                    metrics.pushBack(metric);
                 }
             }
 
@@ -189,7 +192,7 @@ module MetricsMsg {
          * Sets the metrics value
          */
         proc set(metric: string, measurement: real) throws {
-            this.measurements.addOrSet(metric, measurement);
+            this.measurements.addOrReplace(metric, measurement);
         }
 
         /*
@@ -245,7 +248,7 @@ module MetricsMsg {
 
             if !this.measurementTotals.contains(metric) {
                 value = 0.0;
-                this.measurementTotals.addOrSet(metric, value);
+                this.measurementTotals.addOrReplace(metric, value);
             } else {
                 value = this.measurementTotals(metric);
             }
@@ -265,12 +268,12 @@ module MetricsMsg {
             var numMeasurements = getNumMeasurements(metric);
             var measurementTotal = getMeasurementTotal(metric);
 
-            this.numMeasurements.addOrSet(metric, numMeasurements);
+            this.numMeasurements.addOrReplace(metric, numMeasurements);
             this.measurementTotals(metric) += measurement;
 
             var value: real = this.measurementTotals(metric)/numMeasurements;
 
-            this.measurements.addOrSet(metric, value);
+            this.measurements.addOrReplace(metric, value);
         }
     }
 
@@ -287,7 +290,7 @@ module MetricsMsg {
         }   
         
         proc set(metric: string, count: int) {
-            this.counts.addOrSet(metric,count);
+            this.counts.addOrReplace(metric,count);
         }
     
         proc increment(metric: string, increment: int=1) {
@@ -334,28 +337,28 @@ module MetricsMsg {
         var metrics = new list(owned Metric?);
 
         for metric in getNumRequestMetrics() {
-            metrics.append(metric);
+            metrics.pushBack(metric);
         }
         for metric in getResponseTimeMetrics() {
-            metrics.append(metric);
+            metrics.pushBack(metric);
         }        
         for metric in getAvgResponseTimeMetrics() {
-            metrics.append(metric);
+            metrics.pushBack(metric);
         }
         for metric in getTotalResponseTimeMetrics() {
-            metrics.append(metric);
+            metrics.pushBack(metric);
         }
         for metric in getTotalMemoryUsedMetrics() {
-            metrics.append(metric);
+            metrics.pushBack(metric);
         }
         for metric in getSystemMetrics() {
-            metrics.append(metric);
+            metrics.pushBack(metric);
         }
         for metric in getServerMetrics() {
-            metrics.append(metric);
+            metrics.pushBack(metric);
         }
         for metric in getAllUserRequestMetrics() {
-            metrics.append(metric);
+            metrics.pushBack(metric);
         }
 
         return metrics.toArray();
@@ -373,7 +376,7 @@ module MetricsMsg {
         var metrics: list(owned Metric?);
          
         for item in serverMetrics.items(){
-            metrics.append(new Metric(name=item[0], category=MetricCategory.SERVER, 
+            metrics.pushBack(new Metric(name=item[0], category=MetricCategory.SERVER, 
                                           value=item[1]));
         }
 
@@ -384,12 +387,12 @@ module MetricsMsg {
         var metrics = new list(owned Metric?);
 
         for item in requestMetrics.items() {
-            metrics.append(new Metric(name=item[0], 
+            metrics.pushBack(new Metric(name=item[0], 
                                       category=MetricCategory.NUM_REQUESTS,
                                       value=item[1]));
         }
         
-        metrics.append(new Metric(name='total', 
+        metrics.pushBack(new Metric(name='total', 
                                   category=MetricCategory.NUM_REQUESTS, 
                                   value=requestMetrics.total()));
         return metrics;
@@ -399,12 +402,12 @@ module MetricsMsg {
         var metrics = new list(owned Metric?);
 
         for item in userMetrics.items() {
-            metrics.append(new Metric(name=item[0],
+            metrics.pushBack(new Metric(name=item[0],
                                       category=MetricCategory.NUM_REQUESTS,
                                       value=item[1]));
         }
 
-        metrics.append(new Metric(name='total',
+        metrics.pushBack(new Metric(name='total',
                                   category=MetricCategory.NUM_REQUESTS,
                                   value=requestMetrics.total()));
         return metrics;
@@ -415,7 +418,7 @@ module MetricsMsg {
         var metrics = new list(owned Metric?);
 
         for item in responseTimeMetrics.items() {
-            metrics.append(new Metric(name=item[0], 
+            metrics.pushBack(new Metric(name=item[0], 
                                       category=MetricCategory.RESPONSE_TIME,
                                       value=item[1]));
         }
@@ -427,7 +430,7 @@ module MetricsMsg {
         var metrics = new list(owned Metric?);
 
         for item in avgResponseTimeMetrics.items() {
-            metrics.append(new Metric(name=item[0], 
+            metrics.pushBack(new Metric(name=item[0], 
                                       category=MetricCategory.AVG_RESPONSE_TIME,
                                       value=item[1]));
         }
@@ -439,7 +442,7 @@ module MetricsMsg {
         var metrics = new list(owned Metric?);
 
         for item in totalResponseTimeMetrics.items() {
-            metrics.append(new Metric(name=item[0], 
+            metrics.pushBack(new Metric(name=item[0], 
                                       category=MetricCategory.TOTAL_RESPONSE_TIME,
                                       value=item[1]));
         }
@@ -451,7 +454,7 @@ module MetricsMsg {
         var metrics = new list(owned Metric?);
 
         for item in totalMemoryUsedMetrics.items() {
-            metrics.append(new Metric(name=item[0], 
+            metrics.pushBack(new Metric(name=item[0], 
                                       category=MetricCategory.TOTAL_MEMORY_USED,
                                       value=item[1]));
         }
@@ -474,15 +477,15 @@ module MetricsMsg {
             var total = getMaxLocaleMemory(loc);
             
             mLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
-                              'memoryUsed: %i physicalMemory: %i'.format(used,total));
+                              'memoryUsed: %i physicalMemory: %i'.doFormat(used,total));
 
-            metrics.append(new LocaleMetric(name="arkouda_memory_used_per_locale",
+            metrics.pushBack(new LocaleMetric(name="arkouda_memory_used_per_locale",
                              category=MetricCategory.SYSTEM,
                              locale_num=loc.id,
                              locale_name=loc.name,
                              locale_hostname = loc.hostname,
                              value=used):Metric);
-            metrics.append(new LocaleMetric(name="arkouda_percent_memory_used_per_locale",
+            metrics.pushBack(new LocaleMetric(name="arkouda_percent_memory_used_per_locale",
                              category=MetricCategory.SYSTEM,
                              locale_num=loc.id,
                              locale_name=loc.name,
@@ -505,7 +508,7 @@ module MetricsMsg {
                                       number_of_processing_units=loc.numPUs(),
                                       physical_memory=loc.physicalMemory():int,
                                       max_number_of_tasks=loc.maxTaskPar);   
-            localeInfos.append(info);                                                                                                                  
+            localeInfos.pushBack(info);                                                                                                                  
         }  
  
         var serverInfo = new ServerInfo(hostname=serverHostname, 
@@ -519,12 +522,12 @@ module MetricsMsg {
         var name: string;
         var category: MetricCategory;
         var scope: MetricScope;
-        var timestamp: datetime;
+        var timestamp: dateTime;
         var value: real;
         
         proc init(name: string, category: MetricCategory, 
                                 scope: MetricScope=MetricScope.GLOBAL, 
-                                timestamp: datetime=datetime.now(), 
+                                timestamp: dateTime=dateTime.now(), 
                                 value: real) {
             this.name = name;
             this.category = category;
@@ -540,7 +543,7 @@ module MetricsMsg {
 
         proc init(name: string, category: MetricCategory,
                                 scope: MetricScope=MetricScope.USER,
-                                timestamp: datetime=datetime.now(),
+                                timestamp: dateTime=dateTime.now(),
                                 value: real,
                                 user: string) {
 
@@ -562,7 +565,7 @@ module MetricsMsg {
         proc init(name: string, 
                   category: MetricCategory, 
                   scope: MetricScope=MetricScope.GLOBAL, 
-                  timestamp: datetime=datetime.now(), 
+                  timestamp: dateTime=dateTime.now(), 
                   value: real,
                   cmd: string,
                   dType: DType,
@@ -612,7 +615,7 @@ module MetricsMsg {
 
         proc init(name: string, category: MetricCategory, 
                                 scope: MetricScope=MetricScope.LOCALE, 
-                                timestamp: datetime=datetime.now(), 
+                                timestamp: dateTime=dateTime.now(), 
                                 value: real, 
                                 locale_num: int, 
                                 locale_name: string, 
@@ -629,33 +632,33 @@ module MetricsMsg {
         var category = msgArgs.getValueOf("category"):MetricCategory;
             
         mLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
-                            'category: %s'.format(category));
+                            'category: %s'.doFormat(category));
         var metrics: string;
 
         select category {
             when MetricCategory.ALL {
-                metrics = "%jt".format(exportAllMetrics());
+                metrics = formatJson(exportAllMetrics());
             }
             when MetricCategory.NUM_REQUESTS {
-                metrics = "%jt".format(getNumRequestMetrics());
+                metrics = formatJson(getNumRequestMetrics());
             }
             when MetricCategory.SERVER {
-                metrics = "%jt".format(getServerMetrics());
+                metrics = formatJson(getServerMetrics());
             }
             when MetricCategory.SYSTEM {
-                metrics = "%jt".format(getSystemMetrics());
+                metrics = formatJson(getSystemMetrics());
             }
             when MetricCategory.SERVER_INFO {
-                metrics = "%jt".format(getServerInfo());
+                metrics = formatJson(getServerInfo());
             }
             when MetricCategory.TOTAL_MEMORY_USED {
-                metrics = "%jt".format(getTotalMemoryUsedMetrics());            
+                metrics = formatJson(getTotalMemoryUsedMetrics());            
             }
             when MetricCategory.AVG_RESPONSE_TIME {
-                metrics = "%jt".format(getAvgResponseTimeMetrics());            
+                metrics = formatJson(getAvgResponseTimeMetrics());            
             }
             when MetricCategory.TOTAL_RESPONSE_TIME {
-                metrics = "%jt".format(getTotalResponseTimeMetrics());            
+                metrics = formatJson(getTotalResponseTimeMetrics());            
             }
             otherwise {
                 throw getErrorWithContext(getLineNumber(),getModuleName(),getRoutineName(),
@@ -664,7 +667,7 @@ module MetricsMsg {
         }
 
         mLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
-                            'metrics %s'.format(metrics));
+                            'metrics %s'.doFormat(metrics));
         return new MsgTuple(metrics, MsgType.NORMAL);        
     }
 

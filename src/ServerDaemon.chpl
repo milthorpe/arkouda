@@ -6,7 +6,6 @@ module ServerDaemon {
     use ServerErrors;
     use ArkoudaTimeCompat as Time;
     use ZMQ only;
-    use Memory;
     use FileSystem;
     use IO;
     use Logging;
@@ -26,8 +25,11 @@ module ServerDaemon {
     use MetricsMsg;
     use BigIntMsg;
     use NumPyDType;
+    use StatusMsg;
 
     use ArkoudaFileCompat;
+    use ArkoudaListCompat;
+    use ArkoudaIOCompat;
 
     enum ServerDaemonType {DEFAULT,INTEGRATION,METRICS}
 
@@ -51,7 +53,7 @@ module ServerDaemon {
         for rt in rawTypes {
             var daemonType: ServerDaemonType;
             daemonType = rt: ServerDaemonType;
-            types.append(daemonType);
+            types.pushBack(daemonType);
         }
         return types;
     }    
@@ -157,26 +159,26 @@ module ServerDaemon {
        
         proc init() {
             this.socket = this.context.socket(ZMQ.REP); 
-            try! this.socket.bind("tcp://*:%t".format(ServerPort));
+            try! this.socket.bind("tcp://*:%?".doFormat(ServerPort));
         }
         
         proc getConnectUrl(token: string) throws {
             if token.isEmpty() {
-                return "tcp://%s:%t".format(serverHostname, 
+                return "tcp://%s:%?".doFormat(serverHostname, 
                                             ServerPort);
             } else {
-                return "tcp://%s:%i?token=%s".format(serverHostname,
+                return "tcp://%s:%i?token=%s".doFormat(serverHostname,
                                                      ServerPort,
                                                      token);
             }
         }
 
         proc printServerSplashMessage(token: string, arkDirectory: string) throws {
-            var verMessage = "arkouda server version = %s".format(arkoudaVersion);
-            var chplVerMessage = "built with chapel version%s".format(chplVersion);
-            var dirMessage = ".arkouda directory %s".format(arkDirectory);
-            var memLimMessage =  "memory limit = %i".format(getMemLimit());
-            var memUsedMessage = "bytes of memory used = %i".format(getMemUsed());
+            var verMessage = "arkouda server version = %s".doFormat(arkoudaVersion);
+            var chplVerMessage = "built with chapel version%s".doFormat(chplVersion);
+            var dirMessage = ".arkouda directory %s".doFormat(arkDirectory);
+            var memLimMessage =  "memory limit = %i".doFormat(getMemLimit());
+            var memUsedMessage = "bytes of memory used = %i".doFormat(getMemUsed());
             var serverMessage: string;
     
             const buff = '                         ';
@@ -201,25 +203,25 @@ module ServerDaemon {
                 return buffer;
             }
 
-            serverMessage = "server listening on %s".format(this.connectUrl);
+            serverMessage = "server listening on %s".doFormat(this.connectUrl);
             serverMessage = adjustMsg(serverMessage);      
-            serverMessage = "%s %s %s".format(buff,serverMessage,buff);
+            serverMessage = "%s %s %s".doFormat(buff,serverMessage,buff);
         
             var vBuff = generateBuffer(serverMessage,verMessage);
             verMessage = adjustMsg(verMessage);
-            verMessage = "*%s %s %s*".format(vBuff,verMessage,vBuff);
+            verMessage = "*%s %s %s*".doFormat(vBuff,verMessage,vBuff);
             
             var cvBuff = generateBuffer(serverMessage,chplVerMessage);
             chplVerMessage = adjustMsg(chplVerMessage);
-            chplVerMessage = "*%s %s %s*".format(cvBuff,chplVerMessage,cvBuff);
+            chplVerMessage = "*%s %s %s*".doFormat(cvBuff,chplVerMessage,cvBuff);
 
             var mlBuff = generateBuffer(serverMessage,memLimMessage);
             memLimMessage = adjustMsg(memLimMessage);
-            memLimMessage = "*%s %s %s*".format(mlBuff,memLimMessage,mlBuff);
+            memLimMessage = "*%s %s %s*".doFormat(mlBuff,memLimMessage,mlBuff);
 
             var muBuff = generateBuffer(serverMessage,memUsedMessage);
             memUsedMessage = adjustMsg(memUsedMessage);
-            memUsedMessage = "*%s %s %s*".format(muBuff,memUsedMessage,muBuff);
+            memUsedMessage = "*%s %s %s*".doFormat(muBuff,memUsedMessage,muBuff);
         
             var blankBuffer: string;
             var counter = 0;
@@ -229,7 +231,7 @@ module ServerDaemon {
                 counter+=1;
             }
 
-            var blankLine = '*%s*'.format(blankBuffer);
+            var blankLine = '*%s*'.doFormat(blankBuffer);
         
             var tag = '*';
             counter = 0;
@@ -244,7 +246,7 @@ module ServerDaemon {
             writeln(tag);
             writeln(tag);
             writeln(blankLine);
-            writeln('*%s*'.format(serverMessage));
+            writeln('*%s*'.doFormat(serverMessage));
             writeln(verMessage);
             writeln(chplVerMessage);
 
@@ -268,10 +270,10 @@ module ServerDaemon {
             use IO;
             if !serverConnectionInfo.isEmpty() {
                 sdLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
-                               'writing serverConnectionInfo to %t'.format(serverConnectionInfo));
+                               'writing serverConnectionInfo to %?'.doFormat(serverConnectionInfo));
                 try! {
                     var w = open(serverConnectionInfo, ioMode.cw).writer();
-                    w.writef("%s %t %s\n",serverHostname,ServerPort,this.connectUrl);
+                    w.writef("%s %i %s\n",serverHostname,ServerPort,this.connectUrl);
                 }
             }
         }
@@ -287,10 +289,10 @@ module ServerDaemon {
                 }
             } catch fnfe : FileNotFoundError {
                sdLogger.error(getModuleName(),getRoutineName(),getLineNumber(),
-                              "The serverConnectionInfo file was not found %s".format(fnfe.message()));
+                              "The serverConnectionInfo file was not found %s".doFormat(fnfe.message()));
             } catch e : Error {
                sdLogger.error(getModuleName(),getRoutineName(),getLineNumber(),
-                              "Error in deleting serverConnectionInfo file %s".format(e.message()));    
+                              "Error in deleting serverConnectionInfo file %s".doFormat(e.message()));    
             }
         }
         
@@ -307,7 +309,7 @@ module ServerDaemon {
                                                         "repMsg: <binary-data>");
                 } else {
                  sdLogger.info(getModuleName(),getRoutineName(),getLineNumber(), 
-                                                        "repMsg: %s".format(repMsg));
+                                                        "repMsg: %s".doFormat(repMsg));
                 }
             }
             this.socket.send(repMsg);
@@ -324,7 +326,7 @@ module ServerDaemon {
                 throw new owned ErrorWithMsg("Error: access to arkouda requires a token");
             }
             else if serverToken != token {
-                throw new owned ErrorWithMsg("Error: token %s does not match server token, check with server owner".format(token));
+                throw new owned ErrorWithMsg("Error: token %s does not match server token, check with server owner".doFormat(token));
             }
         }
 
@@ -337,7 +339,7 @@ module ServerDaemon {
                 writeUsedModules();
             super.requestShutdown(user);
             this.repCount += 1;
-            this.socket.send(serialize(msg="shutdown server (%i req)".format(repCount), 
+            this.socket.send(serialize(msg="shutdown server (%i req)".doFormat(repCount), 
                          msgType=MsgType.NORMAL,msgFormat=MsgFormat.STRING, user=user));
         }
 
@@ -359,6 +361,7 @@ module ServerDaemon {
             registerFunction("getconfig", getconfigMsg);
             registerFunction("getmemused", getmemusedMsg);
             registerFunction("getavailmem", getmemavailMsg);
+            registerFunction("getmemstatus", getMemoryStatusMsg);
             registerFunction("getCmdMap", getCommandMapMsg);
             registerFunction("clear", clearMsg);
             registerFunction("lsany", lsAnyMsg);
@@ -377,7 +380,7 @@ module ServerDaemon {
         }
         
         proc initArkoudaDirectory() throws {
-            var arkDirectory = '%s%s%s'.format(here.cwd(), pathSep,'.arkouda');
+            var arkDirectory = '%s%s%s'.doFormat(here.cwd(), pathSep,'.arkouda');
             initDirectory(arkDirectory);
             return arkDirectory;
         }
@@ -423,7 +426,7 @@ module ServerDaemon {
             sdLogger.debug(getModuleName(),
                           getRoutineName(),
                           getLineNumber(),
-                          "Set Response Time for %s: %t".format(cmd,elapsedTime));
+                          "Set Response Time for %s: %?".doFormat(cmd,elapsedTime));
             
             // Add response time to the avg response time for the cmd
             avgResponseTimeMetrics.add(cmd,elapsedTime:real);
@@ -437,17 +440,17 @@ module ServerDaemon {
             sdLogger.debug(getModuleName(),
                           getRoutineName(),
                           getLineNumber(),
-                          "Added Avg Response Time for cmd %s: %t".format(cmd,elapsedTime));
+                          "Added Avg Response Time for cmd %s: %?".doFormat(cmd,elapsedTime));
                           
             sdLogger.debug(getModuleName(),
                           getRoutineName(),
                           getLineNumber(),
-                          "Total Response Time for cmd %s: %t".format(cmd,totalResponseTimeMetrics.get(cmd)));
+                          "Total Response Time for cmd %s: %?".doFormat(cmd,totalResponseTimeMetrics.get(cmd)));
                           
             sdLogger.debug(getModuleName(),
                           getRoutineName(),
                           getLineNumber(),
-                          "Total Memory Used for cmd %s: %t GB".format(cmd,totalMemoryUsedMetrics.get(cmd)));    
+                          "Total Memory Used for cmd %s: %? GB".doFormat(cmd,totalMemoryUsedMetrics.get(cmd)));    
 
             var apo = getArrayParameterObj(args);
 
@@ -472,7 +475,7 @@ module ServerDaemon {
                 
                 // Log to the console or arkouda.log file
                 sdLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
-                              "%jt".format(metric)); 
+                              formatJson(metric)); 
             }
             
         }
@@ -482,11 +485,11 @@ module ServerDaemon {
             this.arkDirectory = this.initArkoudaDirectory();
 
             if authenticate {
-                this.serverToken = getArkoudaToken('%s%s%s'.format(this.arkDirectory, pathSep, 'tokens.txt'));
+                this.serverToken = getArkoudaToken('%s%s%s'.doFormat(this.arkDirectory, pathSep, 'tokens.txt'));
             }
 
             sdLogger.debug(getModuleName(), getRoutineName(), getLineNumber(),
-                               "initialized the .arkouda directory %s".format(this.arkDirectory));
+                               "initialized the .arkouda directory %s".doFormat(this.arkDirectory));
     
             this.connectUrl = this.getConnectUrl(this.serverToken);
             this.createServerConnectionInfo();
@@ -530,7 +533,7 @@ module ServerDaemon {
                         request = rawRequest.decode();
                     } catch e: DecodeError {
                         sdLogger.error(getModuleName(),getRoutineName(),getLineNumber(),
-                           "illegal byte sequence in command: %t".format(
+                           "illegal byte sequence in command: %?".doFormat(
                                           rawRequest.decode(decodePolicy.replace)));
                         sendRepMsg(serialize(msg=unknownError(e.message()),msgType=MsgType.ERROR,
                                                  msgFormat=MsgFormat.STRING, user="Unknown"));
@@ -549,7 +552,7 @@ module ServerDaemon {
                     }
                     catch e {
                         sdLogger.error(getModuleName(),getRoutineName(),getLineNumber(),
-                               "Argument List size is not an integer. %s cannot be cast".format(msg.size));
+                               "Argument List size is not an integer. %s cannot be cast".doFormat(msg.size));
                         sendRepMsg(serialize(msg=unknownError(e.message()),msgType=MsgType.ERROR,
                                                          msgFormat=MsgFormat.STRING, user="Unknown"));
                     }
@@ -565,7 +568,7 @@ module ServerDaemon {
                     sdLogger.info(getModuleName(),
                                   getRoutineName(),
                                   getLineNumber(),
-                                  "MessageArgs: %t".format(msgArgs));                    
+                                  "MessageArgs: %?".doFormat(msgArgs));                    
 
                     /*
                      * If authentication is enabled with the --authenticate flag, authenticate
@@ -580,10 +583,10 @@ module ServerDaemon {
                         try {
                             if (cmd != "array") {
                                 sdLogger.info(getModuleName(), getRoutineName(), getLineNumber(),
-                                                     ">>> %t %t".format(cmd, args));
+                                                     ">>> %? %?".doFormat(cmd, args));
                             } else {
                                 sdLogger.info(getModuleName(), getRoutineName(), getLineNumber(),
-                                                     ">>> %s [binary data]".format(cmd));
+                                                     ">>> %s [binary data]".doFormat(cmd));
                             }
                        } catch {
                            // No action on error
@@ -594,7 +597,7 @@ module ServerDaemon {
                     requestShutdown(user=user);
                     if (trace) {
                         sdLogger.info(getModuleName(),getRoutineName(),getLineNumber(),
-                                        "<<< shutdown initiated by %s took %.17r sec".format(user, 
+                                        "<<< shutdown initiated by %s took %.17r sec".doFormat(user, 
                                                 timeSinceEpoch().totalSeconds() - s0));
                     }
                 }
@@ -603,6 +606,13 @@ module ServerDaemon {
                 if cmd == "shutdown" {
                     sendShutdownRequest(user=user);
                     break;
+                }
+
+                /*
+                 * If logCommands is true, log incoming request to the .arkouda/commands.log file
+                 */
+                if logCommands {
+                    appendFile(filePath="%s/commands.log".doFormat(this.arkDirectory), formatJson(msg));
                 }
 
                 /*
@@ -620,10 +630,10 @@ module ServerDaemon {
                     when "array"   { repTuple = arrayMsg(cmd, msgArgs, payload, st); }
                     when "connect" {
                         if authenticate {
-                            repTuple = new MsgTuple("connected to arkouda server tcp://*:%i as user %s with token %s".format(
+                            repTuple = new MsgTuple("connected to arkouda server tcp://*:%i as user %s with token %s".doFormat(
                                                             ServerPort,user,token), MsgType.NORMAL);
                         } else {
-                            repTuple = new MsgTuple("connected to arkouda server tcp://*:%i".format(ServerPort), MsgType.NORMAL);
+                            repTuple = new MsgTuple("connected to arkouda server tcp://*:%i".doFormat(ServerPort), MsgType.NORMAL);
                         }
                     }
                     when "disconnect" {
@@ -632,7 +642,7 @@ module ServerDaemon {
                             break;
                         }
                         
-                        repTuple = new MsgTuple("disconnected from arkouda server tcp://*:%i".format(ServerPort), MsgType.NORMAL);
+                        repTuple = new MsgTuple("disconnected from arkouda server tcp://*:%i".doFormat(ServerPort), MsgType.NORMAL);
                     }
                     when "noop" {
                         repTuple = new MsgTuple("noop", MsgType.NORMAL);
@@ -651,7 +661,7 @@ module ServerDaemon {
                             var binaryRepMsg = commandMapBinary[cmd](cmd, msgArgs, st);
                             sendRepMsg(binaryRepMsg);
                         } else {
-                          repTuple = new MsgTuple("Unrecognized command: %s".format(cmd), MsgType.ERROR);
+                          repTuple = new MsgTuple("Unrecognized command: %s".doFormat(cmd), MsgType.ERROR);
                           sdLogger.error(getModuleName(),getRoutineName(),getLineNumber(),repTuple.msg);
                         }
                     }
@@ -673,14 +683,14 @@ module ServerDaemon {
                  */
                 if trace {
                     sdLogger.info(getModuleName(),getRoutineName(),getLineNumber(), 
-                                              "<<< %s took %.17r sec".format(cmd, elapsedTime));
+                                              "<<< %s took %.17r sec".doFormat(cmd, elapsedTime));
                 }
                 if (trace && memTrack) {
                     var memUsed = getMemUsed():uint * numLocales:uint;
                     var memLimit = (getMemLimit():real * numLocales:uint):int;
                     var pctMemUsed = ((memUsed:real/memLimit)*100):int;
                     sdLogger.info(getModuleName(),getRoutineName(),getLineNumber(),
-                        "bytes of memory %t used after %s command is %t%% pct of max memory %t".format(memUsed,
+                        "bytes of memory %? used after %s command is %?%% pct of max memory %?".doFormat(memUsed,
                                                                                                        cmd,
                                                                                                        pctMemUsed,
                                                                                                        memLimit));
@@ -694,7 +704,7 @@ module ServerDaemon {
                                                         user=user));
                 if trace {
                     sdLogger.error(getModuleName(),getRoutineName(),getLineNumber(),
-                        "<<< %s resulted in error %s in  %.17r sec".format(cmd, e.msg, timeSinceEpoch().totalSeconds() - s0));
+                        "<<< %s resulted in error %s in  %.17r sec".doFormat(cmd, e.msg, timeSinceEpoch().totalSeconds() - s0));
                 }
             } catch (e: Error) {
                 // Generate a ReplyMsg of type ERROR and serialize to a JSON-formatted string
@@ -708,7 +718,7 @@ module ServerDaemon {
                                                          msgFormat=MsgFormat.STRING, user=user));
                 if trace {
                     sdLogger.error(getModuleName(), getRoutineName(), getLineNumber(), 
-                    "<<< %s resulted in error: %s in %.17r sec".format(cmd, e.message(),
+                    "<<< %s resulted in error: %s in %.17r sec".doFormat(cmd, e.message(),
                                                                                  timeSinceEpoch().totalSeconds() - s0));
                 }
             }
@@ -719,7 +729,7 @@ module ServerDaemon {
         deleteServerConnectionInfo();
 
         sdLogger.info(getModuleName(), getRoutineName(), getLineNumber(),
-            "requests = %i responseCount = %i elapsed sec = %i".format(reqCount,
+            "requests = %i responseCount = %i elapsed sec = %i".doFormat(reqCount,
                                                                        repCount,
                                                                        elapsed));
         this.shutdown(); 
@@ -739,18 +749,18 @@ module ServerDaemon {
             this.socket = this.context.socket(ZMQ.REP); 
             this.port = try! getEnv('METRICS_SERVER_PORT','5556'):int;
 
-            try! this.socket.bind("tcp://*:%t".format(this.port));
+            try! this.socket.bind("tcp://*:%?".doFormat(this.port));
             try! sdLogger.debug(getModuleName(), 
                                 getRoutineName(), 
                                 getLineNumber(),
-                                "initialized and listening in port %i".format(
+                                "initialized and listening in port %i".doFormat(
                                 this.port));
         }
 
         override proc run() throws {
             while !this.shutdownDaemon {
                 sdLogger.debug(getModuleName(), getRoutineName(), getLineNumber(),
-                               "awaiting message on port %i".format(this.port));
+                               "awaiting message on port %i".doFormat(this.port));
                 var req = this.socket.recv(bytes).decode();
 
                 var msg: RequestMsg = extractRequest(req);
@@ -760,7 +770,7 @@ module ServerDaemon {
                 var format = msg.format;
                 var args   = msg.args;
                 var size   = msg.size: int;
-                
+
                 var msgArgs: owned MessageArgs;
                 if size > 0 {
                     msgArgs = parseMessageArgs(args, size);
@@ -776,9 +786,9 @@ module ServerDaemon {
                     when "connect" {
                         if authenticate {
                             repTuple = new MsgTuple("connected to arkouda metrics server tcp://*:%i as user " +
-                                                "%s with token %s".format(this.port,user,token), MsgType.NORMAL);
+                                                "%s with token %s".doFormat(this.port,user,token), MsgType.NORMAL);
                         } else {
-                            repTuple = new MsgTuple("connected to arkouda metrics server tcp://*:%i".format(this.port), 
+                            repTuple = new MsgTuple("connected to arkouda metrics server tcp://*:%i".doFormat(this.port), 
                                                                                     MsgType.NORMAL);
                         }
                     }
@@ -842,7 +852,7 @@ module ServerDaemon {
             }
             otherwise {
                 throw getErrorWithContext(
-                      msg="Unsupported ServerDaemonType: %t".format(daemonType),
+                      msg="Unsupported ServerDaemonType: %?".doFormat(daemonType),
                       lineNumber=getLineNumber(),
                       routineName=getRoutineName(),
                       moduleName=getModuleName(),
@@ -855,7 +865,7 @@ module ServerDaemon {
         var daemons = new list(shared ArkoudaServerDaemon);
 
         for (daemonType,i) in zip(serverDaemonTypes,0..serverDaemonTypes.size-1) {
-            daemons.append(getServerDaemon(daemonType));
+            daemons.pushBack(getServerDaemon(daemonType));
         }
         return daemons;
     }

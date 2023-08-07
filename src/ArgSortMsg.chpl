@@ -160,7 +160,7 @@ module ArgSortMsg
               deltaIV = argsortDefault(newa);
           }
           otherwise { throw getErrorWithContext(
-                                msg="Unsupported DataType: %t".format(dtype2str(g.dtype)),
+                                msg="Unsupported DataType: %?".doFormat(dtype2str(g.dtype)),
                                 lineNumber=getLineNumber(),
                                 routineName=getRoutineName(),
                                 moduleName=getModuleName(),
@@ -220,7 +220,7 @@ module ArgSortMsg
           algorithm = algoName: SortingAlgorithm;
         } catch {
           throw getErrorWithContext(
-                                    msg="Unrecognized sorting algorithm: %s".format(algoName),
+                                    msg="Unrecognized sorting algorithm: %s".doFormat(algoName),
                                     lineNumber=getLineNumber(),
                                     routineName=getRoutineName(),
                                     moduleName=getModuleName(),
@@ -232,7 +232,7 @@ module ArgSortMsg
       var arrNames = msgArgs.get("arr_names").getList(n);
       var arrTypes = msgArgs.get("arr_types").getList(n);
       asLogger.debug(getModuleName(),getRoutineName(),getLineNumber(), 
-                                   "number of arrays: %i arrNames: %t, arrTypes: %t".format(n,arrNames, arrTypes));
+                                   "number of arrays: %i arrNames: %?, arrTypes: %?".doFormat(n,arrNames, arrTypes));
       var (arrSize, hasStr, names, types) = validateArraysSameLength(n, arrNames, arrTypes, st);
 
       // If there were no string arrays, merge the arrays into a single array and sort
@@ -285,7 +285,7 @@ module ArgSortMsg
       // Starting with the last array, incrementally permute the IV by sorting each array
       for (i, j) in zip(names.domain.low..names.domain.high by -1,
                         types.domain.low..types.domain.high by -1) {
-        if (types[j] == "str") {
+        if (types[j].toUpper(): ObjType == ObjType.STRINGS) {
           var strings = getSegString(names[i], st);
           iv.a = incrementalArgSort(strings, iv.a);
         } else {
@@ -317,7 +317,7 @@ module ArgSortMsg
         }
         otherwise {
           throw getErrorWithContext(
-                                    msg="Unrecognized sorting algorithm: %s".format(algorithm:string),
+                                    msg="Unrecognized sorting algorithm: %s".doFormat(algorithm:string),
                                     lineNumber=getLineNumber(),
                                     routineName=getRoutineName(),
                                     moduleName=getModuleName(),
@@ -326,7 +326,7 @@ module ArgSortMsg
         }
       }
       try! asLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
-                             "argsort time = %i".format(Time.timeSinceEpoch().totalSeconds() - t1));
+                             "argsort time = %i".doFormat(Time.timeSinceEpoch().totalSeconds() - t1));
       return iv;
     }
     
@@ -342,7 +342,7 @@ module ArgSortMsg
             algorithm = algoName: SortingAlgorithm;
           } catch {
             throw getErrorWithContext(
-                                    msg="Unrecognized sorting algorithm: %s".format(algoName),
+                                    msg="Unrecognized sorting algorithm: %s".doFormat(algoName),
                                     lineNumber=getLineNumber(),
                                     routineName=getRoutineName(),
                                     moduleName=getModuleName(),
@@ -353,11 +353,11 @@ module ArgSortMsg
         // get next symbol name
         var ivname = st.nextName();
         asLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
-                              "cmd: %s name: %s ivname: %s".format(cmd, name, ivname));
+                              "cmd: %s name: %s ivname: %s".doFormat(cmd, name, ivname));
 
-        var objtype = msgArgs.getValueOf("objType");
+        var objtype = msgArgs.getValueOf("objType").toUpper(): ObjType;
         select objtype {
-          when "pdarray" {
+          when ObjType.PDARRAY {
             var gEnt: borrowed GenSymEntry = getGenericTypedArrayEntry(name, st);
             // check and throw if over memory limit
             overMemLimit(radixSortLSD_memEst(gEnt.size, gEnt.itemsize));
@@ -385,7 +385,7 @@ module ArgSortMsg
                 }
             }
           }
-          when "str" {
+          when ObjType.STRINGS {
             var strings = getSegString(name, st);
             // check and throw if over memory limit
             overMemLimit((8 * strings.size * 8)
@@ -394,7 +394,7 @@ module ArgSortMsg
             st.addEntry(ivname, new shared SymEntry(iv));
           }
           otherwise {
-              var errorMsg = notImplementedError(pn, objtype);
+              var errorMsg = notImplementedError(pn, objtype: string);
               asLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);                    
               return new MsgTuple(errorMsg, MsgType.ERROR);
           }

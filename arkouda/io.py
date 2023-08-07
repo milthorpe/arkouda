@@ -7,14 +7,15 @@ from warnings import warn
 import pandas as pd  # type: ignore
 from typeguard import typechecked
 
-import arkouda.array_view
+from arkouda.array_view import ArrayView
 from arkouda.categorical import Categorical
 from arkouda.client import generic_msg
+from arkouda.dataframe import DataFrame
+from arkouda.groupbyclass import GroupBy
 from arkouda.pdarrayclass import create_pdarray, pdarray
-from arkouda.pdarraycreation import array
+from arkouda.pdarraycreation import arange, array
 from arkouda.segarray import SegArray
 from arkouda.strings import Strings
-from arkouda.array_view import ArrayView
 
 __all__ = [
     "get_filetype",
@@ -37,6 +38,8 @@ __all__ = [
     "load",
     "load_all",
     "update_hdf",
+    "snapshot",
+    "restore",
 ]
 
 ARKOUDA_HDF5_FILE_METADATA_GROUP = "_arkouda_metadata"
@@ -81,7 +84,7 @@ def get_filetype(filenames: Union[str, List[str]]) -> str:
     return cast(str, generic_msg(cmd="getfiletype", args={"filename": fname}))
 
 
-def ls(filename: str, col_delim: str = ",") -> List[str]:
+def ls(filename: str, col_delim: str = ",", read_nested: bool = True) -> List[str]:
     """
     This function calls the h5ls utility on a HDF5 file visible to the
     arkouda server or calls a function that imitates the result of h5ls
@@ -93,6 +96,10 @@ def ls(filename: str, col_delim: str = ",") -> List[str]:
         The name of the file to pass to the server
     col_delim : str
         The delimiter used to separate columns if the file is a csv
+    read_nested: bool
+        Default True, when True, SegArray objects will be read from the file. When False,
+        SegArray (or other nested Parquet columns) will be ignored.
+        Only used for Parquet files.
 
     Returns
     -------
@@ -125,7 +132,7 @@ def ls(filename: str, col_delim: str = ",") -> List[str]:
             str,
             generic_msg(
                 cmd=cmd,
-                args={"filename": filename, "col_delim": col_delim},
+                args={"filename": filename, "col_delim": col_delim, "read_nested": read_nested},
             ),
         )
     )
@@ -143,7 +150,7 @@ def get_null_indices(
         Either a list of filenames or shell expression
     datasets : list or str or None
         (List of) name(s) of dataset(s) to read. Each dataset must be a string
-        column. There is no default value for this funciton, the datasets to be
+        column. There is no default value for this function, the datasets to be
         read must be specified.
 
     Returns
@@ -236,7 +243,10 @@ def _mode_str_to_int(mode: str) -> int:
 
 
 def get_datasets(
-    filenames: Union[str, List[str]], allow_errors: bool = False, column_delim: str = ","
+    filenames: Union[str, List[str]],
+    allow_errors: bool = False,
+    column_delim: str = ",",
+    read_nested: bool = True,
 ) -> List[str]:
     """
     Get the names of the datasets in the provide files
@@ -250,6 +260,11 @@ def get_datasets(
         Whether or not to allow errors while accessing datasets
     column_delim : str
         Column delimiter to be used if dataset is CSV. Otherwise, unused.
+    read_nested: bool
+        Default True, when True, SegArray objects will be read from the file. When False,
+        SegArray (or other nested Parquet columns) will be ignored.
+        Only used for Parquet Files.
+
 
     Returns
     -------
@@ -276,7 +291,7 @@ def get_datasets(
         filenames = [filenames]
     for fname in filenames:
         try:
-            datasets = ls(fname, col_delim=column_delim)
+            datasets = ls(fname, col_delim=column_delim, read_nested=read_nested)
             if datasets:
                 break
         except RuntimeError:
@@ -354,6 +369,7 @@ def _prep_datasets(
     filenames: Union[str, List[str]],
     datasets: Optional[Union[str, List[str]]] = None,
     allow_errors: bool = False,
+    read_nested: bool = True,
 ) -> List[str]:
     """
     Prepare a list of datasets to be read
@@ -368,6 +384,10 @@ def _prep_datasets(
     allow_errors: bool
         Default: False
         Whether or not to allow errors during access operations
+    read_nested: bool
+        Default True, when True, SegArray objects will be read from the file. When False,
+        SegArray (or other nested Parquet columns) will be ignored.
+        Only used for Parquet Files
 
     Returns
     -------
@@ -380,14 +400,15 @@ def _prep_datasets(
     """
     if datasets is None:
         # get datasets. We know they exist because we pulled from the file
-        datasets = get_datasets(filenames, allow_errors)
+        datasets = get_datasets(filenames, allow_errors, read_nested=read_nested)
     else:
         if isinstance(datasets, str):
             # TODO - revisit this and enable checks that support things like "strings/values"
             # old logic did not check existence for single string dataset.
             return [datasets]
         # ensure dataset(s) exist
-        nonexistent = set(datasets) - set(get_datasets(filenames, allow_errors))
+        # read_nested always true because when user supplies datasets, it is ignored
+        nonexistent = set(datasets) - set(get_datasets(filenames, allow_errors, read_nested=True))
         if len(nonexistent) > 0:
             raise ValueError(f"Dataset(s) not found: {nonexistent}")
     return datasets
@@ -415,7 +436,9 @@ def _parse_errors(rep_msg, allow_errors: bool = False):
         )
 
 
-def _parse_obj(obj: Dict) -> Union[Strings, pdarray, arkouda.array_view.ArrayView, SegArray]:
+def _parse_obj(
+    obj: Dict,
+) -> Union[Strings, pdarray, ArrayView, SegArray, Categorical, DataFrame]:
     """
     Helper function to create an Arkouda object from read response
 
@@ -433,35 +456,60 @@ def _parse_obj(obj: Dict) -> Union[Strings, pdarray, arkouda.array_view.ArrayVie
     TypeError
         - If return object is an unsupported type
     """
-    if "seg_string" == obj["arkouda_type"]:
+    if Strings.objType.upper() == obj["arkouda_type"]:
         return Strings.from_return_msg(obj["created"])
-    elif "seg_array" == obj["arkouda_type"]:
+    elif SegArray.objType.upper() == obj["arkouda_type"]:
         return SegArray.from_return_msg(obj["created"])
-    elif "pdarray" == obj["arkouda_type"]:
+    elif pdarray.objType.upper() == obj["arkouda_type"]:
         return create_pdarray(obj["created"])
-    elif "ArrayView" == obj["arkouda_type"]:
+    elif ArrayView.objType.upper() == obj["arkouda_type"]:
         components = obj["created"].split("+")
         flat = create_pdarray(components[0])
         shape = create_pdarray(components[1])
-        return arkouda.array_view.ArrayView(flat, shape)
+        return ArrayView(flat, shape)
+    elif Categorical.objType.upper() == obj["arkouda_type"]:
+        return Categorical.from_return_msg(obj["created"])
+    elif GroupBy.objType.upper() == obj["arkouda_type"]:
+        return GroupBy.from_return_msg(obj["created"])
+    elif DataFrame.objType.upper() == obj["arkouda_type"]:
+        return DataFrame.from_return_msg(obj["created"])
     else:
         raise TypeError(f"Unknown arkouda type:{obj['arkouda_type']}")
 
 
-def _dict_recombine_segarrays(df_dict):
+def _dict_recombine_segarrays_categoricals(df_dict):
     # this assumes segments will always have corresponding values.
     # This should happen due to save config
     seg_cols = ["_".join(col.split("_")[:-1]) for col in df_dict.keys() if col.endswith("_segments")]
-    df_dict_keys = [
-        "_".join(col.split("_")[:-1]) if col.endswith("_segments") or col.endswith("_values") else col
+    cat_cols = [".".join(col.split(".")[:-1]) for col in df_dict.keys() if col.endswith(".categories")]
+    df_dict_keys = {
+        "_".join(col.split("_")[:-1])
+        if col.endswith("_segments") or col.endswith("_values")
+        else ".".join(col.split(".")[:-1])
+        if col.endswith("._akNAcode")
+        or col.endswith(".categories")
+        or col.endswith(".codes")
+        or col.endswith(".permutation")
+        or col.endswith(".segments")
+        else col
         for col in df_dict.keys()
-    ]
+    }
 
     # update dict to contain segarrays where applicable if any exist
-    if len(seg_cols) > 0:
+    if len(seg_cols) > 0 or len(cat_cols) > 0:
         df_dict = {
-            col: SegArray.from_parts(df_dict[col + "_segments"], df_dict[col + "_values"])
+            col: SegArray(df_dict[col + "_segments"], df_dict[col + "_values"])
             if col in seg_cols
+            else Categorical.from_codes(
+                df_dict[f"{col}.codes"],
+                df_dict[f"{col}.categories"],
+                permutation=df_dict[f"{col}.permutation"]
+                if f"{col}.permutation" in df_dict_keys
+                else None,
+                segments=df_dict[f"{col}.segments"] if f"{col}.segments" in df_dict_keys else None,
+                _akNAcode=df_dict[f"{col}._akNAcode"],
+            )
+            if col in cat_cols
             else df_dict[col]
             for col in df_dict_keys
         }
@@ -474,8 +522,10 @@ def _build_objects(
     Strings,
     pdarray,
     SegArray,
-    arkouda.array_view.ArrayView,
-    Mapping[str, Union[Strings, pdarray, SegArray, arkouda.array_view.ArrayView]],
+    ArrayView,
+    Categorical,
+    DataFrame,
+    Mapping[str, Union[Strings, pdarray, SegArray, ArrayView, Categorical, DataFrame]],
 ]:
     """
     Helper function to create the Arkouda objects from a read operation
@@ -500,7 +550,9 @@ def _build_objects(
     # 2. We have a single pdarray
     # 3. We have a single strings object
     if len(items) > 1:  # DataSets condition
-        ds_dict = _dict_recombine_segarrays({item["dataset_name"]: _parse_obj(item) for item in items})
+        ds_dict = _dict_recombine_segarrays_categoricals(
+            {item["dataset_name"]: _parse_obj(item) for item in items}
+        )
         # if dict only has 1 element when it had >1 before, the element must be a segarray
         return next(iter(ds_dict.values())) if len(ds_dict.keys()) == 1 else ds_dict
     elif len(items) == 1:
@@ -521,8 +573,10 @@ def read_hdf(
     pdarray,
     Strings,
     SegArray,
-    arkouda.array_view.ArrayView,
-    Mapping[str, Union[pdarray, Strings, SegArray, arkouda.array_view.ArrayView]],
+    ArrayView,
+    Categorical,
+    DataFrame,
+    Mapping[str, Union[pdarray, Strings, SegArray, ArrayView, Categorical, DataFrame]],
 ]:
     """
     Read Arkouda objects from HDF5 file/s
@@ -644,12 +698,15 @@ def read_parquet(
     strict_types: bool = True,
     allow_errors: bool = False,
     tag_data: bool = False,
+    read_nested: bool = True,
 ) -> Union[
     pdarray,
     Strings,
     SegArray,
-    arkouda.array_view.ArrayView,
-    Mapping[str, Union[pdarray, Strings, SegArray, arkouda.array_view.ArrayView]],
+    ArrayView,
+    Categorical,
+    DataFrame,
+    Mapping[str, Union[pdarray, Strings, SegArray, ArrayView, Categorical, DataFrame]],
 ]:
     """
     Read Arkouda objects from Parquet file/s
@@ -676,6 +733,10 @@ def read_parquet(
     tagData: bool
         Default False, if True tag the data with the code associated with the filename
         that the data was pulled from.
+    read_nested: bool
+        Default True, when True, SegArray objects will be read from the file. When False,
+        SegArray (or other nested Parquet columns) will be ignored.
+        If datasets is not None, this will be ignored.
 
     Returns
     -------
@@ -727,7 +788,7 @@ def read_parquet(
     """
     if isinstance(filenames, str):
         filenames = [filenames]
-    datasets = _prep_datasets(filenames, datasets)
+    datasets = _prep_datasets(filenames, datasets, read_nested=read_nested)
 
     if iterative:
         if tag_data:
@@ -739,6 +800,7 @@ def read_parquet(
                 strict_types=strict_types,
                 allow_errors=allow_errors,
                 tag_data=tag_data,
+                read_nested=read_nested,
             )[dset]
             for dset in datasets
         }
@@ -769,8 +831,10 @@ def read_csv(
     pdarray,
     Strings,
     SegArray,
-    arkouda.array_view.ArrayView,
-    Mapping[str, Union[pdarray, Strings, SegArray, arkouda.array_view.ArrayView]],
+    ArrayView,
+    Categorical,
+    DataFrame,
+    Mapping[str, Union[pdarray, Strings, SegArray, ArrayView, Categorical, DataFrame]],
 ]:
     """
     Read CSV file(s) into Arkouda objects. If more than one dataset is found, the objects
@@ -1021,7 +1085,9 @@ def _bulk_write_prep(
     if len(data) == 0:
         raise RuntimeError("No data was found.")
 
-    return datasetNames, data
+    col_objtypes = [c.objType for c in data]
+
+    return datasetNames, data, col_objtypes
 
 
 def to_parquet(
@@ -1102,10 +1168,10 @@ def to_parquet(
             DeprecationWarning,
         )
 
-    datasetNames, pdarrays = _bulk_write_prep(columns, names)
+    datasetNames, data, col_objtypes = _bulk_write_prep(columns, names)
     # append or single column use the old logic
-    if mode.lower() == "append" or len(pdarrays) == 1:
-        for arr, name in zip(pdarrays, cast(List[str], datasetNames)):
+    if mode.lower() == "append" or len(data) == 1:
+        for arr, name in zip(data, cast(List[str], datasetNames)):
             arr.to_parquet(prefix_path=prefix_path, dataset=name, mode=mode, compression=compression)
     else:
         print(
@@ -1114,10 +1180,11 @@ def to_parquet(
                 generic_msg(
                     cmd="toParquet_multi",
                     args={
-                        "columns": pdarrays,
+                        "columns": data,
                         "col_names": datasetNames,
+                        "col_objtypes": col_objtypes,
                         "filename": prefix_path,
-                        "num_cols": len(pdarrays),
+                        "num_cols": len(data),
                         "compression": compression,
                     },
                 ),
@@ -1194,7 +1261,7 @@ def to_hdf(
     if mode.lower() not in ["append", "truncate"]:
         raise ValueError("Allowed modes are 'truncate' and 'append'")
 
-    datasetNames, pdarrays = _bulk_write_prep(columns, names)
+    datasetNames, pdarrays, _ = _bulk_write_prep(columns, names)
 
     for arr, name in zip(pdarrays, cast(List[str], datasetNames)):
         arr.to_hdf(
@@ -1280,7 +1347,7 @@ def update_hdf(
     - This workflow is slightly different from `to_hdf` to prevent reading and
       creating a copy of the file for each dataset
     """
-    datasetNames, pdarrays = _bulk_write_prep(columns, names)
+    datasetNames, pdarrays, _ = _bulk_write_prep(columns, names)
 
     for arr, name in zip(pdarrays, cast(List[str], datasetNames)):
         # overwrite the data without repacking. Repack done once at end if set
@@ -1348,7 +1415,7 @@ def to_csv(
     - Unlike other file formats, CSV files store Strings as their UTF-8 format instead of storing
       bytes as uint(8).
     """
-    datasetNames, pdarrays = _bulk_write_prep(columns, names)  # type: ignore
+    datasetNames, pdarrays, _ = _bulk_write_prep(columns, names)  # type: ignore
     dtypes = [a.dtype.name for a in pdarrays]
 
     generic_msg(
@@ -1456,8 +1523,10 @@ def load(
     pdarray,
     Strings,
     SegArray,
-    arkouda.array_view.ArrayView,
-    Mapping[str, Union[pdarray, Strings, SegArray, arkouda.array_view.ArrayView]],
+    ArrayView,
+    Categorical,
+    DataFrame,
+    Mapping[str, Union[pdarray, Strings, SegArray, ArrayView, Categorical, DataFrame]],
 ]:
     """
     Load a pdarray previously saved with ``pdarray.save()``.
@@ -1510,12 +1579,12 @@ def load(
     Examples
     --------
     >>> # Loading from file without extension
-    >>> obj = a.load('path/prefix')
+    >>> obj = ak.load('path/prefix')
     Loads the array from numLocales files with the name ``cwd/path/name_prefix_LOCALE####``.
     The file type is inferred during processing.
 
     >>> # Loading with an extension (HDF5)
-    >>> obj = a.load('path/prefix.test')
+    >>> obj = ak.load('path/prefix.test')
     Loads the object from numLocales files with the name ``cwd/path/name_prefix_LOCALE####.test`` where
     #### is replaced by each locale numbers. Because filetype is inferred during processing,
     the extension is not required to be a specific format.
@@ -1542,7 +1611,7 @@ def load(
 
 @typechecked
 def load_all(
-    path_prefix: str, file_format: str = "INFER", column_delim: str = ","
+    path_prefix: str, file_format: str = "INFER", column_delim: str = ",", read_nested=True
 ) -> Mapping[str, Union[pdarray, Strings, SegArray, Categorical]]:
     """
     Load multiple pdarrays, Strings, SegArrays, or Categoricals previously
@@ -1558,6 +1627,10 @@ def load_all(
         Defaults to 'INFER'
     column_delim : str
         Column delimiter to be used if dataset is CSV. Otherwise, unused.
+    read_nested: bool
+        Default True, when True, SegArray objects will be read from the file. When False,
+        SegArray (or other nested Parquet columns) will be ignored.
+        Parquet files only
 
     Returns
     -------
@@ -1595,10 +1668,10 @@ def load_all(
     try:
         result = {
             dataset: load(prefix, file_format=file_format, dataset=dataset)
-            for dataset in get_datasets(firstname, column_delim=column_delim)
+            for dataset in get_datasets(firstname, column_delim=column_delim, read_nested=read_nested)
         }
 
-        result = _dict_recombine_segarrays(result)
+        result = _dict_recombine_segarrays_categoricals(result)
         # Check for Categoricals and remove if necessary
         removal_names, categoricals = Categorical.parse_hdf_categoricals(result)
         if removal_names:
@@ -1637,12 +1710,15 @@ def read(
     allow_errors: bool = False,
     calc_string_offsets=False,
     column_delim: str = ",",
+    read_nested: bool = True,
 ) -> Union[
     pdarray,
     Strings,
     SegArray,
-    arkouda.array_view.ArrayView,
-    Mapping[str, Union[pdarray, Strings, SegArray, arkouda.array_view.ArrayView]],
+    ArrayView,
+    Categorical,
+    DataFrame,
+    Mapping[str, Union[pdarray, Strings, SegArray, ArrayView, Categorical, DataFrame]],
 ]:
     """
     Read datasets from files.
@@ -1673,6 +1749,12 @@ def read(
         In the future this option may be set to True as the default.
     column_delim : str
         Column delimiter to be used if dataset is CSV. Otherwise, unused.
+    read_nested: bool
+        Default True, when True, SegArray objects will be read from the file. When False,
+        SegArray (or other nested Parquet columns) will be ignored.
+        Ignored if datasets is not None
+        Parquet Files only.
+
 
     Returns
     -------
@@ -1736,6 +1818,7 @@ def read(
             iterative=iterative,
             strict_types=strictTypes,
             allow_errors=allow_errors,
+            read_nested=read_nested,
         )
     elif ftype.lower() == "csv":
         return read_csv(
@@ -1751,6 +1834,7 @@ def read_tagged_data(
     strictTypes: bool = True,
     allow_errors: bool = False,
     calc_string_offsets=False,
+    read_nested: bool = True,
 ):
     """
     Read datasets from files and tag each record to the file it was read from.
@@ -1777,6 +1861,15 @@ def read_tagged_data(
         Default False, if True this will tell the server to calculate the
         offsets/segments array on the server versus loading them from HDF5 files.
         In the future this option may be set to True as the default.
+    read_nested: bool
+        Default True, when True, SegArray objects will be read from the file. When False,
+        SegArray (or other nested Parquet columns) will be ignored.
+        Ignored if datasets is not `None`
+        Parquet Files only.
+
+    Notes
+    ------
+    Not currently supported for Categorical or GroupBy datasets
 
     Examples
     ---------
@@ -1794,9 +1887,9 @@ def read_tagged_data(
         cmd="globExpansion",
         args={"file_count": len(filenames), "filenames": filenames},
     )
-    file_list = json.loads(j_str)
-    file_cat = Categorical(
-        array(file_list)
+    file_list = array(json.loads(j_str))
+    file_cat = Categorical.from_codes(
+        arange(file_list.size), file_list
     )  # create a categorical from the ak.Strings representation of the file list
 
     ftype = get_filetype(filenames)
@@ -1822,6 +1915,7 @@ def read_tagged_data(
                 strict_types=strictTypes,
                 allow_errors=allow_errors,
                 tag_data=True,
+                read_nested=read_nested,
             ),
             file_cat,
         )
@@ -1829,3 +1923,65 @@ def read_tagged_data(
         raise RuntimeError("CSV does not support tagging data with file name associated.")
     else:
         raise RuntimeError(f"Invalid File Type detected, {ftype}")
+
+
+def snapshot(filename):
+    """
+    Create a snapshot of the current Arkouda namespace. All currently accessible variables containing
+    Arkouda objects will be written to an HDF5 file.
+
+    Unlike other save/load functions, this maintains the integrity of dataframes.
+
+    Current Variable names are used as the dataset name when saving.
+
+    Parameters
+    ----------
+    filename: str
+    Name to use when storing file
+
+    Returns
+    --------
+    None
+
+    See Also
+    ---------
+    ak.restore
+    """
+    import inspect
+    from types import ModuleType
+    from arkouda.dataframe import DataFrame
+
+    filename = filename + "_SNAPSHOT"
+    mode = "TRUNCATE"
+    callers_local_vars = inspect.currentframe().f_back.f_locals.items()
+    for name, val in [
+        (n, v) for n, v in callers_local_vars if not n.startswith("__") and not isinstance(v, ModuleType)
+    ]:
+        if isinstance(val, (pdarray, Categorical, SegArray, Strings, DataFrame, GroupBy)):
+            if isinstance(val, DataFrame):
+                val._to_hdf_snapshot(filename, dataset=name, mode=mode)
+            else:
+                val.to_hdf(filename, dataset=name, mode=mode)
+            mode = "APPEND"
+
+
+def restore(filename):
+    """
+    Return data saved using `ak.snapshot`
+
+    Parameters
+    ----------
+    filename: str
+    Name used to create snapshot to be read
+
+    Returns
+    --------
+    Dict
+
+    Notes
+    ------
+    Unlike other save/load methods using snapshot restore will save DataFrames alongside other
+    objects in HDF5. Thus, they are returned within the dictionary as a dataframe.
+    """
+    restore_files = glob.glob(f"{filename}_SNAPSHOT_LOCALE*")
+    return read_hdf(sorted(restore_files))

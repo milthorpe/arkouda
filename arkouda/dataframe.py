@@ -22,7 +22,6 @@ from arkouda.dtypes import int64 as akint64
 from arkouda.groupbyclass import GroupBy as akGroupBy
 from arkouda.groupbyclass import unique
 from arkouda.index import Index
-from arkouda.io import _dict_recombine_segarrays, get_filetype, load_all
 from arkouda.numeric import cast as akcast
 from arkouda.numeric import cumsum
 from arkouda.numeric import isnan as akisnan
@@ -247,6 +246,8 @@ class DataFrame(UserDict):
 
     COLUMN_CLASSES = (pdarray, Strings, Categorical, SegArray)
 
+    objType = "DataFrame"
+
     def __init__(self, initialdata=None, index=None):
         super().__init__()
 
@@ -275,10 +276,12 @@ class DataFrame(UserDict):
             else:
                 self._set_index(index)
             self.data = {}
-            # convert the lists defining each column into a pdarray
-            # pd.DataFrame.values is stored as rows, we need lists to be columns
-            for key, val in initialdata.to_dict("list").items():
-                self.data[key] = array(val)
+            for key in initialdata.columns:
+                self.data[key] = (
+                    SegArray.from_multi_array([array(r) for r in initialdata[key]])
+                    if isinstance(initialdata[key][0], (list, np.ndarray))
+                    else array(initialdata[key])
+                )
 
             self.data.update()
             return
@@ -299,7 +302,7 @@ class DataFrame(UserDict):
             sizes = set()
 
             # Initial data is a dictionary of arkouda arrays
-            if type(initialdata) == dict:
+            if isinstance(initialdata, dict):
                 for key, val in initialdata.items():
                     if not isinstance(val, self.COLUMN_CLASSES):
                         raise ValueError(f"Values must be one of {self.COLUMN_CLASSES}.")
@@ -316,7 +319,7 @@ class DataFrame(UserDict):
                     self._columns.append(key)
 
             # Initial data is a list of arkouda arrays
-            elif type(initialdata) == list:
+            elif isinstance(initialdata, list):
                 # Create string IDs for the columns
                 keys = [str(x) for x in range(len(initialdata))]
                 for key, col in zip(keys, initialdata):
@@ -344,11 +347,9 @@ class DataFrame(UserDict):
                 self._set_index(arange(self._size))
             else:
                 self._set_index(index)
-
             self.update_size()
 
     def __getattr__(self, key):
-        # print("key =", key)
         if key not in self.columns:
             raise AttributeError(f"Attribute {key} not found")
         # Should this be cached?
@@ -393,7 +394,7 @@ class DataFrame(UserDict):
                 return result
             if len({type(x) for x in key}) > 1:
                 raise TypeError("Invalid selector: too many types in list.")
-            if type(key[0]) == str:
+            if isinstance(key[0], str):
                 for k in key:
                     result.data[k] = UserDict.__getitem__(self, k)
                     result._columns.append(k)
@@ -440,7 +441,7 @@ class DataFrame(UserDict):
             add_index = True
 
         # Set a single row in the dataframe using a dict of values
-        if type(key) == int:
+        if isinstance(key, int):
             for k in self._columns:
                 if isinstance(self.data[k], Strings):
                     raise ValueError(
@@ -462,7 +463,7 @@ class DataFrame(UserDict):
                     self[k][key] = v
 
         # Set a single column in the dataframe using a an arkouda array
-        elif type(key) == str:
+        elif isinstance(key, str):
             if not isinstance(value, self.COLUMN_CLASSES):
                 raise ValueError(f"Column must be one of {self.COLUMN_CLASSES}.")
             elif self._size is not None and self._size != value.size:
@@ -612,7 +613,7 @@ class DataFrame(UserDict):
             elif t == "SegArray":
                 # split creates for segments and values
                 eles = msg[2].split("+")
-                df_dict[msg[1]] = SegArray.from_parts(create_pdarray(eles[0]), create_pdarray(eles[1]))
+                df_dict[msg[1]] = SegArray(create_pdarray(eles[0]), create_pdarray(eles[1]))
             elif t == "Fields":
                 df_dict[msg[1]] = Fields(
                     create_pdarray(msg[2]),
@@ -625,7 +626,7 @@ class DataFrame(UserDict):
             elif t == "IPv4":
                 df_dict[msg[1]] = IPv4(create_pdarray(msg[2]))
             elif t == "Datetime":
-                df_dict[msg[1]] = Datetime(create_pdarray(msg[2]), unit=self[msg[1]].unit)
+                df_dict[msg[1]] = Datetime(create_pdarray(msg[2]))
             elif t == "BitVector":
                 df_dict[msg[1]] = BitVector(
                     create_pdarray(msg[2]), width=self[msg[1]].width, reverse=self[msg[1]].reverse
@@ -863,7 +864,7 @@ class DataFrame(UserDict):
     def _set_index(self, value):
         if isinstance(value, Index) or value is None:
             self._index = value
-        elif isinstance(value, pdarray):
+        elif isinstance(value, (pdarray, Strings)):
             self._index = Index(value)
         elif isinstance(value, list):
             self._index = Index(array(value))
@@ -950,7 +951,6 @@ class DataFrame(UserDict):
         """
         Computes the number of bytes on the arkouda server.
         """
-
         sizes = set()
         for key, val in self.items():
             if val is not None:
@@ -1046,12 +1046,12 @@ class DataFrame(UserDict):
             for i in range(obj.index.size):
                 oldval = obj.index[i]
                 newval = mapper(oldval)
-                if type(oldval) != type(newval):
+                if type(oldval) is not type(newval):
                     raise TypeError("Replacement value must have the same type as the original value")
                 obj.index.values[obj.index.values == oldval] = newval
         elif isinstance(mapper, dict):
             for key, val in mapper.items():
-                if type(key) != type(val):
+                if type(key) is not type(val):
                     raise TypeError("Replacement value must have the same type as the original value")
                 obj.index.values[obj.index.values == key] = val
         else:
@@ -1496,9 +1496,82 @@ class DataFrame(UserDict):
         data = self._prep_data(index=index, columns=columns)
         to_hdf(data, prefix_path=path, file_type=file_type)
 
+    def _to_hdf_snapshot(self, path, dataset="DataFrame", mode="truncate", file_type="distribute"):
+        """
+        Save a dataframe as a group with columns within the group. This allows saving other
+        datasets in the HDF5 file without impacting the integrity of the dataframe
+        This is only used for the snapshot workflow
+        Parameters
+        ----------
+        path : str
+            File path to save data
+        dataset: str
+            Name to save the dataframe under within the file
+            Only used when as_dataset=True
+        mode: str (truncate | append)
+            Default: trunate
+            Indicates whether the dataset should truncate the file and write or append
+            to the file
+            Only used when as_dataset=True
+        file_type: str (single | distribute)
+            Default: distribute
+            Whether to save to a single file or distribute across Locales
+            Only used when as_dataset=True
+
+        Returns
+        -------
+        None
+        Raises
+        ------
+        RuntimeError
+            Raised if a server-side error is thrown saving the pdarray
+        """
+        from arkouda.categorical import Categorical as Categorical_
+        from arkouda.io import _file_type_to_int, _mode_str_to_int
+
+        column_data = [
+            obj.name
+            if not isinstance(obj, (Categorical_, SegArray))
+            else json.dumps(
+                {
+                    "codes": obj.codes.name,
+                    "categories": obj.categories.name,
+                    "NA_codes": obj._akNAcode.name,
+                    **({"permutation": obj.permutation.name} if obj.permutation is not None else {}),
+                    **({"segments": obj.segments.name} if obj.segments is not None else {}),
+                }
+            )
+            if isinstance(obj, Categorical_)
+            else json.dumps({"segments": obj.segments.name, "values": obj.values.name})
+            for k, obj in self.items()
+        ]
+        dtypes = [
+            str(obj.categories.dtype) if isinstance(obj, Categorical_) else str(obj.dtype)
+            for obj in self.values()
+        ]
+        return cast(
+            str,
+            generic_msg(
+                cmd="tohdf",
+                args={
+                    "filename": path,
+                    "dset": dataset,
+                    "file_format": _file_type_to_int(file_type),
+                    "write_mode": _mode_str_to_int(mode),
+                    "objType": self.objType,
+                    "num_cols": len(self.columns),
+                    "column_names": self.columns,
+                    "column_objTypes": [obj.objType for key, obj in self.items()],
+                    "column_dtypes": dtypes,
+                    "columns": column_data,
+                    "index": self.index.values.name,
+                },
+            ),
+        )
+
     def update_hdf(self, prefix_path: str, index=False, columns=None, repack: bool = True):
         """
-        Overwrite the dataset with the name provided with this pdarray. If
+        Overwrite the dataset with the name provided with this dataframe. If
         the dataset does not exist it is added
 
         Parameters
@@ -1739,12 +1812,18 @@ class DataFrame(UserDict):
         Load dataframe from file
         file_format needed for consistency with other load functions
         """
+        from arkouda.io import (
+            _dict_recombine_segarrays_categoricals,
+            get_filetype,
+            load_all,
+        )
+
         prefix, extension = os.path.splitext(prefix_path)
         first_file = f"{prefix}_LOCALE0000{extension}"
         filetype = get_filetype(first_file) if file_format.lower() == "infer" else file_format
 
         # columns load backwards
-        df = cls(_dict_recombine_segarrays(load_all(prefix_path, file_format=filetype)))
+        df = cls(_dict_recombine_segarrays_categoricals(load_all(prefix_path, file_format=filetype)))
         # if parquet, return reversed dataframe to match what was saved
         return df if filetype == "HDF5" else df[df.columns[::-1]]
 
@@ -2150,7 +2229,7 @@ class DataFrame(UserDict):
         array(self.columns).register(f"df_columns_{user_defined_name}")
 
         for col, data in self.data.items():
-            data.register(f"df_data_{data.objtype}_{col}_{user_defined_name}")
+            data.register(f"df_data_{data.objType}_{col}_{user_defined_name}")
 
         self.name = user_defined_name
         return self
@@ -2262,8 +2341,8 @@ class DataFrame(UserDict):
         columns = dict.fromkeys(json.loads(col_resp))
         matches = []
         regEx = compile(
-            f"^df_data_({pdarray.objtype}|{Strings.objtype}|"
-            f"{Categorical.objtype}|{SegArray.objtype})_.*_{user_defined_name}"
+            f"^df_data_({pdarray.objType}|{Strings.objType}|"
+            f"{Categorical.objType}|{SegArray.objType})_.*_{user_defined_name}"
         )
         # Using the regex, cycle through the registered items and find all the columns in the DataFrame
         for name in list_registry():
@@ -2278,20 +2357,20 @@ class DataFrame(UserDict):
         # loop through
         for name in set(matches):
             colName = DataFrame._parse_col_name(name, user_defined_name)[0]
-            if f"_{Strings.objtype}_" in name:
+            if f"_{Strings.objType}_" in name:
                 columns[colName] = Strings.attach(name)
-            elif f"_{pdarray.objtype}_" in name:
+            elif f"_{pdarray.objType}_" in name:
                 columns[colName] = pd_attach(name)
-            elif f"_{Categorical.objtype}_" in name:
+            elif f"_{Categorical.objType}_" in name:
                 columns[colName] = Categorical.attach(name)
-            elif f"_{SegArray.objtype}_" in name:
+            elif f"_{SegArray.objType}_" in name:
                 columns[colName] = SegArray.attach(name)
 
         index_resp = cast(
             str, generic_msg(cmd="attach", args={"name": f"df_index_{user_defined_name}_key"})
         )
         dtype = index_resp.split()[2]
-        if dtype == Strings.objtype:
+        if dtype == "str":  # TODO - this should be updated in the future to Strings
             ind = Strings.from_return_msg(index_resp)
         else:  # pdarray
             ind = create_pdarray(index_resp)
@@ -2328,8 +2407,8 @@ class DataFrame(UserDict):
 
         matches = []
         regEx = compile(
-            f"^df_data_({pdarray.objtype}|{Strings.objtype}|"
-            f"{Categorical.objtype}|{SegArray.objtype})_.*_{user_defined_name}"
+            f"^df_data_({pdarray.objType}|{Strings.objType}|"
+            f"{Categorical.objType}|{SegArray.objType})_.*_{user_defined_name}"
         )
         # Using the regex, cycle through the registered items and find all the columns in the DataFrame
         for name in list_registry():
@@ -2342,13 +2421,13 @@ class DataFrame(UserDict):
 
         # Remove duplicates caused by multiple components in categorical and loop through
         for name in set(matches):
-            if f"_{Strings.objtype}_" in name:
+            if f"_{Strings.objType}_" in name:
                 Strings.unregister_strings_by_name(name)
-            elif f"_{pdarray.objtype}_" in name:
+            elif f"_{pdarray.objType}_" in name:
                 unregister_pdarray_by_name(name)
-            elif f"_{Categorical.objtype}_" in name:
+            elif f"_{Categorical.objType}_" in name:
                 Categorical.unregister_categorical_by_name(name)
-            elif f"_{SegArray.objtype}_" in name:
+            elif f"_{SegArray.objType}_" in name:
                 SegArray.unregister_segarray_by_name(name)
 
         unregister_pdarray_by_name(f"df_index_{user_defined_name}_key")
@@ -2374,7 +2453,6 @@ class DataFrame(UserDict):
         """
         nameParts = entryName.split(" ")
         regName = nameParts[1] if len(nameParts) > 1 else nameParts[0]
-
         colParts = regName.split("_")
         colType = colParts[2]
 
@@ -2387,7 +2465,7 @@ class DataFrame(UserDict):
             return colParts[3], colType
 
     @staticmethod
-    def from_return_msg(repMsg):
+    def from_attach_msg(repMsg):
         """
         Creates and returns a DataFrame based on return components from ak.util.attach
 
@@ -2413,7 +2491,9 @@ class DataFrame(UserDict):
 
         # index could be a pdarray or a Strings
         idxType = parts[3].split()[2]
-        if idxType == Strings.objtype:
+        if (
+            idxType == "str"
+        ):  # TODO - we should update the create statment to check for Strings.objType here
             idx = Index.factory(Strings.from_return_msg(f"{parts[3]}+{parts[4]}"))
             i = 5
         else:  # pdarray
@@ -2434,23 +2514,46 @@ class DataFrame(UserDict):
 
             elif parts[i] == "categorical":
                 colName = DataFrame._parse_col_name(parts[i + 1], dfName)[0]
-                catMsg = (
-                    f"{parts[i]}+{parts[i+1]}+{parts[i+2]}+{parts[i+3]}+"
-                    f"{parts[i+4]}+{parts[i+5]}+{parts[i+6]}"
-                )
-                cols[colName] = Categorical.from_return_msg(catMsg)
-                i += 6
+                cols[colName] = Categorical.from_return_msg(parts[i + 2] + "+" + parts[i + 3])
+                i += 3
 
             elif parts[i] == "segarray":
-                colName = DataFrame._parse_col_name(parts[i + 1], dfName)[0]
-                cols[colName] = SegArray.from_return_msg(parts[i + 2])
-                i += 2
+                info = json.loads(parts[i + 1])
+                colName = DataFrame._parse_col_name(info["segments"], dfName)[0]
+                cols[colName] = SegArray.from_return_msg(parts[i + 1])
+                i += 1
 
             i += 1
 
         df = DataFrame(cols, idx)
         df.name = dfName
         return df
+
+    @classmethod
+    def from_return_msg(cls, rep_msg):
+        from arkouda.categorical import Categorical as Categorical_
+
+        data = json.loads(rep_msg)
+        idx = None
+        columns = {}
+        for k, create_data in data.items():
+            comps = create_data.split("+|+")
+            if k.lower() == "index":
+                if comps[0] == Strings.objType.upper():
+                    idx = Index(Strings.from_return_msg(comps[1]))
+                else:
+                    idx = Index(create_pdarray(comps[1]))
+            else:
+                if comps[0] == pdarray.objType.upper():
+                    columns[k] = create_pdarray(comps[1])
+                elif comps[0] == Strings.objType.upper():
+                    columns[k] = Strings.from_return_msg(comps[1])
+                elif comps[0] == Categorical_.objType.upper():
+                    columns[k] = Categorical_.from_return_msg(comps[1])
+                elif comps[0] == SegArray.objType.upper():
+                    columns[k] = SegArray.from_return_msg(comps[1])
+
+        return cls(columns, idx)
 
 
 def sorted(df, column=False):

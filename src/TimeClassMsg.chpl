@@ -11,7 +11,9 @@ module TimeClassMsg {
     use BinOp;
     use ArkoudaTimeCompat as Time;
 
+    use Map;
     use ArkoudaMapCompat;
+    use ArkoudaIOCompat;
 
     private config const logLevel = ServerConfig.logLevel;
     private config const logChannel = ServerConfig.logChannel;
@@ -56,7 +58,7 @@ module TimeClassMsg {
 
         forall (v, y, m, d, iso_y, is_ly, woy, doy, dow) in zip(valuesEntry.a, year, month, day, isoYear, is_leap_year, weekOfYear, dayOfYear, dayOfWeek) {
             // convert to seconds and create date
-            var t = date.fromTimestamp(floorDivisionHelper(v, 10**9):int);
+            var t = date.createFromTimestamp(floorDivisionHelper(v, 10**9):int);
             (y, m, d, (iso_y, woy, dow)) = (t.year, t.month, t.day, t.isoCalendar());
             dow -= 1;
             is_ly = isLeapYear(y);
@@ -65,30 +67,30 @@ module TimeClassMsg {
 
         var retname = st.nextName();
         st.addEntry(retname, new shared SymEntry(day));
-        attributesDict.addOrSet("day", "created %s".format(st.attrib(retname)));
+        attributesDict.addOrReplace("day", "created %s".doFormat(st.attrib(retname)));
         retname = st.nextName();
         st.addEntry(retname, new shared SymEntry(month));
-        attributesDict.add("month", "created %s".format(st.attrib(retname)));
+        attributesDict.add("month", "created %s".doFormat(st.attrib(retname)));
         retname = st.nextName();
         st.addEntry(retname, new shared SymEntry(year));
-        attributesDict.add("year", "created %s".format(st.attrib(retname)));
+        attributesDict.add("year", "created %s".doFormat(st.attrib(retname)));
         retname = st.nextName();
         st.addEntry(retname, new shared SymEntry(is_leap_year));
-        attributesDict.add("isLeapYear", "created %s".format(st.attrib(retname)));
+        attributesDict.add("isLeapYear", "created %s".doFormat(st.attrib(retname)));
         retname = st.nextName();
         st.addEntry(retname, new shared SymEntry(dayOfYear));
-        attributesDict.add("dayOfYear", "created %s".format(st.attrib(retname)));
+        attributesDict.add("dayOfYear", "created %s".doFormat(st.attrib(retname)));
         retname = st.nextName();
         st.addEntry(retname, new shared SymEntry(isoYear));
-        attributesDict.add("isoYear", "created %s".format(st.attrib(retname)));
+        attributesDict.add("isoYear", "created %s".doFormat(st.attrib(retname)));
         retname = st.nextName();
         st.addEntry(retname, new shared SymEntry(weekOfYear));
-        attributesDict.add("weekOfYear", "created %s".format(st.attrib(retname)));
+        attributesDict.add("weekOfYear", "created %s".doFormat(st.attrib(retname)));
         retname = st.nextName();
         st.addEntry(retname, new shared SymEntry(dayOfWeek));
-        attributesDict.add("dayOfWeek", "created %s".format(st.attrib(retname)));
+        attributesDict.add("dayOfWeek", "created %s".doFormat(st.attrib(retname)));
 
-        var repMsg: string = "%jt".format(attributesDict);
+        var repMsg: string = formatJson(attributesDict);
 
         tLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),repMsg);
         return new MsgTuple(repMsg, MsgType.NORMAL);
@@ -96,7 +98,7 @@ module TimeClassMsg {
 
     proc timeDeltaAttributesMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
         var values: borrowed GenSymEntry = getGenericTypedArrayEntry(msgArgs.getValueOf("values"), st);
-        var repMsg: string = "%jt".format(simpleAttributesHelper(toSymEntry(values, int).a, st));
+        var repMsg: string = formatJson(simpleAttributesHelper(toSymEntry(values, int).a, st));
 
         tLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),repMsg);
         return new MsgTuple(repMsg, MsgType.NORMAL);
@@ -117,7 +119,7 @@ module TimeClassMsg {
                 // "day" is not modded, because it's the last unit
                 [(ei,vi) in zip(e.a,values)] ei = floorDivisionHelper(vi, denominator):int;
             }
-            attributesDict.add(u, "created %s".format(st.attrib(retname)));
+            attributesDict.add(u, "created %s".doFormat(st.attrib(retname)));
             denominator *= f;  //denominator is product of previous factors
         }
         return attributesDict;

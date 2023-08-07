@@ -10,9 +10,11 @@ module FileIO {
     use MultiTypeSymEntry;
     use ServerErrors;
     use Sort;
+    use Map;
 
     use ArkoudaFileCompat;
-    use ArkoudaMapCompat;
+    use ArkoudaRangeCompat;
+    use ArkoudaIOCompat;
 
     use ServerConfig, Logging, CommandMap;
     private config const logLevel = ServerConfig.logLevel;
@@ -143,7 +145,7 @@ module FileIO {
             filenames[i] = generateFilename(prefix, extension, i);
         }
         fioLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
-                "generateFilenames targetLocales.size %i, filenames.size %i".format(targetLocalesSize, filenames.size));
+                "generateFilenames targetLocales.size %i, filenames.size %i".doFormat(targetLocalesSize, filenames.size));
 
         return filenames;
     }
@@ -153,8 +155,8 @@ module FileIO {
      * the user along with a file index and extension.
      */
     proc generateFilename(prefix : string, extension : string, idx : int) : string throws {
-        var suffix = '%04i'.format(idx);
-        return "%s_LOCALE%s%s".format(prefix, suffix, extension);
+        var suffix = '%04i'.doFormat(idx);
+        return "%s_LOCALE%s%s".doFormat(prefix, suffix, extension);
     }
 
     /*
@@ -163,7 +165,7 @@ module FileIO {
      * being overwritten.
      */
     proc getMatchingFilenames(prefix : string, extension : string) throws {
-        return glob("%s_LOCALE*%s".format(prefix, extension));    
+        return glob("%s_LOCALE*%s".doFormat(prefix, extension));    
     }
 
     /*
@@ -220,7 +222,7 @@ module FileIO {
             //TODO: change this to throw
             halt("At least one domain must have stride 1");
         }
-        if !d1.stridable && !d2.stridable {
+        if !stridable(d1) && !stridable(d2) {
             return {low..high};
         } else {
             var stride = max(d1.stride, d2.stride);
@@ -246,7 +248,7 @@ module FileIO {
           f.close();
         } catch e {
           throw getErrorWithContext(
-                     msg=e:string,
+                     msg=formatString(e),
                      getLineNumber(),
                      getRoutineName(),
                      getModuleName(),
@@ -268,7 +270,7 @@ module FileIO {
         var tmp = glob(filename);
 
         if tmp.size <= 0 {
-          var errorMsg = "Cannot retrieve filename from glob expression %s, check file name or format".format(filename);
+          var errorMsg = "Cannot retrieve filename from glob expression %s, check file name or format".doFormat(filename);
           return new MsgTuple(errorMsg, MsgType.ERROR);
         }
             
@@ -277,7 +279,7 @@ module FileIO {
       }
 
       if !exists(filename) {
-        var errorMsg = "File %s does not exist in a location accessible to Arkouda".format(filename);
+        var errorMsg = "File %s does not exist in a location accessible to Arkouda".doFormat(filename);
         return new MsgTuple(errorMsg,MsgType.ERROR);
       } 
 
@@ -312,7 +314,7 @@ module FileIO {
         var tmp = glob(filename);
 
         if tmp.size <= 0 {
-          var errorMsg = "Cannot retrieve filename from glob expression %s, check file name or format".format(filename);
+          var errorMsg = "Cannot retrieve filename from glob expression %s, check file name or format".doFormat(filename);
           return new MsgTuple(errorMsg, MsgType.ERROR);
         }
             
@@ -320,9 +322,9 @@ module FileIO {
         filename = tmp[tmp.domain.first];
       }
       fioLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
-                      "FILENAME: %s".format(filename));
+                      "FILENAME: %s".doFormat(filename));
       if !exists(filename) {
-        var errorMsg = "File %s does not exist in a location accessible to Arkouda".format(filename);
+        var errorMsg = "File %s does not exist in a location accessible to Arkouda".doFormat(filename);
         return new MsgTuple(errorMsg,MsgType.ERROR);
       } 
 
@@ -353,7 +355,7 @@ module FileIO {
           var n: int = 1000;
           var jsonfiles = msgArgs.getValueOf("filenames");
           var files: string = if jsonfiles.size > 2*n then jsonfiles[0..#n]+'...'+jsonfiles[jsonfiles.size-n..#n] else jsonfiles;
-          var errorMsg = "Could not decode json filenames via tempfile (%i files: %s)".format(nfiles, files);
+          var errorMsg = "Could not decode json filenames via tempfile (%i files: %s)".doFormat(nfiles, files);
           fioLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
           return new MsgTuple(errorMsg, MsgType.ERROR);
       }
@@ -369,9 +371,9 @@ module FileIO {
           }
           var tmp = glob(filelist[0]);
           fioLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
-                                "glob expanded %s to %i files".format(filelist[0], tmp.size));
+                                "glob expanded %s to %i files".doFormat(filelist[0], tmp.size));
           if tmp.size == 0 {
-              var errorMsg = "The wildcarded filename %s either corresponds to files inaccessible to Arkouda or files of an invalid format".format(filelist[0]);
+              var errorMsg = "The wildcarded filename %s either corresponds to files inaccessible to Arkouda or files of an invalid format".doFormat(filelist[0]);
               fioLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
               return new MsgTuple(errorMsg, MsgType.ERROR);
           }
@@ -383,6 +385,6 @@ module FileIO {
           // assumes that we are providing 
           filenames = filelist;
       }
-      return new MsgTuple("%jt".format(filenames), MsgType.NORMAL);
+      return new MsgTuple(formatJson(filenames), MsgType.NORMAL);
     }
 }

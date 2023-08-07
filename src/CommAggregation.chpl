@@ -1,9 +1,11 @@
 module CommAggregation {
-  use CTypes;
   use ServerConfig;
   use UnorderedCopy;
   use CommPrimitives;
   use ChplConfig;
+
+  use ArkoudaCTypesCompat;
+  use ArkoudaPOSIXCompat;
 
   // TODO should tune these values at startup
   param defaultBuffSize = if CHPL_COMM == "ugni" then 4096 else 8192;
@@ -53,10 +55,10 @@ module CommAggregation {
     var bufferIdxs: c_ptr(int);
 
     proc postinit() {
-      lBuffers = c_malloc(c_ptr(aggType), numLocales);
+      lBuffers = allocate(c_ptr(aggType), numLocales);
       bufferIdxs = bufferIdxAlloc();
       for loc in myLocaleSpace {
-        lBuffers[loc] = c_malloc(aggType, bufferSize);
+        lBuffers[loc] = allocate(aggType, bufferSize);
         bufferIdxs[loc] = 0;
         rBuffers[loc] = new remoteBuffer(aggType, bufferSize, loc);
       }
@@ -65,10 +67,10 @@ module CommAggregation {
     proc deinit() {
       flush();
       for loc in myLocaleSpace {
-        c_free(lBuffers[loc]);
+        deallocate(lBuffers[loc]);
       }
-      c_free(lBuffers);
-      c_free(bufferIdxs);
+      deallocate(lBuffers);
+      deallocate(bufferIdxs);
     }
 
     proc flush() {
@@ -135,7 +137,6 @@ module CommAggregation {
 
 
   /* "Aggregator" that uses unordered copy instead of actually aggregating */
-  pragma "no doc"
   record DstUnorderedAggregator {
     type elemType;
 
@@ -172,12 +173,12 @@ module CommAggregation {
     var bufferIdxs: c_ptr(int);
 
     proc postinit() {
-      dstAddrs = c_malloc(c_ptr(aggType), numLocales);
-      lSrcAddrs = c_malloc(c_ptr(aggType), numLocales);
+      dstAddrs = allocate(c_ptr(aggType), numLocales);
+      lSrcAddrs = allocate(c_ptr(aggType), numLocales);
       bufferIdxs = bufferIdxAlloc();
       for loc in myLocaleSpace {
-        dstAddrs[loc] = c_malloc(aggType, bufferSize);
-        lSrcAddrs[loc] = c_malloc(aggType, bufferSize);
+        dstAddrs[loc] = allocate(aggType, bufferSize);
+        lSrcAddrs[loc] = allocate(aggType, bufferSize);
         bufferIdxs[loc] = 0;
         rSrcAddrs[loc] = new remoteBuffer(aggType, bufferSize, loc);
         rSrcVals[loc] = new remoteBuffer(elemType, bufferSize, loc);
@@ -187,12 +188,12 @@ module CommAggregation {
     proc deinit() {
       flush();
       for loc in myLocaleSpace {
-        c_free(dstAddrs[loc]);
-        c_free(lSrcAddrs[loc]);
+        deallocate(dstAddrs[loc]);
+        deallocate(lSrcAddrs[loc]);
       }
-      c_free(dstAddrs);
-      c_free(lSrcAddrs);
-      c_free(bufferIdxs);
+      deallocate(dstAddrs);
+      deallocate(lSrcAddrs);
+      deallocate(bufferIdxs);
     }
 
     proc flush() {
@@ -272,7 +273,6 @@ module CommAggregation {
   }
 
   /* "Aggregator" that uses unordered copy instead of actually aggregating */
-  pragma "no doc"
   record SrcUnorderedAggregator {
     type elemType;
 
@@ -300,10 +300,10 @@ module CommAggregation {
     // Allocate a buffer on loc if we haven't already. Return a c_ptr to the
     // remote locales buffer
     proc cachedAlloc(): c_ptr(elemType) {
-      if data == c_nil {
+      if data == nil {
         const rvf_size = size;
         on Locales[loc] do {
-          data = c_malloc(elemType, rvf_size);
+          data = allocate(elemType, rvf_size);
         }
       }
       return data;
@@ -315,7 +315,7 @@ module CommAggregation {
       if boundsChecking {
         assert(this.loc == here.id);
         assert(this.data == data);
-        assert(data != c_nil);
+        assert(data != nil);
       }
       for i in 0..<size {
         yield data[i];
@@ -330,9 +330,9 @@ module CommAggregation {
       if boundsChecking {
         assert(this.loc == here.id);
         assert(this.data == data);
-        assert(data != c_nil);
+        assert(data != nil);
       }
-      c_free(data);
+      deallocate(data);
     }
 
     // After free'ing the data, need to nil out the records copy of the pointer
@@ -341,7 +341,7 @@ module CommAggregation {
       if boundsChecking {
         assert(this.locale.id == here.id);
       }
-      data = c_nil;
+      data = nil;
     }
 
     // Copy size elements from lArr to the remote buffer. Must be running on
@@ -377,7 +377,7 @@ module CommAggregation {
     }
 
     proc deinit() {
-      if data != c_nil {
+      if data != nil {
         const rvf_data=data;
         on Locales[loc] {
           localFree(rvf_data);
@@ -394,7 +394,7 @@ module CommAggregation {
   // Cacheline aligned and padded allocation to avoid false-sharing
   inline proc bufferIdxAlloc() {
     const cachePaddedLocales = (numLocales + 7) & ~7;
-    return c_aligned_alloc(int, 64, cachePaddedLocales);
+    return allocate(int, 64, alignment=cachePaddedLocales);
   }
 
   module BigIntegerAggregation {
@@ -402,6 +402,7 @@ module CommAggregation {
     use CommPrimitives;
     use CommAggregation;
     use BigInteger, GMP;
+    use ArkoudaPOSIXCompat;
 
     proc bigint._serializedSize() {
       extern proc chpl_gmp_mpz_struct_sign_size(from: __mpz_struct) : mp_size_t;
@@ -425,8 +426,8 @@ module CommAggregation {
 
       var limb_ptr = chpl_gmp_mpz_struct_limbs(this.getImpl());
 
-      c_memcpy(x, c_ptrTo(sign_size), size_bytes);
-      c_memcpy(x+size_bytes, limb_ptr, limb_bytes);
+      memcpy(x, c_ptrTo(sign_size), size_bytes);
+      memcpy(x+size_bytes, limb_ptr, limb_bytes);
     }
 
     proc bigint._deserializeFrom(x: c_ptr(uint(8))) {
@@ -438,14 +439,14 @@ module CommAggregation {
 
       var size_bytes = c_sizeof(mp_size_t);
 
-      c_memcpy(c_ptrTo(sign_size), x, size_bytes);
+      memcpy(c_ptrTo(sign_size), x, size_bytes);
 
       var nlimbs = AutoMath.abs(sign_size:int);
       var limb_bytes = nlimbs * c_sizeof(mp_limb_t):int;
 
       _mpz_realloc(this.mpz, nlimbs);
       var xp = chpl_gmp_mpz_struct_limbs(this.getImpl());
-      c_memcpy(xp, x+size_bytes, limb_bytes);
+      memcpy(xp, x+size_bytes, limb_bytes);
 
       chpl_gmp_mpz_set_sign_size(this.mpz, sign_size);
 
@@ -463,10 +464,10 @@ module CommAggregation {
       var bufferIdxs: c_ptr(int);
 
       proc postinit() {
-        lBuffers = c_malloc(c_ptr(aggType), numLocales);
+        lBuffers = allocate(c_ptr(aggType), numLocales);
         bufferIdxs = bufferIdxAlloc();
         for loc in myLocaleSpace {
-          lBuffers[loc] = c_malloc(aggType, bufferSize);
+          lBuffers[loc] = allocate(aggType, bufferSize);
           bufferIdxs[loc] = 0;
           rBuffers[loc] = new remoteBuffer(aggType, bufferSize, loc);
         }
@@ -475,10 +476,10 @@ module CommAggregation {
       proc deinit() {
         flush();
         for loc in myLocaleSpace {
-          c_free(lBuffers[loc]);
+          deallocate(lBuffers[loc]);
         }
-        c_free(lBuffers);
-        c_free(bufferIdxs);
+        deallocate(lBuffers);
+        deallocate(bufferIdxs);
       }
 
       proc flush() {
@@ -517,7 +518,7 @@ module CommAggregation {
         }
 
         // Buffer the address and the serialized value
-        c_memcpy(c_ptrTo(lBuffers[loc][bufferIdx]), c_ptrTo(dstAddr), addr_bytes);
+        memcpy(c_ptrTo(lBuffers[loc][bufferIdx]), c_ptrTo(dstAddr), addr_bytes);
         src._serializeInto(c_ptrTo(lBuffers[loc][bufferIdx+addr_bytes]));
         bufferIdx += addr_bytes + serialize_bytes;
 
@@ -550,7 +551,7 @@ module CommAggregation {
             var addr_bytes = c_sizeof(c_ptr(bigint)): int;
 
             // Copy addr out of buffer
-            c_memcpy(c_ptrTo(dstAddr), c_ptrTo(remBufferPtr[curBufferIdx]), addr_bytes);
+            memcpy(c_ptrTo(dstAddr), c_ptrTo(remBufferPtr[curBufferIdx]), addr_bytes);
             // assert that record locality matches mpz locality
             if boundsChecking { assert(dstAddr.deref().localeId == here.id); }
             // deserialize into bigint
@@ -584,12 +585,12 @@ module CommAggregation {
       var bufferIdxs: c_ptr(int);
 
       proc postinit() {
-        dstAddrs = c_malloc(c_ptr(aggType), numLocales);
-        lSrcAddrs = c_malloc(c_ptr(aggType), numLocales);
+        dstAddrs = allocate(c_ptr(aggType), numLocales);
+        lSrcAddrs = allocate(c_ptr(aggType), numLocales);
         bufferIdxs = bufferIdxAlloc();
         for loc in myLocaleSpace {
-          dstAddrs[loc] = c_malloc(aggType, bufferSize);
-          lSrcAddrs[loc] = c_malloc(aggType, bufferSize);
+          dstAddrs[loc] = allocate(aggType, bufferSize);
+          lSrcAddrs[loc] = allocate(aggType, bufferSize);
           bufferIdxs[loc] = 0;
           rSrcAddrs[loc] = new remoteBuffer(aggType, bufferSize, loc);
           rSrcVals[loc] = new remoteBuffer(uint(8), uintBufferSize, loc);
@@ -599,12 +600,12 @@ module CommAggregation {
       proc deinit() {
         flush();
         for loc in myLocaleSpace {
-          c_free(dstAddrs[loc]);
-          c_free(lSrcAddrs[loc]);
+          deallocate(dstAddrs[loc]);
+          deallocate(lSrcAddrs[loc]);
         }
-        c_free(dstAddrs);
-        c_free(lSrcAddrs);
-        c_free(bufferIdxs);
+        deallocate(dstAddrs);
+        deallocate(lSrcAddrs);
+        deallocate(bufferIdxs);
       }
 
       proc flush() {

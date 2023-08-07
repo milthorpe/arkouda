@@ -1,6 +1,5 @@
 module GenSymIO {
     use IO;
-    use CTypes;
     use Path;
     use MultiTypeSymbolTable;
     use MultiTypeSymEntry;
@@ -17,8 +16,13 @@ module GenSymIO {
     use Message;
     use ServerConfig;
     use SegmentedString;
-
+    use Map;
     use ArkoudaMapCompat;
+
+    use ArkoudaListCompat;
+    use ArkoudaStringBytesCompat;
+    use ArkoudaCTypesCompat;
+    use ArkoudaIOCompat;
 
     private config const logLevel = ServerConfig.logLevel;
     private config const logChannel = ServerConfig.logChannel;
@@ -51,7 +55,7 @@ module GenSymIO {
         overMemLimit(2*size);
 
         gsLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
-                                          "dtype: %t size: %i".format(dtype,size));
+                                          "dtype: %? size: %i".doFormat(dtype,size));
 
         proc bytesToSymEntry(size:int, type t, st: borrowed SymTab, ref data:bytes): string throws {
             var entry = new shared SymEntry(size, t);
@@ -73,7 +77,7 @@ module GenSymIO {
         } else if dtype == DType.UInt8 {
             rname = bytesToSymEntry(size, uint(8), st, data);
         } else {
-            msg = "Unhandled data type %s".format(msgArgs.getValueOf("dtype"));
+            msg = "Unhandled data type %s".doFormat(msgArgs.getValueOf("dtype"));
             msgType = MsgType.ERROR;
             gsLogger.error(getModuleName(),getRoutineName(),getLineNumber(),msg);
         }
@@ -90,7 +94,7 @@ module GenSymIO {
                     st.addEntry(oname, offsetsEntry);
                     msg = "created " + st.attrib(oname) + "+created " + st.attrib(rname);
                 } else {
-                    throw new Error("Unsupported Type %s".format(g.entryType));
+                    throw new Error("Unsupported Type %s".doFormat(g.entryType));
                 }
 
             } catch e: Error {
@@ -135,7 +139,7 @@ module GenSymIO {
         var arrayBytes: bytes;
         var abstractEntry = st.lookup(msgArgs.getValueOf("array"));
         if !abstractEntry.isAssignableTo(SymbolEntryType.TypedArraySymEntry) {
-            var errorMsg = "Error: Unhandled SymbolEntryType %s".format(abstractEntry.entryType);
+            var errorMsg = "Error: Unhandled SymbolEntryType %s".doFormat(abstractEntry.entryType);
             gsLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
             return errorMsg.encode(); // return as bytes
         }
@@ -144,11 +148,11 @@ module GenSymIO {
         overMemLimit(2 * entry.getSizeEstimate());
 
         proc distArrToBytes(A: [?D] ?eltType) {
-            var ptr = c_malloc(eltType, D.size);
+            var ptr = allocate(eltType, D.size);
             var localA = makeArrayFromPtr(ptr, D.size:uint);
             localA = A;
             const size = D.size*c_sizeof(eltType):int;
-            return createBytesWithOwnedBuffer(ptr:c_ptr(uint(8)), size, size);
+            return bytes.createAdoptingBuffer(ptr:c_ptr(uint(8)), size, size);
         }
 
         if entry.dtype == DType.Int64 {
@@ -162,7 +166,7 @@ module GenSymIO {
         } else if entry.dtype == DType.UInt8 {
             arrayBytes = distArrToBytes(toSymEntry(entry, uint(8)).a);
         } else {
-            var errorMsg = "Error: Unhandled dtype %s".format(entry.dtype);
+            var errorMsg = "Error: Unhandled dtype %s".doFormat(entry.dtype);
             gsLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);
             return errorMsg.encode(); // return as bytes
         }
@@ -189,45 +193,66 @@ module GenSymIO {
         }
     }
 
-    proc _buildReadAllMsgJson(rnames:list(3*string), allowErrors:bool, fileErrorCount:int, fileErrors:list(string), st: borrowed SymTab): string throws {
+    proc _buildReadAllMsgJson(rnames:list((string, ObjType, string)), allowErrors:bool, fileErrorCount:int, fileErrors:list(string), st: borrowed SymTab): string throws {
         var items: list(map(string, string));
 
         for rname in rnames {
             var (dsetName, akType, id) = rname;
             var item: map(string, string) = new map(string, string);
             item.add("dataset_name", dsetName.replace(Q, ESCAPED_QUOTES, -1));
-            item.add("arkouda_type", akType);
+            item.add("arkouda_type", akType: string);
             var create_str: string;
-            if (akType == "ArrayView") {
+            if akType == ObjType.ARRAYVIEW {
                 var (valName, segName) = id.splitMsgToTuple("+", 2);
                 create_str = "created " + st.attrib(valName) + "+created " + st.attrib(segName);
             }
-            else if (akType == "pdarray") {
+            else if akType == ObjType.PDARRAY {
                 create_str = "created " + st.attrib(id);
             }
-            else if (akType == "seg_string") {
+            else if akType == ObjType.STRINGS {
                 var (segName, nBytes) = id.splitMsgToTuple("+", 2);
                 create_str = "created " + st.attrib(segName) + "+created bytes.size " + nBytes;
             }
-            else if (akType == "seg_array") {
+            else if (akType == ObjType.SEGARRAY || akType == ObjType.CATEGORICAL || 
+                        akType == ObjType.GROUPBY || akType == ObjType.DATAFRAME) {
                 create_str = id;
-
-            } 
+            }
             else {
                 continue;
             }
             item.add("created", create_str);
-            items.append(item);
+            items.pushBack(item);
         }
         
         var reply: map(string, string) = new map(string, string);
-        reply.add("items", "%jt".format(items));
+        reply.add("items", formatJson(items));
         if allowErrors && !fileErrors.isEmpty() { // If configured, build the allowErrors portion
             reply.add("allow_errors", "true");
             reply.add("file_error_count", fileErrorCount:string);
-            reply.add("file_errors", "%jt".format(fileErrors));
+            reply.add("file_errors", formatJson(fileErrors));
         }
-        return "%jt".format(reply);
+        return formatJson(reply);
+    }
+
+    /*
+     * Simple JSON parser to allow creating a map(string, string) for properly formatted JSON string.
+     * REQUIRES THAT DATA DOES NOT CONTAIN : or ". This will only work on JSON that is not nested.
+    */
+    proc jsonToMap(json: string): map(string, string) throws {
+        // remove components not needed for parsing
+        var clean_json = json.strip().replace("\"", "").replace("{", "").replace("}", ""); // syntax highlight messed up by \".
+
+        // generate the return map
+        var m: map(string, string) = new map(string, string);
+
+        //get each key value pair
+        var key_value = clean_json.split(", ");
+        for kv in key_value  {
+            // split to 2 components key: value
+            var x = kv.split(": ");
+            m.addOrReplace(x[0], x[1]);
+        }
+        return m;
     }
 
 }
