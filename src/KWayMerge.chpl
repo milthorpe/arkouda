@@ -1,5 +1,6 @@
 module KWayMerge {
   use GPUIterator;
+  use Math;
 
   config const TREE_MERGE: bool = false; 
 
