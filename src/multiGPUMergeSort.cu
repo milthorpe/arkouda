@@ -1,5 +1,5 @@
 #include "tanasic_sort.cuh"
-#include <cub/cub.cuh>
+#include <hipcub/hipcub.hpp>
 #include <stdio.h>
 
 /** Create temporary devices buffers to be used in merge and swap steps */
@@ -26,7 +26,8 @@ DeviceBuffers<T>* createDeviceBuffers(const size_t num_elements, const int *gpus
 template <typename T>
 void destroyDeviceBuffers(void *device_buffers_ptr) {
   DeviceBuffers<T>* device_buffers = (DeviceBuffers<T>*)device_buffers_ptr;
-  delete device_buffers;
+  delete[] device_buffers;
+  
 }
 
 template <typename T>
@@ -103,13 +104,13 @@ template <typename T>
 void cubSortKeysOnStream(const T *d_keys_in, T *d_keys_out, size_t N, cudaStream_t stream) {
   size_t temp_storage_bytes = 0;
   void *d_temp_storage = NULL;
+  hipcub::CachingDeviceAllocator g_allocator;  // Caching allocator for device memory
 
-  CachingDeviceAllocator  g_allocator(true);  // Caching allocator for device memory
   // run SortKeys once to determine the necessary size of d_temp_storage
-  CubDebugExit(DeviceRadixSort::SortKeys(d_temp_storage, temp_storage_bytes, d_keys_in, d_keys_out, N, 0, sizeof(T)*8, stream));
+  CubDebugExit(hipcub::DeviceRadixSort::SortKeys(d_temp_storage, temp_storage_bytes, d_keys_in, d_keys_out, N, 0, sizeof(T)*8, stream));
   CubDebugExit(g_allocator.DeviceAllocate(&d_temp_storage, temp_storage_bytes, stream));
 
-  CubDebugExit(DeviceRadixSort::SortKeys(d_temp_storage, temp_storage_bytes, d_keys_in, d_keys_out, N, 0, sizeof(T)*8, stream));
+  CubDebugExit(hipcub::DeviceRadixSort::SortKeys(d_temp_storage, temp_storage_bytes, d_keys_in, d_keys_out, N, 0, sizeof(T)*8, stream));
   if (d_temp_storage) CubDebugExit(g_allocator.DeviceFree(d_temp_storage));
 }
 
