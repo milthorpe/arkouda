@@ -91,10 +91,12 @@ module CUBRadixSort {
     private proc mergePartitions(type t, deviceBuffers: c_void_ptr, devices: [] int(32)) {
         if (devices.size > 2) {
             forall i in 0..1 {
+                var devicesSubset: [0..#devices.size / 2] int(32);
+                devicesSubset = devices((i * (devices.size / 2)) .. #(devices.size / 2));
                 mergePartitions(
                     t,
                     deviceBuffers,
-                    devices((i * (devices.size / 2)) .. ((i + 1) * (devices.size / 2))-1));
+                    devicesSubset);
             }
         }
 
@@ -108,10 +110,12 @@ module CUBRadixSort {
 
         if (devices.size > 2) {
             forall i in 0..1 {
+                var devicesSubset: [0..#devices.size / 2] int(32);
+                devicesSubset = devices((i * (devices.size / 2)) .. #(devices.size / 2));
                 mergePartitions(
                     t,
                     deviceBuffers,
-                    devices((i * (devices.size / 2)) .. ((i + 1) * (devices.size / 2))-1));
+                    devicesSubset);
             }
         }
     }
