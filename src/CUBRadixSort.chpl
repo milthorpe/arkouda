@@ -1,4 +1,5 @@
 module CUBRadixSort {
+use IO;
     use MultiTypeSymEntry;
     use GPUIterator;
     use GPUAPI;
@@ -90,7 +91,7 @@ module CUBRadixSort {
 
     private proc mergePartitions(type t, deviceBuffers: c_void_ptr, devices: [] int(32)) {
         if (devices.size > 2) {
-            forall i in 0..1 {
+            coforall i in 0..1 {
                 var devicesSubset: [0..#devices.size / 2] int(32);
                 devicesSubset = devices((i * (devices.size / 2)) .. #(devices.size / 2));
                 mergePartitions(
@@ -104,12 +105,12 @@ module CUBRadixSort {
         if (pivot > 0) {
             var devicesToMerge: [0..1] int(32);
             swapPartitions(t, deviceBuffers, pivot, devices, devices.size: int(32), devicesToMerge);
-            forall i in 0..1 do
-                mergeLocalPartitions(t, deviceBuffers, pivot, devicesToMerge[i], devices, devices.size: int(32));
+            coforall deviceToMerge in devicesToMerge do
+                mergeLocalPartitions(t, deviceBuffers, pivot, deviceToMerge, devices, devices.size: int(32));
         }
 
         if (devices.size > 2) {
-            forall i in 0..1 {
+            coforall i in 0..1 {
                 var devicesSubset: [0..#devices.size / 2] int(32);
                 devicesSubset = devices((i * (devices.size / 2)) .. #(devices.size / 2));
                 mergePartitions(
@@ -118,6 +119,13 @@ module CUBRadixSort {
                     devicesSubset);
             }
         }
+/*
+// DEBUG - extra synchronization after merge
+        coforall deviceId in devices {
+          SetDevice(deviceId); 
+          DeviceSynchronize();
+        }
+*/
     }
 
     private proc cubSortKeysMergeOnHost(type t, devInPtr: c_void_ptr, devAOut: GPUArray, N: int) {
@@ -170,7 +178,7 @@ module CUBRadixSort {
 
     proc setupPeerAccess() {
         var allDevices = devices;
-        forall i in allDevices {
+        coforall i in allDevices {
             SetDevice(i);
             enablePeerAccess(allDevices, nGPUs);
         }
@@ -333,6 +341,7 @@ module CUBRadixSort {
         if logSortKernelTime {
             timer.stop();
             writef("merge on GPU %10.3dr\n", timer.elapsed()*1000.0);
+	            try! stdout.flush();
             timer.clear();
             timer.start();
         }
@@ -348,6 +357,7 @@ module CUBRadixSort {
                 } else if t == real(64) {
                     copyDeviceBufferToHost_double(deviceBuffers, aOut.localSlice(lo .. hi), N);
                 }
+                DeviceSynchronize();
             }
         }
         var copyBack = new Lambda2();
@@ -359,10 +369,11 @@ module CUBRadixSort {
         if logSortKernelTime {
             timer.stop();
             writef("copy back %10.3dr\n", timer.elapsed()*1000.0);
+	            try! stdout.flush();
             timer.clear();
             timer.start();
         }
-
+        
         if t == int(32) {
             destroyDeviceBuffers_int32(deviceBuffers);
         } else if t == int(64) {
