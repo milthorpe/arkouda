@@ -19,15 +19,13 @@ DeviceBuffers<T>* createDeviceBuffers(const size_t num_elements, const int *gpus
                   std::numeric_limits<T>::max());
     CheckCudaError(cudaStreamSynchronize(*device_buffers->GetPrimaryStream(lastDevice)));
   }
-
   return device_buffers;
 }
 
 template <typename T>
 void destroyDeviceBuffers(void *device_buffers_ptr) {
   DeviceBuffers<T>* device_buffers = (DeviceBuffers<T>*)device_buffers_ptr;
-  delete[] device_buffers;
-  
+  delete device_buffers;
 }
 
 template <typename T>

@@ -22,15 +22,13 @@ DeviceBuffers<T>* createDeviceBuffers(const size_t num_elements, const int *gpus
                   std::numeric_limits<T>::max());
     CheckCudaError(hipStreamSynchronize(*device_buffers->GetPrimaryStream(lastDevice)));
   }
-
   return device_buffers;
 }
 
 template <typename T>
 void destroyDeviceBuffers(void *device_buffers_ptr) {
   DeviceBuffers<T>* device_buffers = (DeviceBuffers<T>*)device_buffers_ptr;
-  delete[] device_buffers;
-  
+  delete device_buffers;
 }
 
 template <typename T>
@@ -39,10 +37,12 @@ void copyDeviceBufferToHost(void *device_buffers_ptr, T *hostArray, const size_t
   CheckCudaError(hipGetDevice(&deviceId));
   DeviceBuffers<T>* device_buffers = (DeviceBuffers<T>*)device_buffers_ptr;
   //CheckCudaError(hipStreamSynchronize(*device_buffers->GetPrimaryStream(deviceId)));
-  CheckCudaError(hipMemcpy(hostArray,
+  CheckCudaError(hipMemcpyAsync(hostArray,
                             thrust::raw_pointer_cast(device_buffers->AtPrimary(deviceId)->data()),
                             sizeof(T) * N,
-                            hipMemcpyDeviceToHost));
+                            hipMemcpyDeviceToHost,
+			    *device_buffers->GetPrimaryStream(deviceId)));
+  CheckCudaError(hipStreamSynchronize(*device_buffers->GetPrimaryStream(deviceId)));
 }
 
 template <typename T>
