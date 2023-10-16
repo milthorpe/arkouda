@@ -323,9 +323,9 @@ module CSVMsg {
         return (row_ct, hasHeader, new list(dtypes));
     }
 
-    proc read_files_into_dist_array(A: [?D] ?t, dset: string, filenames: [] string, filedomains: [] domain(1), skips: set(string), hasHeaders: bool, col_delim: string, offsets: [] int) throws {
+    proc read_files_into_dist_array(ref A: [?D] ?t, dset: string, filenames: [] string, filedomains: [] domain(1), skips: set(string), hasHeaders: bool, col_delim: string, offsets: [] int) throws {
 
-        coforall loc in A.targetLocales() do on loc {
+        coforall loc in A.targetLocales() with (ref A) do on loc {
             // Create local copies of args
             var locFiles = filenames;
             var locFiledoms = filedomains;
@@ -375,7 +375,7 @@ module CSVMsg {
     proc generate_subdoms(filenames: [?D] string, row_counts: [D] int, validFiles: [D] bool) throws {
         var skips = new set(string);
         var offsets = (+ scan row_counts) - row_counts;
-        var subdoms: [D] domain(1);
+        var subdoms = makeDistArray(D, domain(1));
         for (i, fname, off, ct, vf) in zip(D, filenames, offsets, row_counts, validFiles) {
             if (!vf) {
                 skips.add(fname);
@@ -400,7 +400,7 @@ module CSVMsg {
                 when DType.Int64 {
                     var a = makeDistArray(record_count, int);
                     read_files_into_dist_array(a, dset, filenames, subdoms, skips, true, col_delim, offsets);
-                    var entry = new shared SymEntry(a);
+                    var entry = createSymEntry(a);
                     var rname = st.nextName();
                     st.addEntry(rname, entry);
                     rtnData.pushBack((dset, ObjType.PDARRAY, rname));
@@ -408,7 +408,7 @@ module CSVMsg {
                 when DType.UInt64 {
                     var a = makeDistArray(record_count, uint);
                     read_files_into_dist_array(a, dset, filenames, subdoms, skips, true, col_delim, offsets);
-                    var entry = new shared SymEntry(a);
+                    var entry = createSymEntry(a);
                     var rname = st.nextName();
                     st.addEntry(rname, entry);
                     rtnData.pushBack((dset, ObjType.PDARRAY, rname));
@@ -416,7 +416,7 @@ module CSVMsg {
                 when DType.Float64 {
                     var a = makeDistArray(record_count, real);
                     read_files_into_dist_array(a, dset, filenames, subdoms, skips, true, col_delim, offsets);
-                    var entry = new shared SymEntry(a);
+                    var entry = createSymEntry(a);
                     var rname = st.nextName();
                     st.addEntry(rname, entry);
                     rtnData.pushBack((dset, ObjType.PDARRAY, rname));
@@ -424,7 +424,7 @@ module CSVMsg {
                 when DType.Bool {
                     var a = makeDistArray(record_count, bool);
                     read_files_into_dist_array(a, dset, filenames, subdoms, skips, true, col_delim, offsets);
-                    var entry = new shared SymEntry(a);
+                    var entry = createSymEntry(a);
                     var rname = st.nextName();
                     st.addEntry(rname, entry);
                     rtnData.pushBack((dset, ObjType.PDARRAY, rname));

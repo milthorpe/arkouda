@@ -47,47 +47,47 @@ module TimeClassMsg {
         var attributesDict = simpleAttributesHelper(valuesEntry.a, st);
 
         const valDom = valuesEntry.a.domain;
-        var year: [valDom] int;
-        var month: [valDom] int;
-        var day: [valDom] int;
-        var isoYear: [valDom] int;
-        var is_leap_year: [valDom] bool;
-        var weekOfYear: [valDom] int;
-        var dayOfYear: [valDom] int;
-        var dayOfWeek: [valDom] int;
+        var year = makeDistArray(valDom, int);
+        var month = makeDistArray(valDom, int);
+        var day = makeDistArray(valDom, int);
+        var isoYear = makeDistArray(valDom, int);
+        var is_leap_year = makeDistArray(valDom, bool);
+        var weekOfYear = makeDistArray(valDom, int);
+        var dayOfYear = makeDistArray(valDom, int);
+        var dayOfWeek = makeDistArray(valDom, int);
 
         forall (v, y, m, d, iso_y, is_ly, woy, doy, dow) in zip(valuesEntry.a, year, month, day, isoYear, is_leap_year, weekOfYear, dayOfYear, dayOfWeek) {
             // convert to seconds and create date
-            var t = date.createFromTimestamp(floorDivisionHelper(v, 10**9):int);
-            (y, m, d, (iso_y, woy, dow)) = (t.year, t.month, t.day, t.isoCalendar());
+            var t = createFromTimestampCompat(floorDivisionHelper(v, 10**9):int);
+            (y, m, d, (iso_y, woy, dow)) = (t.year, t.month, t.day, t.isoWeekDate());
             dow -= 1;
             is_ly = isLeapYear(y);
             doy = MONTHOFFSET[is_ly * 13 + m - 1] + d;
         }
 
         var retname = st.nextName();
-        st.addEntry(retname, new shared SymEntry(day));
+        st.addEntry(retname, createSymEntry(day));
         attributesDict.addOrReplace("day", "created %s".doFormat(st.attrib(retname)));
         retname = st.nextName();
-        st.addEntry(retname, new shared SymEntry(month));
+        st.addEntry(retname, createSymEntry(month));
         attributesDict.add("month", "created %s".doFormat(st.attrib(retname)));
         retname = st.nextName();
-        st.addEntry(retname, new shared SymEntry(year));
+        st.addEntry(retname, createSymEntry(year));
         attributesDict.add("year", "created %s".doFormat(st.attrib(retname)));
         retname = st.nextName();
-        st.addEntry(retname, new shared SymEntry(is_leap_year));
+        st.addEntry(retname, createSymEntry(is_leap_year));
         attributesDict.add("isLeapYear", "created %s".doFormat(st.attrib(retname)));
         retname = st.nextName();
-        st.addEntry(retname, new shared SymEntry(dayOfYear));
+        st.addEntry(retname, createSymEntry(dayOfYear));
         attributesDict.add("dayOfYear", "created %s".doFormat(st.attrib(retname)));
         retname = st.nextName();
-        st.addEntry(retname, new shared SymEntry(isoYear));
+        st.addEntry(retname, createSymEntry(isoYear));
         attributesDict.add("isoYear", "created %s".doFormat(st.attrib(retname)));
         retname = st.nextName();
-        st.addEntry(retname, new shared SymEntry(weekOfYear));
+        st.addEntry(retname, createSymEntry(weekOfYear));
         attributesDict.add("weekOfYear", "created %s".doFormat(st.attrib(retname)));
         retname = st.nextName();
-        st.addEntry(retname, new shared SymEntry(dayOfWeek));
+        st.addEntry(retname, createSymEntry(dayOfWeek));
         attributesDict.add("dayOfWeek", "created %s".doFormat(st.attrib(retname)));
 
         var repMsg: string = formatJson(attributesDict);
@@ -104,7 +104,7 @@ module TimeClassMsg {
         return new MsgTuple(repMsg, MsgType.NORMAL);
     }
 
-    proc simpleAttributesHelper(values: [?aD] ?t, st: borrowed SymTab): map throws {
+    proc simpleAttributesHelper(values: [?aD] ?t, st: borrowed SymTab): map(string, string) throws {
         var attributesDict = new map(keyType=string, valType=string);
         var denominator = 1;
         for (u, f) in zip(UNITS, FACTORS) {

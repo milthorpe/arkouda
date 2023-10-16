@@ -123,13 +123,13 @@ module ArgSortMsg
      */
     proc incrementalArgSort(g: GenSymEntry, iv: [?aD] int): [] int throws {
       // Store the incremental permutation to be applied on top of the initial perm
-      var deltaIV: [aD] int;
+      var deltaIV = makeDistArray(aD, int);
       // Discover the dtype of the entry holding the keys array
       select g.dtype {
           when DType.Int64 {
               var e = toSymEntry(g, int);
               // Permute the keys array with the initial iv
-              var newa: [e.a.domain] int;
+              var newa = makeDistArray(e.a.domain, int);
               ref olda = e.a;
               // Effectively: newa = olda[iv]
               forall (newai, idx) in zip(newa, iv) with (var agg = newSrcAggregator(int)) {
@@ -141,7 +141,7 @@ module ArgSortMsg
           when DType.UInt64 {
               var e = toSymEntry(g, uint);
               // Permute the keys array with the initial iv
-              var newa: [e.a.domain] uint;
+              var newa = makeDistArray(e.a.domain, uint);
               ref olda = e.a;
               // Effectively: newa = olda[iv]
               forall (newai, idx) in zip(newa, iv) with (var agg = newSrcAggregator(uint)) {
@@ -152,11 +152,23 @@ module ArgSortMsg
           }
           when DType.Float64 {
               var e = toSymEntry(g, real);
-              var newa: [e.a.domain] real;
+              var newa = makeDistArray(e.a.domain, real);
               ref olda = e.a;
               forall (newai, idx) in zip(newa, iv) with (var agg = newSrcAggregator(real)) {
                   agg.copy(newai, olda[idx]);
               }
+              deltaIV = argsortDefault(newa);
+          }
+          when DType.Bool {
+              var e = toSymEntry(g, bool);
+              // Permute the keys array with the initial iv
+              var newa = makeDistArray(e.a.domain, int);
+              ref olda = e.a;
+              // Effectively: newa = olda[iv]
+              forall (newai, idx) in zip(newa, iv) with (var agg = newSrcAggregator(int)) {
+                  agg.copy(newai, olda[idx]:int);
+              }
+              // Generate the next incremental permutation
               deltaIV = argsortDefault(newa);
           }
           otherwise { throw getErrorWithContext(
@@ -169,7 +181,7 @@ module ArgSortMsg
           }
       }
       // The output permutation is the composition of the initial and incremental permutations
-      var newIV: [aD] int;
+      var newIV = makeDistArray(aD, int);
       // Effectively: newIV = iv[deltaIV] 
       forall (newIVi, idx) in zip(newIV, deltaIV) with (var agg = newSrcAggregator(int)) {
         agg.copy(newIVi, iv[idx]);
@@ -179,14 +191,14 @@ module ArgSortMsg
 
     proc incrementalArgSort(s: SegString, iv: [?aD] int): [] int throws {
       var hashes = s.siphash();
-      var newHashes: [aD] 2*uint;
+      var newHashes = makeDistArray(aD, 2*uint);
       forall (nh, idx) in zip(newHashes, iv) with (var agg = newSrcAggregator((2*uint))) {
         agg.copy(nh, hashes[idx]);
       }
       var deltaIV = argsortDefault(newHashes);
       // var (newOffsets, newVals) = s[iv];
       // var deltaIV = newStr.argGroup();
-      var newIV: [aD] int;
+      var newIV = makeDistArray(aD, int);
       forall (newIVi, idx) in zip(newIV, deltaIV) with (var agg = newSrcAggregator(int)) {
         agg.copy(newIVi, iv[idx]);
       }
@@ -259,7 +271,7 @@ module ArgSortMsg
           var merged = mergeNumericArrays(numDigits, arrSize, totalDigits, bitWidths, negs, names, st);
 
           var iv = argsortDefault(merged, algorithm=algorithm);
-          st.addEntry(ivname, new shared SymEntry(iv));
+          st.addEntry(ivname, createSymEntry(iv));
 
           var repMsg = "created " + st.attrib(ivname);
           asLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),repMsg);
@@ -301,10 +313,11 @@ module ArgSortMsg
     
     proc argsortDefault(A:[?D] ?t, algorithm:SortingAlgorithm=defaultSortAlgorithm):[D] int throws {
       var t1 = Time.timeSinceEpoch().totalSeconds();
-      var iv: [D] int;
+      var iv = makeDistArray(D, int);
       select algorithm {
         when SortingAlgorithm.TwoArrayRadixSort {
-          var AI = [(a, i) in zip(A, D)] (a, i);
+          var AI = makeDistArray(D, (t,int));
+          AI = [(a, i) in zip(A, D)] (a, i);
           Sort.TwoArrayRadixSort.twoArrayRadixSort(AI, comparator=myDefaultComparator);
           iv = [(a, i) in AI] i;
         }
@@ -366,17 +379,23 @@ module ArgSortMsg
                 when (DType.Int64) {
                     var e = toSymEntry(gEnt,int);
                     var iv = argsortDefault(e.a, algorithm=algorithm);
-                    st.addEntry(ivname, new shared SymEntry(iv));
+                    st.addEntry(ivname, createSymEntry(iv));
                 }
                 when (DType.UInt64) {
                     var e = toSymEntry(gEnt,uint);
                     var iv = argsortDefault(e.a, algorithm=algorithm);
-                    st.addEntry(ivname, new shared SymEntry(iv));
+                    st.addEntry(ivname, createSymEntry(iv));
                 }
                 when (DType.Float64) {
                     var e = toSymEntry(gEnt, real);
                     var iv = argsortDefault(e.a);
-                    st.addEntry(ivname, new shared SymEntry(iv));
+                    st.addEntry(ivname, createSymEntry(iv));
+                }
+                when (DType.Bool) {
+                    var e = toSymEntry(gEnt,bool);
+                    var int_ea = makeDistArray(e.a:int);
+                    var iv = argsortDefault(int_ea, algorithm=algorithm);
+                    st.addEntry(ivname, createSymEntry(iv));
                 }
                 otherwise {
                     var errorMsg = notImplementedError(pn,gEnt.dtype);
@@ -391,7 +410,7 @@ module ArgSortMsg
             overMemLimit((8 * strings.size * 8)
                          + (2 * here.maxTaskPar * numLocales * 2**16 * 8));
             var iv = strings.argsort();
-            st.addEntry(ivname, new shared SymEntry(iv));
+            st.addEntry(ivname, createSymEntry(iv));
           }
           otherwise {
               var errorMsg = notImplementedError(pn, objtype: string);

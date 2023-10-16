@@ -12,7 +12,8 @@ module MultiTypeSymEntry
     use CTypes;
 
     public use NumPyDType;
-    public use SymArrayDmap;
+    public use SymArrayDmapCompat;
+    use ArkoudaSymEntryCompat;
 
     private config const logLevel = ServerConfig.logLevel;
     private config const logChannel = ServerConfig.logChannel;
@@ -31,7 +32,6 @@ module MultiTypeSymEntry
         
             GenSymEntry,
                 SegStringSymEntry,    // SegString composed of offset-int[], bytes->uint(8)
-                CategoricalSymEntry,  // Categorical
 
             CompositeSymEntry,        // Entries that consist of multiple SymEntries of varying type
 
@@ -142,7 +142,7 @@ module MultiTypeSymEntry
         
         // not sure yet how to implement numpy data() function
 
-        proc init(type etype, len: int = 0, GPU:bool = false) {
+        proc init(type etype, len: int = 0, param GPU:bool = false) {
             this.entryType = SymbolEntryType.TypedArraySymEntry;
             assignableTypes.add(this.entryType);
             this.dtype = whichDtype(etype);
@@ -217,53 +217,20 @@ module MultiTypeSymEntry
         var max_bits = -1;
 
         /*
-        This init takes length and element type
-
-        :arg len: length of array to be allocated
-        :type len: int
-
-        :arg etype: type to be instantiated
-        :type etype: type
-
-        :arg GPU: bool whether to allocate the array in GPU unified memory
-        */
-        proc init(len: int, type etype, param GPU:bool = false) {
-            super.init(etype, len);
-            this.entryType = SymbolEntryType.PrimitiveTypedArraySymEntry;
-            assignableTypes.add(this.entryType);
-
-            this.etype = etype;
-            this.GPU = GPU;
-            this.a = makeDistArray(size, etype, GPU);
-        }
-
-        /*
         This init takes an array whose type matches `makeDistArray()`
 
         :arg a: array
         :type a: [] ?etype
         */
-        proc init(in a: [?D] ?etype, max_bits=-1) {
+        proc init(in a: [?D] ?etype, max_bits=-1, param GPU:bool) {
             super.init(etype, D.size);
             this.entryType = SymbolEntryType.PrimitiveTypedArraySymEntry;
             assignableTypes.add(this.entryType);
 
             this.etype = etype;
-            this.GPU = false;
+            this.GPU = GPU;
             this.a = a;
             this.max_bits=max_bits;
-        }
-
-        /*
-        This init takes an array whose type is defaultRectangular (convenience
-        function for creating a distributed array from a non-distributed one)
-
-        :arg a: array
-        :type a: [] ?etype
-        */
-        proc init(a: [?D] ?etype) where MyDmap != Dmap.defaultRectangular && a.isDefaultRectangular() {
-            this.init(D.size, etype, GPU=false);
-            this.a = a;
         }
 
         proc prefetchLocalDataToDevice(lo: int, hi: int, deviceId: int(32)) {
@@ -282,27 +249,6 @@ module MultiTypeSymEntry
         */
         proc deinit() {
             if logLevel == LogLevel.DEBUG {writeln("deinit SymEntry");try! stdout.flush();}
-        }
-        
-        override proc writeThis(f) throws {
-          use Reflection;
-          proc writeField(f, param i) throws {
-            if !isArray(getField(this, i)) {
-              f.write(getFieldName(this.type, i), " = ", getField(this, i):string);
-            } else {
-              f.write(getFieldName(this.type, i), " = ", formatAry(getField(this, i)));
-            }
-          }
-
-          super.writeThis(f);
-          f.write(" {");
-          param nFields = numFields(this.type);
-          for param i in 0..nFields-2 {
-            writeField(f, i);
-            f.write(", ");
-          }
-          writeField(f, nFields-1);
-          f.write("}");
         }
 
         /*
@@ -347,6 +293,16 @@ module MultiTypeSymEntry
             return prefix + s + suffix;
         }
     }
+    
+    inline proc createSymEntry(len: int, type etype, param GPU:bool = false) throws {
+      var a = makeDistArray(len, etype, GPU);
+      return new shared SymEntry(a, GPU=GPU);
+    }
+
+    inline proc createSymEntry(in a: [?D] ?etype, max_bits=-1, param GPU:bool = false) throws {
+      var A = makeDistArray(a, GPU);
+      return new shared SymEntry(A, max_bits=max_bits, GPU);
+    }
 
     /*
         Base class for any entry that consists of multiple SymEntries that have varying types.
@@ -376,7 +332,7 @@ module MultiTypeSymEntry
     */
     proc createTypedSymEntry(len: int, type t) throws {
         if t == bool {overMemLimit(len);} else {overMemLimit(len*numBytes(t));}
-        return new shared SymEntry(len, t);
+        return createSymEntry(len,t);
     }
 
     class SegStringSymEntry:GenSymEntry {
@@ -385,7 +341,7 @@ module MultiTypeSymEntry
         var offsetsEntry: shared SymEntry(int);
         var bytesEntry: shared SymEntry(uint(8));
 
-        proc init(offsetsSymEntry: shared SymEntry, bytesSymEntry: shared SymEntry, type etype) {
+        proc init(offsetsSymEntry: shared SymEntry(int), bytesSymEntry: shared SymEntry(uint(8)), type etype) {
             super.init(etype, bytesSymEntry.size);
             this.entryType = SymbolEntryType.SegStringSymEntry;
             assignableTypes.add(this.entryType);

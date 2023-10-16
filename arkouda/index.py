@@ -1,3 +1,4 @@
+import json
 from typing import List, Optional, Union
 
 import pandas as pd  # type: ignore
@@ -8,21 +9,24 @@ from arkouda.dtypes import bool as akbool
 from arkouda.dtypes import float64 as akfloat64
 from arkouda.dtypes import int64 as akint64
 from arkouda.groupbyclass import GroupBy, unique
-from arkouda.infoclass import list_registry
-from arkouda.pdarrayclass import pdarray
-from arkouda.pdarraycreation import arange, array, ones
+from arkouda.numeric import cast as akcast
+from arkouda.pdarrayclass import RegistrationError, pdarray
+from arkouda.pdarraycreation import arange, array, create_pdarray, ones
 from arkouda.pdarraysetops import argsort, in1d
 from arkouda.sorting import coargsort
-from arkouda.util import convert_if_categorical, generic_concat, get_callback, register
+from arkouda.util import convert_if_categorical, generic_concat, get_callback
 
 
 class Index:
+    objType = "Index"
+
     @typechecked
     def __init__(
         self,
         values: Union[List, pdarray, Strings, Categorical, pd.Index, "Index"],
         name: Optional[str] = None,
     ):
+        self.registered_name: Optional[str] = None
         if isinstance(values, Index):
             self.values = values.values
             self.size = values.size
@@ -103,6 +107,22 @@ class Index:
         else:
             return MultiIndex(index)
 
+    @classmethod
+    def from_return_msg(cls, rep_msg):
+        data = json.loads(rep_msg)
+
+        idx = []
+        for d in data:
+            i_comps = d.split("+|+")
+            if i_comps[0].lower() == pdarray.objType.lower():
+                idx.append(create_pdarray(i_comps[1]))
+            elif i_comps[0].lower() == Strings.objType.lower():
+                idx.append(Strings.from_return_msg(i_comps[1]))
+            elif i_comps[0].lower() == Categorical.objType.lower():
+                idx.append(Categorical.from_return_msg(i_comps[1]))
+
+        return cls.factory(idx) if len(idx) > 1 else cls.factory(idx[0])
+
     def to_pandas(self):
         val = convert_if_categorical(self.values).to_ndarray()
         return pd.Index(data=val, dtype=val.dtype, name=self.name)
@@ -123,26 +143,145 @@ class Index:
         self.values = new_idx
         return self
 
-    def register(self, label):
-        register(self.values, f"{label}_key")
-        self.name = label
-        return 1
-
-    def is_registered(self):
+    def register(self, user_defined_name):
         """
-        Return True if the object is contained in the registry
+        Register this Index object and underlying components with the Arkouda server
+
+        Parameters
+        ----------
+        user_defined_name : str
+            user defined name the Index is to be registered under,
+            this will be the root name for underlying components
 
         Returns
         -------
-        bool
+        Index
+            The same Index which is now registered with the arkouda server and has an updated name.
+            This is an in-place modification, the original is returned to support
+            a fluid programming style.
+            Please note you cannot register two different Indexes with the same name.
+
+        Raises
+        ------
+        TypeError
+            Raised if user_defined_name is not a str
+        RegistrationError
+            If the server was unable to register the Index with the user_defined_name
+
+        See also
+        --------
+        unregister, attach, is_registered
+
+        Notes
+        -----
+        Objects registered with the server are immune to deletion until
+        they are unregistered.
+        """
+        from arkouda.client import generic_msg
+
+        if self.registered_name is not None and self.is_registered():
+            raise RegistrationError(f"This object is already registered as {self.registered_name}")
+
+        generic_msg(
+            cmd="register",
+            args={
+                "name": user_defined_name,
+                "objType": self.objType,
+                "num_idxs": 1,
+                "idx_names": [
+                    json.dumps(
+                        {
+                            "codes": self.values.codes.name,
+                            "categories": self.values.categories.name,
+                            "NA_codes": self.values._akNAcode.name,
+                            **(
+                                {"permutation": self.values.permutation.name}
+                                if self.values.permutation is not None
+                                else {}
+                            ),
+                            **(
+                                {"segments": self.values.segments.name}
+                                if self.values.segments is not None
+                                else {}
+                            ),
+                        }
+                    )
+                    if isinstance(self.values, Categorical)
+                    else self.values.name
+                ],
+                "idx_types": [self.values.objType],
+            },
+        )
+        self.registered_name = user_defined_name
+        return self
+
+    def unregister(self):
+        """
+        Unregister this Index object in the arkouda server which was previously
+        registered using register() and/or attached to using attach()
+
+        Raises
+        ------
+        RegistrationError
+            If the object is already unregistered or if there is a server error
+            when attempting to unregister
+
+        See also
+        --------
+        register, attach, is_registered
+
+        Notes
+        -----
+        Objects registered with the server are immune to deletion until
+        they are unregistered.
+        """
+        from arkouda.util import unregister
+
+        if not self.registered_name:
+            raise RegistrationError("This object is not registered")
+        unregister(self.registered_name)
+        self.registered_name = None
+
+    def is_registered(self):
+        """
+         Return True iff the object is contained in the registry or is a component of a
+         registered object.
+
+        Returns
+        -------
+        numpy.bool
             Indicates if the object is contained in the registry
 
         Raises
         ------
-        RuntimeError
-            Raised if there's a server-side error thrown
+        RegistrationError
+            Raised if there's a server-side error or a mis-match of registered components
+
+        See Also
+        --------
+        register, attach, unregister
+
+        Notes
+        -----
+        Objects registered with the server are immune to deletion until
+        they are unregistered.
         """
-        return f"{self.name}_key" in list_registry()
+        from arkouda.util import is_registered
+
+        if self.registered_name is None:
+            if not isinstance(self.values, Categorical):
+                return is_registered(self.values.name, as_component=True)
+            else:
+                result = True
+                result &= is_registered(self.values.codes.name, as_component=True)
+                result &= is_registered(self.values.categories.name, as_component=True)
+                result &= is_registered(self.values._akNAcode.name, as_component=True)
+                if self.values.permutation is not None and self.values.segments is not None:
+                    result &= is_registered(self.values.permutation.name, as_component=True)
+                    result &= is_registered(self.values.segments.name, as_component=True)
+                return result
+        else:
+            return is_registered(self.registered_name)
 
     def to_dict(self, label):
         data = {}
@@ -250,12 +389,55 @@ class Index:
         - Any file extension can be used.The file I/O does not rely on the extension to
         determine the file format.
         """
-        return self.values.to_hdf(prefix_path, dataset=dataset, mode=mode, file_type=file_type)
+        from typing import cast as typecast
+
+        from arkouda.categorical import Categorical as Categorical_
+        from arkouda.client import generic_msg
+        from arkouda.io import _file_type_to_int, _mode_str_to_int
+
+        index_data = [
+            self.values.name
+            if not isinstance(self.values, (Categorical_))
+            else json.dumps(
+                {
+                    "codes": self.values.codes.name,
+                    "categories": self.values.categories.name,
+                    "NA_codes": self.values._akNAcode.name,
+                    **(
+                        {"permutation": self.values.permutation.name}
+                        if self.values.permutation is not None
+                        else {}
+                    ),
+                    **(
+                        {"segments": self.values.segments.name}
+                        if self.values.segments is not None
+                        else {}
+                    ),
+                }
+            )
+        ]
+        return typecast(
+            str,
+            generic_msg(
+                cmd="tohdf",
+                args={
+                    "filename": prefix_path,
+                    "dset": dataset,
+                    "file_format": _file_type_to_int(file_type),
+                    "write_mode": _mode_str_to_int(mode),
+                    "objType": self.objType,
+                    "num_idx": 1,
+                    "idx": index_data,
+                    "idx_objTypes": [self.values.objType],  # this will be pdarray, strings, or cat
+                    "idx_dtypes": [str(self.values.dtype)],
+                },
+            ),
+        )
 
     def update_hdf(
         self,
         prefix_path: str,
-        dataset: str = "array",
+        dataset: str = "index",
         repack: bool = True,
     ):
         """
@@ -292,7 +474,58 @@ class Index:
         - Because HDF5 deletes do not release memory, this will create a copy of the
           file with the new data
         """
-        return self.values.update_hdf(prefix_path, dataset=dataset, repack=repack)
+        from arkouda.categorical import Categorical as Categorical_
+        from arkouda.client import generic_msg
+        from arkouda.io import (
+            _file_type_to_int,
+            _get_hdf_filetype,
+            _mode_str_to_int,
+            _repack_hdf,
+        )
+
+        # determine the format (single/distribute) that the file was saved in
+        file_type = _get_hdf_filetype(prefix_path + "*")
+
+        index_data = [
+            self.values.name
+            if not isinstance(self.values, (Categorical_))
+            else json.dumps(
+                {
+                    "codes": self.values.codes.name,
+                    "categories": self.values.categories.name,
+                    "NA_codes": self.values._akNAcode.name,
+                    **(
+                        {"permutation": self.values.permutation.name}
+                        if self.values.permutation is not None
+                        else {}
+                    ),
+                    **(
+                        {"segments": self.values.segments.name}
+                        if self.values.segments is not None
+                        else {}
+                    ),
+                }
+            )
+        ]
+
+        generic_msg(
+            cmd="tohdf",
+            args={
+                "filename": prefix_path,
+                "dset": dataset,
+                "file_format": _file_type_to_int(file_type),
+                "write_mode": _mode_str_to_int("append"),
+                "objType": self.objType,
+                "num_idx": 1,
+                "idx": index_data,
+                "idx_objTypes": [self.values.objType],  # this will be pdarray, strings, or cat
+                "idx_dtypes": [str(self.values.dtype)],
+                "overwrite": True,
+            },
+        ),
+
+        if repack:
+            _repack_hdf(prefix_path)
 
     def to_parquet(
         self,
@@ -478,20 +711,25 @@ class Index:
 
 
 class MultiIndex(Index):
+    objType = "MultiIndex"
+
     def __init__(self, values):
+        self.registered_name: Optional[str] = None
         if not (isinstance(values, list) or isinstance(values, tuple)):
             raise TypeError("MultiIndex should be an iterable")
         self.values = values
         first = True
         for col in self.values:
+            # col can be a python int which doesn't have a size attribute
+            col_size = col.size if not isinstance(col, int) else 0
             if first:
                 # we are implicitly assuming values contains arkouda types and not python lists
                 # because we are using obj.size/obj.dtype instead of len(obj)/type(obj)
                 # this should be made explict using typechecking
-                self.size = col.size
+                self.size = col_size
                 first = False
             else:
-                if col.size != self.size:
+                if col_size != self.size:
                     raise ValueError("All columns in MultiIndex must have same length")
         self.levels = len(self.values)
 
@@ -537,10 +775,93 @@ class MultiIndex(Index):
         self.index = new_idx
         return self
 
-    def register(self, label):
-        for i, arr in enumerate(self.index):
-            register(arr, f"{label}_key_{i}")
-        return len(self.index)
+    def to_ndarray(self):
+        import numpy as np
+
+        return np.array([convert_if_categorical(val).to_ndarray() for val in self.values])
+
+    def to_list(self):
+        return self.to_ndarray().tolist()
+
+    def register(self, user_defined_name):
+        """
+        Register this Index object and underlying components with the Arkouda server
+
+        Parameters
+        ----------
+        user_defined_name : str
+            user defined name the Index is to be registered under,
+            this will be the root name for underlying components
+
+        Returns
+        -------
+        MultiIndex
+            The same Index which is now registered with the arkouda server and has an updated name.
+            This is an in-place modification, the original is returned to support
+            a fluid programming style.
+            Please note you cannot register two different Indexes with the same name.
+
+        Raises
+        ------
+        TypeError
+            Raised if user_defined_name is not a str
+        RegistrationError
+            If the server was unable to register the Index with the user_defined_name
+
+        See also
+        --------
+        unregister, attach, is_registered
+
+        Notes
+        -----
+        Objects registered with the server are immune to deletion until
+        they are unregistered.
+        """
+        from arkouda.client import generic_msg
+
+        if self.registered_name is not None and self.is_registered():
+            raise RegistrationError(f"This object is already registered as {self.registered_name}")
+
+        generic_msg(
+            cmd="register",
+            args={
+                "name": user_defined_name,
+                "objType": self.objType,
+                "num_idxs": len(self.values),
+                "idx_names": [
+                    json.dumps(
+                        {
+                            "codes": v.codes.name,
+                            "categories": v.categories.name,
+                            "NA_codes": v._akNAcode.name,
+                            **({"permutation": v.permutation.name} if v.permutation is not None else {}),
+                            **({"segments": v.segments.name} if v.segments is not None else {}),
+                        }
+                    )
+                    if isinstance(v, Categorical)
+                    else v.name
+                    for v in self.values
+                ],
+                "idx_types": [v.objType for v in self.values],
+            },
+        )
+        self.registered_name = user_defined_name
+        return self
+
+    def unregister(self):
+        from arkouda.util import unregister
+
+        if not self.registered_name:
+            raise RegistrationError("This object is not registered")
+        unregister(self.registered_name)
+        self.registered_name = None
+
+    def is_registered(self):
+        from arkouda.util import is_registered
+
+        if self.registered_name is None:
+            return False
+        return is_registered(self.registered_name)
 
     def to_dict(self, labels):
         data = {}
@@ -580,5 +901,176 @@ class MultiIndex(Index):
             raise TypeError("MultiIndex lookup failure")
         # if individual vals convert to pdarrays
         if not isinstance(key[0], pdarray):
-            key = [array([x]) for x in key]
+            dt = self.values[0].dtype if isinstance(self.values[0], pdarray) else akint64
+            key = [akcast(array([x]), dt) for x in key]
+
         return in1d(self.index, key)
+
+    def to_hdf(
+        self,
+        prefix_path: str,
+        dataset: str = "index",
+        mode: str = "truncate",
+        file_type: str = "distribute",
+    ) -> str:
+        """
+        Save the Index to HDF5.
+        The object can be saved to a collection of files or single file.
+        Parameters
+        ----------
+        prefix_path : str
+            Directory and filename prefix that all output files share
+        dataset : str
+            Name of the dataset to create in files (must not already exist)
+        mode : str {'truncate' | 'append'}
+            By default, truncate (overwrite) output files, if they exist.
+            If 'append', attempt to create new dataset in existing files.
+        file_type: str ("single" | "distribute")
+            Default: "distribute"
+            When set to single, dataset is written to a single file.
+            When distribute, dataset is written on a file per locale.
+            This is only supported by HDF5 files and will have no impact of Parquet Files.
+        Returns
+        -------
+        string message indicating result of save operation
+        Raises
+        -------
+        RuntimeError
+            Raised if a server-side error is thrown saving the pdarray
+        Notes
+        -----
+        - The prefix_path must be visible to the arkouda server and the user must
+        have write permission.
+        - Output files have names of the form ``<prefix_path>_LOCALE<i>``, where ``<i>``
+        ranges from 0 to ``numLocales`` for `file_type='distribute'`. Otherwise,
+        the file name will be `prefix_path`.
+        - If any of the output files already exist and
+        the mode is 'truncate', they will be overwritten. If the mode is 'append'
+        and the number of output files is less than the number of locales or a
+        dataset with the same name already exists, a ``RuntimeError`` will result.
+        - Any file extension can be used.The file I/O does not rely on the extension to
+        determine the file format.
+        """
+        from typing import cast as typecast
+
+        from arkouda.categorical import Categorical as Categorical_
+        from arkouda.client import generic_msg
+        from arkouda.io import _file_type_to_int, _mode_str_to_int
+
+        index_data = [
+            obj.name
+            if not isinstance(obj, (Categorical_))
+            else json.dumps(
+                {
+                    "codes": obj.codes.name,
+                    "categories": obj.categories.name,
+                    "NA_codes": obj._akNAcode.name,
+                    **({"permutation": obj.permutation.name} if obj.permutation is not None else {}),
+                    **({"segments": obj.segments.name} if obj.segments is not None else {}),
+                }
+            )
+            for obj in self.values
+        ]
+        return typecast(
+            str,
+            generic_msg(
+                cmd="tohdf",
+                args={
+                    "filename": prefix_path,
+                    "dset": dataset,
+                    "file_format": _file_type_to_int(file_type),
+                    "write_mode": _mode_str_to_int(mode),
+                    "objType": self.objType,
+                    "num_idx": len(self.values),
+                    "idx": index_data,
+                    "idx_objTypes": [obj.objType for obj in self.values],
+                    "idx_dtypes": [str(obj.dtype) for obj in self.values],
+                },
+            ),
+        )
+
+    def update_hdf(
+        self,
+        prefix_path: str,
+        dataset: str = "index",
+        repack: bool = True,
+    ):
+        """
+        Overwrite the dataset with the name provided with this Index object. If
+        the dataset does not exist it is added.
+
+        Parameters
+        -----------
+        prefix_path : str
+            Directory and filename prefix that all output files share
+        dataset : str
+            Name of the dataset to create in files
+        repack: bool
+            Default: True
+            HDF5 does not release memory on delete. When True, the inaccessible
+            data (that was overwritten) is removed. When False, the data remains, but is
+            inaccessible. Setting to false will yield better performance, but will cause
+            file sizes to expand.
+
+        Returns
+        --------
+        str - success message if successful
+
+        Raises
+        -------
+        RuntimeError
+            Raised if a server-side error is thrown saving the index
+
+        Notes
+        ------
+        - If file does not contain File_Format attribute to indicate how it was saved,
+          the file name is checked for _LOCALE#### to determine if it is distributed.
+        - If the dataset provided does not exist, it will be added
+        - Because HDF5 deletes do not release memory, this will create a copy of the
+          file with the new data
+        """
+        from arkouda.categorical import Categorical as Categorical_
+        from arkouda.client import generic_msg
+        from arkouda.io import (
+            _file_type_to_int,
+            _get_hdf_filetype,
+            _mode_str_to_int,
+            _repack_hdf,
+        )
+
+        # determine the format (single/distribute) that the file was saved in
+        file_type = _get_hdf_filetype(prefix_path + "*")
+
+        index_data = [
+            obj.name
+            if not isinstance(obj, (Categorical_))
+            else json.dumps(
+                {
+                    "codes": obj.codes.name,
+                    "categories": obj.categories.name,
+                    "NA_codes": obj._akNAcode.name,
+                    **({"permutation": obj.permutation.name} if obj.permutation is not None else {}),
+                    **({"segments": obj.segments.name} if obj.segments is not None else {}),
+                }
+            )
+            for obj in self.values
+        ]
+
+        generic_msg(
+            cmd="tohdf",
+            args={
+                "filename": prefix_path,
+                "dset": dataset,
+                "file_format": _file_type_to_int(file_type),
+                "write_mode": _mode_str_to_int("append"),
+                "objType": self.objType,
+                "num_idx": len(self.values),
+                "idx": index_data,
+                "idx_objTypes": [obj.objType for obj in self.values],
+                "idx_dtypes": [str(obj.dtype) for obj in self.values],
+                "overwrite": True,
+            },
+        ),
+
+        if repack:
+            _repack_hdf(prefix_path)

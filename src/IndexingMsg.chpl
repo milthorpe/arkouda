@@ -49,7 +49,7 @@ module IndexingMsg
         // String array containing the type of the following value at even indicies then the value ex. ["int", "7", "slice", "(0,5,-1)", "pdarray", "id_4"]
         var typeCoords: [0..#(ndim*2)] string = msgArgs.get("coords").getList(ndim*2);
 
-        var scaledCoords: [makeDistDom(+ reduce dims)] int;
+        var scaledCoords = makeDistArray(+ reduce dims, int);
         // check there's enough room to create a copy for scan and throw if creating a copy would go over memory limit
         overMemLimit(numBytes(int) * dims.size);
         var offsets = (+ scan dims) - dims;
@@ -363,7 +363,7 @@ module IndexingMsg
                 return new MsgTuple(errorMsg,MsgType.ERROR);               
             }
             if ivMax >= e.size {
-                var errorMsg = "Error: %s: OOBindex %i > %i".doFormat(pn,ivMin,e.size-1);
+                var errorMsg = "Error: %s: OOBindex %i > %i".doFormat(pn,ivMax,e.size-1);
                 imLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);             
                 return new MsgTuple(errorMsg,MsgType.ERROR);
             }
@@ -399,7 +399,7 @@ module IndexingMsg
                 return new MsgTuple(errorMsg,MsgType.ERROR);               
             }
             if ivMax >= e.size {
-                var errorMsg = "Error: %s: OOBindex %i > %i".doFormat(pn,ivMin,e.size-1);
+                var errorMsg = "Error: %s: OOBindex %i > %i".doFormat(pn,ivMax,e.size-1);
                 imLogger.error(getModuleName(),getRoutineName(),getLineNumber(),errorMsg);             
                 return new MsgTuple(errorMsg,MsgType.ERROR);
             }
@@ -608,7 +608,10 @@ module IndexingMsg
                 var e = toSymEntry(gEnt,bigint);
                 var val = valueArg.getBigIntValue();
                 if e.max_bits != -1 {
-                  mod(val, val, e.max_bits);
+                    var max_size = 1:bigint;
+                    max_size <<= e.max_bits;
+                    max_size -= 1;
+                    val &= max_size;
                 }
                 e.a[idx] = val;
              }
@@ -616,7 +619,10 @@ module IndexingMsg
                 var e = toSymEntry(gEnt,bigint);
                 var val = valueArg.getIntValue():bigint;
                 if e.max_bits != -1 {
-                  mod(val, val, e.max_bits);
+                    var max_size = 1:bigint;
+                    max_size <<= e.max_bits;
+                    max_size -= 1;
+                    val &= max_size;
                 }
                 e.a[idx] = val;
              }
@@ -624,7 +630,10 @@ module IndexingMsg
                 var e = toSymEntry(gEnt,bigint);
                 var val = valueArg.getUIntValue():bigint;
                 if e.max_bits != -1 {
-                  mod(val, val, e.max_bits);
+                    var max_size = 1:bigint;
+                    max_size <<= e.max_bits;
+                    max_size -= 1;
+                    val &= max_size;
                 }
                 e.a[idx] = val;
              }
@@ -632,7 +641,10 @@ module IndexingMsg
                 var e = toSymEntry(gEnt,bigint);
                 var val = valueArg.getBoolValue():bigint;
                 if e.max_bits != -1 {
-                  mod(val, val, e.max_bits);
+                    var max_size = 1:bigint;
+                    max_size <<= e.max_bits;
+                    max_size -= 1;
+                    val &= max_size;
                 }
                 e.a[idx] = val;
              }
@@ -1150,7 +1162,10 @@ module IndexingMsg
                 var e = toSymEntry(gEnt,bigint);
                 var val = value.getBigIntValue();
                 if e.max_bits != -1 {
-                  mod(val, val, e.max_bits);
+                    var max_size = 1:bigint;
+                    max_size <<= e.max_bits;
+                    max_size -= 1;
+                    val &= max_size;
                 }
                 e.a[slice] = val;
              }
@@ -1158,7 +1173,10 @@ module IndexingMsg
                 var e = toSymEntry(gEnt,bigint);
                 var val = value.getIntValue():bigint;
                 if e.max_bits != -1 {
-                  mod(val, val, e.max_bits);
+                    var max_size = 1:bigint;
+                    max_size <<= e.max_bits;
+                    max_size -= 1;
+                    val &= max_size;
                 }
                 e.a[slice] = val;
              }
@@ -1166,7 +1184,10 @@ module IndexingMsg
                 var e = toSymEntry(gEnt,bigint);
                 var val = value.getUIntValue():bigint;
                 if e.max_bits != -1 {
-                  mod(val, val, e.max_bits);
+                    var max_size = 1:bigint;
+                    max_size <<= e.max_bits;
+                    max_size -= 1;
+                    val &= max_size;
                 }
                 e.a[slice] = val;
              }
@@ -1174,7 +1195,10 @@ module IndexingMsg
                 var e = toSymEntry(gEnt,bigint);
                 var val = value.getBoolValue():bigint;
                 if e.max_bits != -1 {
-                  mod(val, val, e.max_bits);
+                    var max_size = 1:bigint;
+                    max_size <<= e.max_bits;
+                    max_size -= 1;
+                    val &= max_size;
                 }
                 e.a[slice] = val;
              }
@@ -1309,7 +1333,12 @@ module IndexingMsg
                 var x = toSymEntry(gX,bigint);
                 var y = toSymEntry(gY,bigint);
                 if x.max_bits != -1 {
-                    mod(y.a, y.a, x.max_bits);
+                    var max_size = 1:bigint;
+                    max_size <<= x.max_bits;
+                    max_size -= 1;
+                    forall y in y.a with (var local_max_size = max_size) {
+                        y &= local_max_size;
+                    }
                 }
                 x.a[slice] = y.a;
              }
@@ -1318,7 +1347,12 @@ module IndexingMsg
                 var y = toSymEntry(gY,int);
                 var ya = y.a:bigint;
                 if x.max_bits != -1 {
-                    mod(ya, ya, x.max_bits);
+                    var max_size = 1:bigint;
+                    max_size <<= x.max_bits;
+                    max_size -= 1;
+                    forall y in ya with (var local_max_size = max_size) {
+                        y &= local_max_size;
+                    }
                 }
                 x.a[slice] = ya;
              }
@@ -1327,7 +1361,12 @@ module IndexingMsg
                 var y = toSymEntry(gY,uint);
                 var ya = y.a:bigint;
                 if x.max_bits != -1 {
-                    mod(ya, ya, x.max_bits);
+                    var max_size = 1:bigint;
+                    max_size <<= x.max_bits;
+                    max_size -= 1;
+                    forall y in ya with (var local_max_size = max_size) {
+                        y &= local_max_size;
+                    }
                 }
                 x.a[slice] = ya;
              }
@@ -1337,7 +1376,12 @@ module IndexingMsg
                 // TODO change once we can cast directly from bool to bigint
                 var ya = y.a:int:bigint;
                 if x.max_bits != -1 {
-                    mod(ya, ya, x.max_bits);
+                    var max_size = 1:bigint;
+                    max_size <<= x.max_bits;
+                    max_size -= 1;
+                    forall y in ya with (var local_max_size = max_size) {
+                        y &= local_max_size;
+                    }
                 }
                 x.a[slice] = ya;
              }

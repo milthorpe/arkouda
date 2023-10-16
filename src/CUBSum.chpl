@@ -44,7 +44,7 @@ module CUBSum {
     }
 
     /** Perform a sum over an Arkouda array in unified memory */
-    proc cubSum(ref e: SymEntry) where e.GPU == true {
+    proc cubSum(ref e: SymEntry(?)) where e.GPU == true {
         var sum: e.etype = 0;
         ref a = e.a;
         coforall loc in a.targetLocales() with (+ reduce sum) do on loc {
@@ -125,7 +125,7 @@ module CUBSum {
         return sum;
     }
 
-    proc cubSumUnified(arr: GPUUnifiedArray) {
+    proc cubSumUnified(arr: GPUUnifiedArray(?)) {
         var deviceSum: [0..#nGPUs] arr.etype;
 
         // TODO: proper lambda functions break Chapel compiler

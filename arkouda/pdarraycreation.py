@@ -501,7 +501,7 @@ def ones(
 @typechecked
 def full(
     size: Union[int_scalars, str],
-    fill_value: Union[int_scalars, str],
+    fill_value: Union[numeric_scalars, str],
     dtype: Union[np.dtype, type, str, BigInt] = float64,
     max_bits: Optional[int] = None,
 ) -> Union[pdarray, Strings]:
@@ -677,7 +677,7 @@ def ones_like(pda: pdarray) -> pdarray:
 
 
 @typechecked
-def full_like(pda: pdarray, fill_value: int_scalars) -> pdarray:
+def full_like(pda: pdarray, fill_value: numeric_scalars) -> pdarray:
     """
     Create a pdarray filled with fill_value of the same size and dtype as an existing
     pdarray.
@@ -786,8 +786,6 @@ def arange(*args, **kwargs) -> pdarray:
     >>> ak.arange(-5, -10, -1)
     array([-5, -6, -7, -8, -9])
     """
-    from arkouda.numeric import cast as akcast
-
     # if one arg is given then arg is stop
     if len(args) == 1:
         start = 0
@@ -814,10 +812,9 @@ def arange(*args, **kwargs) -> pdarray:
 
     if isSupportedInt(start) and isSupportedInt(stop) and isSupportedInt(stride):
         arg_dtypes = [resolve_scalar_dtype(arg) for arg in (start, stop, stride)]
-        max_bits = None
+        max_bits = -1 if "max_bits" not in kwargs.keys() else kwargs["max_bits"]
         arg_dtype = "int64"
-        if dtype in ["bigint", bigint] or "bigint" in arg_dtypes:
-            max_bits = None if "max_bits" not in kwargs.keys() else kwargs["max_bits"]
+        if dtype in ["bigint", bigint] or "bigint" in arg_dtypes or max_bits != -1:
             arg_dtype = "bigint"
         elif "uint64" in arg_dtypes:
             arg_dtype = "uint64"
@@ -830,7 +827,7 @@ def arange(*args, **kwargs) -> pdarray:
         return (
             create_pdarray(repMsg, max_bits=max_bits)
             if dtype == akint64
-            else akcast(create_pdarray(repMsg, max_bits=max_bits), dtype)
+            else array(create_pdarray(repMsg), max_bits=max_bits, dtype=dtype)
         )
     else:
         raise TypeError(

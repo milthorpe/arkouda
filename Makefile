@@ -125,7 +125,7 @@ install-hdf5:
 	rm -rf $(HDF5_BUILD_DIR)
 	echo '$$(eval $$(call add-path,$(HDF5_INSTALL_DIR)))' >> Makefile.paths
 
-ARROW_VER := 9.0.0
+ARROW_VER := 11.0.0
 ARROW_NAME_VER := apache-arrow-$(ARROW_VER)
 ARROW_FULL_NAME_VER := arrow-apache-arrow-$(ARROW_VER)
 ARROW_BUILD_DIR := $(DEP_BUILD_DIR)/$(ARROW_FULL_NAME_VER)
@@ -320,7 +320,6 @@ ARKOUDA_SOURCES = $(shell find $(ARKOUDA_SOURCE_DIR)/ -type f -name '*.chpl')
 ARKOUDA_MAIN_SOURCE := $(ARKOUDA_SOURCE_DIR)/$(ARKOUDA_MAIN_MODULE).chpl
 
 ifeq ($(shell expr $(CHPL_MINOR) \> 31),1)
-	CHPL_COMPAT_FLAGS += -sbigintInitThrows=true
 	ARKOUDA_COMPAT_MODULES += -M $(ARKOUDA_SOURCE_DIR)/compat/gt-131
 endif
 

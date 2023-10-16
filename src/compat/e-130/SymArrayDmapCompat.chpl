@@ -1,5 +1,5 @@
 
-module SymArrayDmap
+module SymArrayDmapCompat
 {
     use ChplConfig;
 
@@ -77,6 +77,27 @@ module SymArrayDmap
     proc makeDistArray(size:int, type etype, param GPU:bool = false) {
         var a: [makeDistDom(size, GPU)] etype;
         return a;
+    }
+
+    proc makeDistArray(in a: [?D] ?etype)
+      where MyDmap != Dmap.defaultRectangular && a.isDefaultRectangular() {
+        var res = makeDistArray(D.size, etype);
+        res = a;
+        return res;
+    }
+
+    proc makeDistArray(in a: [?D] ?etype) {
+        return a;
+    }
+
+    proc makeDistArray(D: domain, type etype) {
+      var res: [D] etype;
+      return res;
+    }
+
+    proc makeDistArray(D: domain, initExpr: ?t) throws {
+      var res: [D] t = initExpr;
+      return res;
     }
 
     /* 

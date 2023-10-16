@@ -8,6 +8,7 @@ import numpy as np  # type: ignore
 import pandas as pd  # type: ignore
 from base_test import ArkoudaTest
 from context import arkouda as ak
+from pandas.testing import assert_frame_equal
 
 from arkouda import io_util
 
@@ -432,6 +433,32 @@ class DataFrameTest(ArkoudaTest):
         self.assertListEqual(c.index.to_list(), ["Bob", "Alice", "Carol"])
         self.assertListEqual(c.values.to_list(), [2, 3, 1])
 
+    def test_gb_aggregations(self):
+        df = build_ak_df()
+        pd_df = build_pd_df()
+        # remove strings col because many aggregations don't support it
+        cols_without_str = list(set(df.columns) - {"userName"})
+        df = df[cols_without_str]
+        pd_df = pd_df[cols_without_str]
+
+        group_on = "userID"
+        for agg in ["sum", "first"]:
+            for col in df.columns:
+                if col == group_on:
+                    # pandas groupby doesn't return the column used to group
+                    continue
+                ak_ans = getattr(df.groupby(group_on), agg)(col)
+                pd_ans = getattr(pd_df.groupby(group_on), agg)()[col]
+                self.assertListEqual(ak_ans.to_list(), pd_ans.to_list())
+
+            # pandas groupby doesn't return the column used to group
+            cols_without_group_on = list(set(df.columns) - {group_on})
+            ak_ans = getattr(df.groupby(group_on), agg)()[cols_without_group_on]
+            pd_ans = getattr(pd_df.groupby(group_on), agg)()[cols_without_group_on]
+            # we don't currently support index names in arkouda
+            pd_ans.index.name = None
+            assert_frame_equal(pd_ans, ak_ans.to_pandas(retain_index=True))
+
     def test_to_pandas(self):
         df = build_ak_df()
         pd_df = build_pd_df()
@@ -644,7 +671,7 @@ class DataFrameTest(ArkoudaTest):
     def test_head_tail_datetime_display(self):
         # Reproducer for issue #2596
         values = ak.array([1689221916000000] * 100, dtype=ak.int64)
-        dt = ak.Datetime(values, unit='u')
+        dt = ak.Datetime(values, unit="u")
         df = ak.DataFrame({"Datetime from Microseconds": dt})
         # verify _get_head_tail and _get_head_tail_server match
         self.assertEqual(df._get_head_tail_server().__repr__(), df._get_head_tail().__repr__())
@@ -719,3 +746,70 @@ class DataFrameTest(ArkoudaTest):
         self.assertListEqual(df.index.to_list(), df2.index.to_list())
         self.assertListEqual(df["a"].to_list(), df2["a"].to_list())
         self.assertListEqual(df["b"].to_list(), df2["b"].to_list())
+
+    def test_merge(self):
+        df1 = ak.DataFrame(
+            {
+                "key": ak.arange(4),
+                "value1": ak.array(["A", "B", "C", "D"]),
+            }
+        )
+
+        df2 = ak.DataFrame(
+            {
+                "key": ak.arange(2, 6, 1),
+                "value1": ak.array(["A", "B", "D", "F"]),
+                "value2": ak.array(["apple", "banana", "cherry", "date"]),
+            }
+        )
+
+        ij_expected_df = ak.DataFrame(
+            {
+                "key": ak.array([2, 3]),
+                "value1_x": ak.array(["C", "D"]),
+                "value1_y": ak.array(["A", "B"]),
+                "value2": ak.array(["apple", "banana"])
+            }
+        )
+
+        ij_merged_df = ak.merge(df1, df2, how="inner", on="key")
+
+        self.assertListEqual(ij_expected_df.columns, ij_merged_df.columns)
+        self.assertListEqual(ij_expected_df["key"].to_list(), ij_merged_df["key"].to_list())
+        self.assertListEqual(ij_expected_df["value1_x"].to_list(), ij_merged_df["value1_x"].to_list())
+        self.assertListEqual(ij_expected_df["value1_y"].to_list(), ij_merged_df["value1_y"].to_list())
+        self.assertListEqual(ij_expected_df["value2"].to_list(), ij_merged_df["value2"].to_list())
+
+        rj_expected_df = ak.DataFrame(
+            {
+                "key": ak.array([2, 3, 4, 5]),
+                "value1_x": ak.array(["C", "D", "nan", "nan"]),
+                "value1_y": ak.array(["A", "B", "D", "F"]),
+                "value2": ak.array(["apple", "banana", "cherry", "date"])
+            }
+        )
+
+        rj_merged_df = ak.merge(df1, df2, how="right", on="key")
+
+        self.assertListEqual(rj_expected_df.columns, rj_merged_df.columns)
+        self.assertListEqual(rj_expected_df["key"].to_list(), rj_merged_df["key"].to_list())
+        self.assertListEqual(rj_expected_df["value1_x"].to_list(), rj_merged_df["value1_x"].to_list())
+        self.assertListEqual(rj_expected_df["value1_y"].to_list(), rj_merged_df["value1_y"].to_list())
+        self.assertListEqual(rj_expected_df["value2"].to_list(), rj_merged_df["value2"].to_list())
+
+        lj_expected_df = ak.DataFrame(
+            {
+                "key": ak.array([2, 3, 0, 1]),
+                "value1_y": ak.array(["A", "B", "nan", "nan"]),
+                "value2": ak.array(["apple", "banana", "nan", "nan"]),
+                "value1_x": ak.array(["C", "D", "A", "B"]),
+            }
+        )
+
+        lj_merged_df = ak.merge(df1, df2, how="left", on="key")
+
+        self.assertListEqual(lj_expected_df.columns, lj_merged_df.columns)
+        self.assertListEqual(lj_expected_df["key"].to_list(), lj_merged_df["key"].to_list())
+        self.assertListEqual(lj_expected_df["value1_x"].to_list(), lj_merged_df["value1_x"].to_list())
+        self.assertListEqual(lj_expected_df["value1_y"].to_list(), lj_merged_df["value1_y"].to_list())
+        self.assertListEqual(lj_expected_df["value2"].to_list(), lj_merged_df["value2"].to_list())

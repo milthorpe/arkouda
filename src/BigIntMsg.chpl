@@ -48,7 +48,7 @@ module BigIntMsg {
         }
 
         var retname = st.nextName();
-        st.addEntry(retname, new shared SymEntry(bigIntArray, max_bits));
+        st.addEntry(retname, createSymEntry(bigIntArray, max_bits));
         var syment = toSymEntry(getGenericTypedArrayEntry(retname, st), bigint);
         repMsg = "created %s".doFormat(st.attrib(retname));
         biLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),repMsg);
@@ -68,12 +68,12 @@ module BigIntMsg {
                 var retList: list(string);
                 // default to false because we want to do first loop whether or not tmp is all_zero
                 var all_zero = false;
-                var low: [tmp.domain] uint;
+                var low = makeDistArray(tmp.domain, uint);
                 const ushift = 64:uint;
                 while !all_zero {
                   low = tmp:uint;
                   var retname = st.nextName();
-                  st.addEntry(retname, new shared SymEntry(low));
+                  st.addEntry(retname, createSymEntry(low));
                   retList.pushBack("created %s".doFormat(st.attrib(retname)));
 
                   all_zero = true;

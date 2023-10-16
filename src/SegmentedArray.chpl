@@ -13,7 +13,7 @@ module SegmentedArray {
     // we can't just call hashArrays because the compiler complains about recursion
     overMemLimit(numBytes(uint) * size * 2);
     var dom = makeDistDom(size);
-    var hashes: [dom] 2*uint(64);
+    var hashes = makeDistArray(dom, 2*uint);
     /* Hashes of subsequent arrays cannot be simply XORed
      * because equivalent values will cancel each other out.
      * Thus, a non-linear function must be applied to each array,
@@ -95,7 +95,7 @@ module SegmentedArray {
     // temporarily add to symtab for hashArrays and then delete entry
     var segInds = [(b, i) in zip (broadcastedSegs, valInd)] i - b;
     var siName = st.nextName();
-    st.addEntry(siName, new shared SymEntry(segInds));
+    st.addEntry(siName, createSymEntry(segInds));
     // we can't just call hashArrays because the compiler complains about recursion
     var hashes = hashHelper(size, [valName, siName], [valObjType, ObjType.PDARRAY:string], st);
     st.deleteEntry(siName);
@@ -109,9 +109,9 @@ module SegmentedArray {
     // we have to hash twice before the XOR to avoid collisions with
     // things like ak.Segarray(ak.array([0,2],ak.array([1,1,2,2]))
     var upperName = st.nextName();
-    st.addEntry(upperName, new shared SymEntry(upper));
+    st.addEntry(upperName, createSymEntry(upper));
     var lowerName = st.nextName();
-    st.addEntry(lowerName, new shared SymEntry(lower));
+    st.addEntry(lowerName, createSymEntry(lower));
     var rehash = hashHelper(size, [upperName, lowerName], [ObjType.PDARRAY:string, ObjType.PDARRAY:string], st);
     st.deleteEntry(upperName);
     st.deleteEntry(lowerName);
