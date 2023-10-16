@@ -1,4 +1,8 @@
+#ifdef __NVCC__
+#include "nccl.h"
+#else
 #include "rccl/rccl.h"
+#endif
 #include <stdio.h>
 
 #define NCCLCHECK(cmd) do {                         \
