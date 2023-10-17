@@ -1,6 +1,4 @@
 #include <hipcub/hipcub.hpp>
-#include <stdio.h>
-#include "hip_error_check.h"
 
 using namespace hipcub;
 

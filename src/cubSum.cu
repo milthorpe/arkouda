@@ -1,5 +1,4 @@
 #include <hipcub/hipcub.hpp>
-#include <stdio.h>
 
 using namespace hipcub;
 
