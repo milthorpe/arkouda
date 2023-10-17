@@ -11,12 +11,12 @@ module CUBSum {
     config const sumReduceOnGPU = true;
     config const sumPrefetchUnified = true;
 
-    extern proc cubSum_int32(input: c_void_ptr, output: c_void_ptr, num_items: c_size_t);
-    extern proc cubSum_int64(input: c_void_ptr, output: c_void_ptr, num_items: c_size_t);
-    extern proc cubSum_float(input: c_void_ptr, output: c_void_ptr, num_items: c_size_t);
-    extern proc cubSum_double(input: c_void_ptr, output: c_void_ptr, num_items: c_size_t);
+    extern proc cubSum_int32(input: c_ptr(void), output: c_ptr(void), num_items: c_size_t);
+    extern proc cubSum_int64(input: c_ptr(void), output: c_ptr(void), num_items: c_size_t);
+    extern proc cubSum_float(input: c_ptr(void), output: c_ptr(void), num_items: c_size_t);
+    extern proc cubSum_double(input: c_ptr(void), output: c_ptr(void), num_items: c_size_t);
 
-    private proc cubSumDevice(type etype, devInPtr: c_void_ptr, N: int, deviceId: int(32)) {
+    private proc cubSumDevice(type etype, devInPtr: c_ptr(void), N: int, deviceId: int(32)) {
         var hostOut: [0..#1] etype;
         var devOut = new GPUArray(hostOut);
         if etype == int(32) {

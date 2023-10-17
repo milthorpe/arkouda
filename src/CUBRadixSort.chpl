@@ -10,48 +10,48 @@ use IO;
     config param logSortKernelTime = false;
     config param cubRadixSortVerbose = false;
 
-    extern proc cubSortKeys_int32(keys_in: c_void_ptr, keys_out: c_void_ptr, N: c_size_t);
-    extern proc cubSortKeys_int64(keys_in: c_void_ptr, keys_out: c_void_ptr, N: c_size_t);
-    extern proc cubSortKeys_float(keys_in: c_void_ptr, keys_out: c_void_ptr, N: c_size_t);
-    extern proc cubSortKeys_double(keys_in: c_void_ptr, keys_out: c_void_ptr, N: c_size_t);
-    extern proc cubSortPairs_int32(keys_in: c_void_ptr, keys_out: c_void_ptr, values_in: c_void_ptr, values_out: c_void_ptr, N: c_size_t);
-    extern proc cubSortPairs_int64(keys_in: c_void_ptr, keys_out: c_void_ptr, values_in: c_void_ptr, values_out: c_void_ptr, N: c_size_t);
-    extern proc cubSortPairs_float(keys_in: c_void_ptr, keys_out: c_void_ptr, values_in: c_void_ptr, values_out: c_void_ptr, N: c_size_t);
-    extern proc cubSortPairs_double(keys_in: c_void_ptr, keys_out: c_void_ptr, values_in: c_void_ptr, values_out: c_void_ptr, N: c_size_t);
+    extern proc cubSortKeys_int32(keys_in: c_ptr(void), keys_out: c_ptr(void), N: c_size_t);
+    extern proc cubSortKeys_int64(keys_in: c_ptr(void), keys_out: c_ptr(void), N: c_size_t);
+    extern proc cubSortKeys_float(keys_in: c_ptr(void), keys_out: c_ptr(void), N: c_size_t);
+    extern proc cubSortKeys_double(keys_in: c_ptr(void), keys_out: c_ptr(void), N: c_size_t);
+    extern proc cubSortPairs_int32(keys_in: c_ptr(void), keys_out: c_ptr(void), values_in: c_ptr(void), values_out: c_ptr(void), N: c_size_t);
+    extern proc cubSortPairs_int64(keys_in: c_ptr(void), keys_out: c_ptr(void), values_in: c_ptr(void), values_out: c_ptr(void), N: c_size_t);
+    extern proc cubSortPairs_float(keys_in: c_ptr(void), keys_out: c_ptr(void), values_in: c_ptr(void), values_out: c_ptr(void), N: c_size_t);
+    extern proc cubSortPairs_double(keys_in: c_ptr(void), keys_out: c_ptr(void), values_in: c_ptr(void), values_out: c_ptr(void), N: c_size_t);
 
     extern proc enablePeerAccess(devices: [] int(32), nGPUs: int(32));
-    extern proc createDeviceBuffers_int32(num_elements: c_size_t, devices: [] int(32), nGPUs: int(32)): c_void_ptr;
-    extern proc createDeviceBuffers_int64(num_elements: c_size_t, devices: [] int(32), nGPUs: int(32)): c_void_ptr;
-    extern proc createDeviceBuffers_float(num_elements: c_size_t, devices: [] int(32), nGPUs: int(32)): c_void_ptr;
-    extern proc createDeviceBuffers_double(num_elements: c_size_t, devices: [] int(32), nGPUs: int(32)): c_void_ptr;
-    extern proc destroyDeviceBuffers_int32(device_buffers: c_void_ptr);
-    extern proc destroyDeviceBuffers_int64(device_buffers: c_void_ptr);
-    extern proc destroyDeviceBuffers_float(device_buffers: c_void_ptr);
-    extern proc destroyDeviceBuffers_double(device_buffers: c_void_ptr);
-    extern proc copyDeviceBufferToHost_int32(device_buffers: c_void_ptr, hostArray: [] int(32), N: c_size_t);
-    extern proc copyDeviceBufferToHost_int64(device_buffers: c_void_ptr, hostArray: [] int(64), N: c_size_t);
-    extern proc copyDeviceBufferToHost_float(device_buffers: c_void_ptr, hostArray: [] real(32), N: c_size_t);
-    extern proc copyDeviceBufferToHost_double(device_buffers: c_void_ptr, hostArray: [] real(64), N: c_size_t);
+    extern proc createDeviceBuffers_int32(num_elements: c_size_t, devices: [] int(32), nGPUs: int(32)): c_ptr(void);
+    extern proc createDeviceBuffers_int64(num_elements: c_size_t, devices: [] int(32), nGPUs: int(32)): c_ptr(void);
+    extern proc createDeviceBuffers_float(num_elements: c_size_t, devices: [] int(32), nGPUs: int(32)): c_ptr(void);
+    extern proc createDeviceBuffers_double(num_elements: c_size_t, devices: [] int(32), nGPUs: int(32)): c_ptr(void);
+    extern proc destroyDeviceBuffers_int32(device_buffers: c_ptr(void));
+    extern proc destroyDeviceBuffers_int64(device_buffers: c_ptr(void));
+    extern proc destroyDeviceBuffers_float(device_buffers: c_ptr(void));
+    extern proc destroyDeviceBuffers_double(device_buffers: c_ptr(void));
+    extern proc copyDeviceBufferToHost_int32(device_buffers: c_ptr(void), hostArray: [] int(32), N: c_size_t);
+    extern proc copyDeviceBufferToHost_int64(device_buffers: c_ptr(void), hostArray: [] int(64), N: c_size_t);
+    extern proc copyDeviceBufferToHost_float(device_buffers: c_ptr(void), hostArray: [] real(32), N: c_size_t);
+    extern proc copyDeviceBufferToHost_double(device_buffers: c_ptr(void), hostArray: [] real(64), N: c_size_t);
 
-    extern proc findPivot_int32(device_buffers: c_void_ptr, devices: [] int(32), nGPUs: int(32)): int;
-    extern proc findPivot_int64(device_buffers: c_void_ptr, devices: [] int(32), nGPUs: int(32)): int;
-    extern proc findPivot_float(device_buffers: c_void_ptr, devices: [] int(32), nGPUs: int(32)): int;
-    extern proc findPivot_double(device_buffers: c_void_ptr, devices: [] int(32), nGPUs: int(32)): int;
-    extern proc swapPartitions_int32(device_buffers: c_void_ptr, pivot: c_size_t, devices: [] int(32), nGPUs: int(32), devicesToMerge: [] int(32));
-    extern proc swapPartitions_int64(device_buffers: c_void_ptr, pivot: c_size_t, devices: [] int(32), nGPUs: int(32), devicesToMerge: [] int(32));
-    extern proc swapPartitions_float(device_buffers: c_void_ptr, pivot: c_size_t, devices: [] int(32), nGPUs: int(32), devicesToMerge: [] int(32));
-    extern proc swapPartitions_double(device_buffers: c_void_ptr, pivot: c_size_t, devices: [] int(32), nGPUs: int(32), devicesToMerge: [] int(32));
-    extern proc mergeLocalPartitions_int32(device_buffers: c_void_ptr, pivot: c_size_t, deviceToMerge: int, devices: [] int(32), nGPUs: int(32));
-    extern proc mergeLocalPartitions_int64(device_buffers: c_void_ptr, pivot: c_size_t, deviceToMerge: int, devices: [] int(32), nGPUs: int(32));
-    extern proc mergeLocalPartitions_float(device_buffers: c_void_ptr, pivot: c_size_t, deviceToMerge: int, devices: [] int(32), nGPUs: int(32));
-    extern proc mergeLocalPartitions_double(device_buffers: c_void_ptr, pivot: c_size_t, deviceToMerge: int, devices: [] int(32), nGPUs: int(32));
+    extern proc findPivot_int32(device_buffers: c_ptr(void), devices: [] int(32), nGPUs: int(32)): int;
+    extern proc findPivot_int64(device_buffers: c_ptr(void), devices: [] int(32), nGPUs: int(32)): int;
+    extern proc findPivot_float(device_buffers: c_ptr(void), devices: [] int(32), nGPUs: int(32)): int;
+    extern proc findPivot_double(device_buffers: c_ptr(void), devices: [] int(32), nGPUs: int(32)): int;
+    extern proc swapPartitions_int32(device_buffers: c_ptr(void), pivot: c_size_t, devices: [] int(32), nGPUs: int(32), devicesToMerge: [] int(32));
+    extern proc swapPartitions_int64(device_buffers: c_ptr(void), pivot: c_size_t, devices: [] int(32), nGPUs: int(32), devicesToMerge: [] int(32));
+    extern proc swapPartitions_float(device_buffers: c_ptr(void), pivot: c_size_t, devices: [] int(32), nGPUs: int(32), devicesToMerge: [] int(32));
+    extern proc swapPartitions_double(device_buffers: c_ptr(void), pivot: c_size_t, devices: [] int(32), nGPUs: int(32), devicesToMerge: [] int(32));
+    extern proc mergeLocalPartitions_int32(device_buffers: c_ptr(void), pivot: c_size_t, deviceToMerge: int, devices: [] int(32), nGPUs: int(32));
+    extern proc mergeLocalPartitions_int64(device_buffers: c_ptr(void), pivot: c_size_t, deviceToMerge: int, devices: [] int(32), nGPUs: int(32));
+    extern proc mergeLocalPartitions_float(device_buffers: c_ptr(void), pivot: c_size_t, deviceToMerge: int, devices: [] int(32), nGPUs: int(32));
+    extern proc mergeLocalPartitions_double(device_buffers: c_ptr(void), pivot: c_size_t, deviceToMerge: int, devices: [] int(32), nGPUs: int(32));
 
-    extern proc sortToDeviceBuffer_int32(keys_in: c_void_ptr, device_buffers: c_void_ptr, N: c_size_t);
-    extern proc sortToDeviceBuffer_int64(keys_in: c_void_ptr, device_buffers: c_void_ptr, N: c_size_t);
-    extern proc sortToDeviceBuffer_float(keys_in: c_void_ptr, device_buffers: c_void_ptr, N: c_size_t);
-    extern proc sortToDeviceBuffer_double(keys_in: c_void_ptr, device_buffers: c_void_ptr, N: c_size_t);
+    extern proc sortToDeviceBuffer_int32(keys_in: c_ptr(void), device_buffers: c_ptr(void), N: c_size_t);
+    extern proc sortToDeviceBuffer_int64(keys_in: c_ptr(void), device_buffers: c_ptr(void), N: c_size_t);
+    extern proc sortToDeviceBuffer_float(keys_in: c_ptr(void), device_buffers: c_ptr(void), N: c_size_t);
+    extern proc sortToDeviceBuffer_double(keys_in: c_ptr(void), device_buffers: c_ptr(void), N: c_size_t);
 
-    private proc findPivot(type t, device_buffers: c_void_ptr, devices: [] int(32), nGPUs: int(32)): int {
+    private proc findPivot(type t, device_buffers: c_ptr(void), devices: [] int(32), nGPUs: int(32)): int {
         if t == int(32) {
             return findPivot_int32(device_buffers, devices, nGPUs);
         } else if t == int(64) {
@@ -65,7 +65,7 @@ use IO;
         }
     }
 
-    private proc swapPartitions(type t, device_buffers: c_void_ptr, pivot: c_size_t, devices: [] int(32), nGPUs: int(32), devicesToMerge: [] int(32)) {
+    private proc swapPartitions(type t, device_buffers: c_ptr(void), pivot: c_size_t, devices: [] int(32), nGPUs: int(32), devicesToMerge: [] int(32)) {
         if t == int(32) {
             swapPartitions_int32(device_buffers, pivot, devices, nGPUs, devicesToMerge);
         } else if t == int(64) {
@@ -77,7 +77,7 @@ use IO;
         }
     }
 
-    private proc mergeLocalPartitions(type t, device_buffers: c_void_ptr, pivot: c_size_t, deviceToMerge: int, devices: [] int(32), nGPUs: int(32)) {
+    private proc mergeLocalPartitions(type t, device_buffers: c_ptr(void), pivot: c_size_t, deviceToMerge: int, devices: [] int(32), nGPUs: int(32)) {
         if t == int(32) {
             mergeLocalPartitions_int32(device_buffers, pivot, deviceToMerge, devices, nGPUs);
         } else if t == int(64) {
@@ -89,7 +89,7 @@ use IO;
         }
     }
 
-    private proc mergePartitions(type t, deviceBuffers: c_void_ptr, devices: [] int(32)) {
+    private proc mergePartitions(type t, deviceBuffers: c_ptr(void), devices: [] int(32)) {
         if (devices.size > 2) {
             coforall i in 0..1 {
                 var devicesSubset: [0..#devices.size / 2] int(32);
@@ -128,7 +128,7 @@ use IO;
 */
     }
 
-    private proc cubSortKeysMergeOnHost(type t, devInPtr: c_void_ptr, devAOut: GPUArray, N: int) {
+    private proc cubSortKeysMergeOnHost(type t, devInPtr: c_ptr(void), devAOut: GPUArray, N: int) {
         if t == int(32) {
             cubSortKeys_int32(devInPtr, devAOut.dPtr(), N: c_size_t);
         } else if t == int(64) {
@@ -145,7 +145,7 @@ use IO;
         }
     }
 
-    private proc cubSortKeysMergeOnGPU(type t, devInPtr: c_void_ptr, N: int, deviceBuffers: c_void_ptr) {
+    private proc cubSortKeysMergeOnGPU(type t, devInPtr: c_ptr(void), N: int, deviceBuffers: c_ptr(void)) {
         if t == int(32) {
             sortToDeviceBuffer_int32(devInPtr, deviceBuffers, N);
         } else if t == int(64) {
@@ -157,7 +157,7 @@ use IO;
         }
     }
 
-    private proc cubSortPairs(type t, devInPtr: c_void_ptr, devAOut: GPUArray, devRanksIn: GPUArray, devRanksOut: GPUArray, N: int) {
+    private proc cubSortPairs(type t, devInPtr: c_ptr(void), devAOut: GPUArray, devRanksIn: GPUArray, devRanksOut: GPUArray, N: int) {
         devRanksIn.toDevice();
         if t == int(32) {
             cubSortPairs_int32(devInPtr, devAOut.dPtr(), devRanksIn.dPtr(), devRanksOut.dPtr(), N: c_size_t);
@@ -205,7 +205,7 @@ use IO;
        radix sort a block distributed array,
        returning a sorted array, without updating the input
      */
-    proc cubRadixSortLSDKeysMergeOnHost(e: SymEntry) {
+    proc cubRadixSortLSDKeysMergeOnHost(e: SymEntry(?)) {
         if !e.GPU then throw new owned Error("cubRadixSortLSDKeysMergeOnHost called on non-GPU SymEntry");
         ref a = e.a;
         var aD = a.domain;
@@ -275,7 +275,7 @@ use IO;
         }
     }
 
-    proc cubRadixSortLSDKeysMergeOnGPU(e: SymEntry) where e.GPU == true {
+    proc cubRadixSortLSDKeysMergeOnGPU(e: SymEntry(?)) where e.GPU == true {
         ref a = e.a;
         var aD = a.domain;
         type t = e.etype;
@@ -287,7 +287,7 @@ use IO;
         }
 
         var aOut: [aD] t;
-        var deviceBuffers: c_void_ptr;
+        var deviceBuffers: c_ptr(void);
         if t == int(32) {
             deviceBuffers = createDeviceBuffers_int32(a.size, allDevices, allDevices.size: int(32));
         } else if t == int(64) {
@@ -357,7 +357,7 @@ use IO;
                 } else if t == real(64) {
                     copyDeviceBufferToHost_double(deviceBuffers, aOut.localSlice(lo .. hi), N);
                 }
-                DeviceSynchronize();
+                //DeviceSynchronize(); // previous operation already synchronizes stream
             }
         }
         var copyBack = new Lambda2();
@@ -395,7 +395,7 @@ use IO;
     /* Radix Sort Least Significant Digit
        radix sort a block distributed array
        returning a permutation vector as a block distributed array */
-    proc cubRadixSortLSD_ranks(e: SymEntry) {
+    proc cubRadixSortLSD_ranks(e: SymEntry(?)) {
         ref a = e.a;
         var aD = a.domain;
         type t = e.etype;

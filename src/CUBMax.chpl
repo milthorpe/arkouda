@@ -8,12 +8,12 @@ module CUBMax {
 
     config const maxReduceOnGPU = true;
 
-    extern proc cubMax_int32(input: c_void_ptr, output: c_void_ptr, num_items: c_size_t);
-    extern proc cubMax_int64(input: c_void_ptr, output: c_void_ptr, num_items: c_size_t);
-    extern proc cubMax_float(input: c_void_ptr, output: c_void_ptr, num_items: c_size_t);
-    extern proc cubMax_double(input: c_void_ptr, output: c_void_ptr, num_items: c_size_t);
+    extern proc cubMax_int32(input: c_ptr(void), output: c_ptr(void), num_items: c_size_t);
+    extern proc cubMax_int64(input: c_ptr(void), output: c_ptr(void), num_items: c_size_t);
+    extern proc cubMax_float(input: c_ptr(void), output: c_ptr(void), num_items: c_size_t);
+    extern proc cubMax_double(input: c_ptr(void), output: c_ptr(void), num_items: c_size_t);
 
-    private proc cubMaxDevice(type etype, devInPtr: c_void_ptr, N: int, deviceId: int(32)) {
+    private proc cubMaxDevice(type etype, devInPtr: c_ptr(void), N: int, deviceId: int(32)) {
         var hostOut: [0..#1] etype;
         var devOut = new GPUArray(hostOut);
         if etype == int(32) {
@@ -40,7 +40,7 @@ module CUBMax {
         return cubMax(aEntry);
     }
 
-    proc cubMax(ref e: SymEntry) where e.GPU == true {
+    proc cubMax(ref e: SymEntry(?)) where e.GPU == true {
         var max: e.etype = 0;
         ref a = e.a;
         coforall loc in a.targetLocales() with (+ reduce max) do on loc {
@@ -77,7 +77,7 @@ module CUBMax {
         return max;
     }
 
-    proc cubMaxUnified(arr: GPUUnifiedArray) {
+    proc cubMaxUnified(arr: GPUUnifiedArray(?)) {
         var deviceMax: [0..#nGPUs] arr.etype;
 
         // TODO: proper lambda functions break Chapel compiler

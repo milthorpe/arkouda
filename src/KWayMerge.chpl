@@ -26,15 +26,15 @@ module KWayMerge {
     //writeln("now A = ", dst);
   }
 
-  proc mergeSortedKeys(dst: [?aD] ?keyType, src: [aD] keyType, numChunks: int) {
+  proc mergeSortedKeys(ref dst: [?aD] ?keyType, ref src: [aD] keyType, numChunks: int) {
     mergeChunks(dst, src, numChunks, new KeysComparator(max(keyType)));
   }
 
-  proc mergeSortedRanks(dst: [?aD] ?t, src: [aD] t, numChunks: int) where isTuple(t) {
+  proc mergeSortedRanks(ref dst: [?aD] ?t, ref src: [aD] t, numChunks: int) where isTuple(t) {
     mergeChunks(dst, src, numChunks, new KeysRanksComparator(max(t)));
   }
 
-  private proc mergeChunks(dst: [?aD] ?t, src: [aD] t, numChunks: int, comparator) {
+  private proc mergeChunks(ref dst: [?aD] ?t, ref src: [aD] t, numChunks: int, comparator) {
     if TREE_MERGE {
       treeMerge(dst, src, numChunks, comparator);
     } else {
@@ -42,7 +42,7 @@ module KWayMerge {
     }
   }
 
-  private proc directMerge(dst: [?aD] ?t, src: [aD] t, numChunks: int, comparator) {
+  private proc directMerge(ref dst: [?aD] ?t, ref src: [aD] t, numChunks: int, comparator) {
     var cNextIdx: [0..<numChunks] int;
     var cLastIdx: [0..<numChunks] int;
     var chunks: [0..<numChunks] range(int);
@@ -53,7 +53,7 @@ module KWayMerge {
     directMerge(dst, src, chunks, comparator);
   }
 
-  private proc directMerge(dst: [?aD] ?t, src: [aD] t, chunks: [?chunkD] range(int), comparator) {
+  private proc directMerge(ref dst: [?aD] ?t, ref src: [aD] t, chunks: [?chunkD] range(int), comparator) {
     var numChunks = chunkD.size;
     var cNextIdx: [0..<numChunks] int;
     var cLastIdx: [0..<numChunks] int;
@@ -86,7 +86,7 @@ module KWayMerge {
     }
   }
 
-  private proc treeMerge(dst: [?aD] ?t, src: [aD] t, numChunks: int, comparator) {
+  private proc treeMerge(ref dst: [?aD] ?t, ref src: [aD] t, numChunks: int, comparator) {
     var cNextIdx: [0..<numChunks] int;
     var cLastIdx: [0..<numChunks] int;
     for chunkId in 0..<numChunks {

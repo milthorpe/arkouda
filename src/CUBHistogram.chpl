@@ -10,16 +10,16 @@ module CUBHistogram {
     config param histogramReduceOnGPU = true;
     config param histogramPrefetchUnified = true;
 
-    extern proc cubHistogram_int32(samples: c_void_ptr, histogram: c_void_ptr, num_levels: int, lower_bound: int(32), upper_bound: int(32), N: int);
-    extern proc cubHistogram_int64(samples: c_void_ptr, histogram: c_void_ptr, num_levels: int, lower_bound: int(64), upper_bound: int(64), N: int);
-    extern proc cubHistogram_float(samples: c_void_ptr, histogram: c_void_ptr, num_levels: int, lower_bound: real(32), upper_bound: real(32), N: int);
-    extern proc cubHistogram_double(samples: c_void_ptr, histogram: c_void_ptr, num_levels: int, lower_bound: real(64), upper_bound: real(64), N: int);
+    extern proc cubHistogram_int32(samples: c_ptr(void), histogram: c_ptr(void), num_levels: int, lower_bound: int(32), upper_bound: int(32), N: int);
+    extern proc cubHistogram_int64(samples: c_ptr(void), histogram: c_ptr(void), num_levels: int, lower_bound: int(64), upper_bound: int(64), N: int);
+    extern proc cubHistogram_float(samples: c_ptr(void), histogram: c_ptr(void), num_levels: int, lower_bound: real(32), upper_bound: real(32), N: int);
+    extern proc cubHistogram_double(samples: c_ptr(void), histogram: c_ptr(void), num_levels: int, lower_bound: real(64), upper_bound: real(64), N: int);
 
     // Chapel doesn't seem to expose these common FP operations
     extern proc nextafterf(from: real(32), to: real(32)): real(32);
     extern proc nextafter(from: real(64), to: real(64)): real(64);
 
-    private proc cubHistogram(type t, devSamples: c_void_ptr, histogram: [] int, lower_bound: t, upper_bound: t, N: int, deviceId: int(32)) {
+    private proc cubHistogram(type t, devSamples: c_ptr(void), histogram: [] int, lower_bound: t, upper_bound: t, N: int, deviceId: int(32)) {
         var num_levels = histogram.size + 1;
         var devHistogram = new GPUArray(histogram);
 
@@ -53,7 +53,7 @@ module CUBHistogram {
         return cubHistogram(samplesEntry, sampleMin, sampleMax, bins, binWidth);
     }
 
-    proc cubHistogram(ref samples: SymEntry, sampleMin: ?etype, sampleMax: etype, bins: int, binWidth: real) where samples.GPU == true {
+    proc cubHistogram(ref samples: SymEntry(?), sampleMin: ?etype, sampleMax: etype, bins: int, binWidth: real) where samples.GPU == true {
         var hist: [0..#bins] int;
         ref a = samples.a;
         coforall loc in a.targetLocales() with (+ reduce hist) do on loc {
@@ -91,7 +91,7 @@ module CUBHistogram {
     }
 
     // TODO update HistogramMsg to call the SymEntry version of this proc
-    proc cubHistogramUnified(arr: GPUUnifiedArray, sampleMin: ?t, sampleMax: t, bins: int, binWidth: real) {
+    proc cubHistogramUnified(arr: GPUUnifiedArray(?), sampleMin: ?t, sampleMax: t, bins: int, binWidth: real) {
         // each device computes its histogram in a separate array
         var deviceHistograms: [0..#nGPUs][0..#bins] int;
 

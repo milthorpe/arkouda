@@ -8,12 +8,12 @@ module CUBMin {
 
     config const minReduceOnGPU = true;
 
-    extern proc cubMin_int32(input: c_void_ptr, output: c_void_ptr, num_items: c_size_t);
-    extern proc cubMin_int64(input: c_void_ptr, output: c_void_ptr, num_items: c_size_t);
-    extern proc cubMin_float(input: c_void_ptr, output: c_void_ptr, num_items: c_size_t);
-    extern proc cubMin_double(input: c_void_ptr, output: c_void_ptr, num_items: c_size_t);
+    extern proc cubMin_int32(input: c_ptr(void), output: c_ptr(void), num_items: c_size_t);
+    extern proc cubMin_int64(input: c_ptr(void), output: c_ptr(void), num_items: c_size_t);
+    extern proc cubMin_float(input: c_ptr(void), output: c_ptr(void), num_items: c_size_t);
+    extern proc cubMin_double(input: c_ptr(void), output: c_ptr(void), num_items: c_size_t);
 
-    private proc cubMinDevice(type etype, devInPtr: c_void_ptr, N: int, deviceId: int(32)) {
+    private proc cubMinDevice(type etype, devInPtr: c_ptr(void), N: int, deviceId: int(32)) {
         var hostOut: [0..#1] etype;
         var devOut = new GPUArray(hostOut);
         if etype == int(32) {
@@ -40,7 +40,7 @@ module CUBMin {
         return cubMin(aEntry);
     }
 
-    proc cubMin(ref e: SymEntry) where e.GPU == true {
+    proc cubMin(ref e: SymEntry(?)) where e.GPU == true {
         var min: e.etype = 0;
         ref a = e.a;
         coforall loc in a.targetLocales() with (+ reduce min) do on loc {
@@ -77,7 +77,7 @@ module CUBMin {
         return min;
     }
 
-    proc cubMinUnified(arr: GPUUnifiedArray) {
+    proc cubMinUnified(arr: GPUUnifiedArray(?)) {
         var deviceMin: [0..#nGPUs] arr.etype;
 
         // TODO: proper lambda functions break Chapel compiler
