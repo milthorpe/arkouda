@@ -1,6 +1,7 @@
 module KWayMerge {
   use GPUIterator;
   use Math;
+  use Time;
 
   config const TREE_MERGE: bool = false; 
 
@@ -14,16 +15,15 @@ module KWayMerge {
     inline proc key(kr) { const (k, _) = kr; return k; }
   }
 
-  proc mergeSortedKeys(dst: [?aD] ?keyType, src: [aD] keyType, localesToMerge: [0..1] (locale,int), pivot: int) {
+  proc mergeSortedKeys(ref dst: [?aD] ?keyType, ref src: [aD] keyType, localesToMerge: [0..1] (locale,int), pivot: int) {
     coforall (loc,cut) in localesToMerge do on loc {
       var localSub = aD.localSubdomain();
       var dstLocal = dst.localSlice(localSub);
       var srcLocal = src.localSlice(localSub);
-      //writeln("at ", loc, " merging ", localSub.dim(0).first,"..",(cut-1)," and ", cut, "..", localSub.dim(0).last);
+      //writeln(dateTime.now(), " at ", here, " merging ", localSub.dim(0).first,"..",(cut-1)," and ", cut, "..", localSub.dim(0).last);
       var chunks = [localSub.dim(0).first..<cut, cut..localSub.dim(0).last];
       directMerge(dst, src, chunks, new KeysComparator(max(keyType)));
     }
-    //writeln("now A = ", dst);
   }
 
   proc mergeSortedKeys(ref dst: [?aD] ?keyType, ref src: [aD] keyType, numChunks: int) {
@@ -63,9 +63,10 @@ module KWayMerge {
       cNextIdx[tid] = chunks[tid].first;
       cLastIdx[tid] = chunks[tid].last;
       totalSize += chunks[tid].last - chunks[tid].first + 1;
-      draw[tid] = src[cNextIdx[tid]];
+      draw[tid] = src.localAccess[cNextIdx[tid]];
       cNextIdx[tid] += 1;
     }
+    //writeln(dateTime.now(), " at ", here, " merging next index ", cNextIdx, " totalSize ", totalSize);
     for i in chunks[0].first..#totalSize {
       var minA = draw[0];
       var minALoc: int = 0;
@@ -75,12 +76,12 @@ module KWayMerge {
           minALoc = j;
         }
       }
-      dst[i] = minA;
+      dst.localAccess[i] = minA;
       const next = cNextIdx[minALoc];
       if (next > cLastIdx[minALoc]) {
         draw[minALoc] = comparator.dummy;
       } else {
-        draw[minALoc] = src[next];
+        draw[minALoc] = src.localAccess[next];
       }
       cNextIdx[minALoc] = next + 1;
     }
