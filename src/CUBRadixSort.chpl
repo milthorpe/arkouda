@@ -5,6 +5,7 @@ use IO;
     use GPUAPI;
     use CTypes;
     use KWayMerge;
+    use DistMerge;
     use Time;
 
     config param logSortKernelTime = false;
@@ -105,8 +106,9 @@ use IO;
         if (pivot > 0) {
             var devicesToMerge: [0..1] int(32);
             swapPartitions(t, deviceBuffers, pivot, devices, devices.size: int(32), devicesToMerge);
-            coforall deviceToMerge in devicesToMerge do
+            coforall deviceToMerge in devicesToMerge {
                 mergeLocalPartitions(t, deviceBuffers, pivot, deviceToMerge, devices, devices.size: int(32));
+            }
         }
 
         if (devices.size > 2) {
@@ -176,11 +178,14 @@ use IO;
         devRanksOut.fromDevice();
     }
 
+    /** On each locale, setup GPU peer access between all devices */
     proc setupPeerAccess() {
-        var allDevices = devices;
-        coforall i in allDevices {
-            SetDevice(i);
-            enablePeerAccess(allDevices, nGPUs);
+        coforall loc in Locales do on loc {
+            var allDevices = devices;
+            coforall i in allDevices {
+                SetDevice(i);
+                enablePeerAccess(allDevices, nGPUs);
+            }
         }
     }
 
@@ -210,68 +215,79 @@ use IO;
         ref a = e.a;
         var aD = a.domain;
         type t = e.etype;
-
-        var timer: stopwatch;
+        var timerLoc1: stopwatch;
         if logSortKernelTime {
-            timer.start();
+            timerLoc1.start();
+        }
+        var dest: [aD] t = noinit;
+        if logSortKernelTime {
+            timerLoc1.stop();
+            writef("create dest %10.3dr\n", timerLoc1.elapsed()*1000.0);
+            timerLoc1.clear();
+            timerLoc1.start();
         }
 
-        var aOut: [aD] t;
-
-        if logSortKernelTime {
-            timer.stop();
-            writef("create aOut %10.3dr\n", timer.elapsed()*1000.0);
-            timer.clear();
-            timer.start();
-        }
-
-        // TODO: proper lambda functions break Chapel compiler
-        record Lambda {
-            proc this(lo: int, hi: int, N: int) {
-                var deviceId: int(32);
-                GetDevice(deviceId);
-                e.prefetchLocalDataToDevice(lo, hi, deviceId);
-                if (cubRadixSortVerbose) {
-                    var count: int(32);
-                    GetDeviceCount(count);
-                    writeln("In cubSortKeysCallback, launching the CUDA kernel with a range of ", lo, "..", hi, " (Size: ", N, "), GPU", deviceId, " of ", count, " @", here);
-                }
-                // these are temporary arrays that do not need to be cached on SymEntry
-                var devAOut = new GPUArray(aOut.localSlice(lo .. hi));
-                cubSortKeysMergeOnHost(t, e.c_ptrToLocalData(lo), devAOut, N);
+        coforall loc in a.targetLocales() do on loc {
+            var timer: stopwatch;
+            if logSortKernelTime {
+                timer.start();
             }
-        }
-        // get local domain's indices
-        var lD = aD.localSubdomain();
-        // calc task's indices from local domain's indices
-        var tD = {lD.low..lD.high};
-        var cubSortKeysCallback = new Lambda();
-        forall i in GPU(tD, cubSortKeysCallback) {
-            writeln("Should not reach this point!");
-            exit(1);
-        }
 
-        if logSortKernelTime {
-            timer.stop();
-            writef("sort %10.3dr\n", timer.elapsed()*1000.0);
-            timer.clear();
-            timer.start();
-        }
+            // TODO: proper lambda functions break Chapel compiler
+            record Lambda {
+                proc this(lo: int, hi: int, N: int) {
+                    var deviceId: int(32);
+                    GetDevice(deviceId);
+                    e.prefetchLocalDataToDevice(lo, hi, deviceId);
+                    if (cubRadixSortVerbose) {
+                        var count: int(32);
+                        GetDeviceCount(count);
+                        writeln("In cubSortKeysCallback, launching the CUDA kernel with a range of ", lo, "..", hi, " (Size: ", N, "), GPU", deviceId, " of ", count, " @", here);
+                    }
+                    // these are temporary arrays that do not need to be cached on SymEntry
+                    var devDest = new GPUArray(dest.localSlice(lo .. hi));
+                    cubSortKeysMergeOnHost(t, e.c_ptrToLocalData(lo), devDest, N);
+                }
+            }
+            // get local domain's indices
+            var lD = aD.localSubdomain();
+            // calc task's indices from local domain's indices
+            var tD = {lD.low..lD.high};
+            var cubSortKeysCallback = new Lambda();
+            forall i in GPU(tD, cubSortKeysCallback) {
+                writeln("Should not reach this point!");
+                exit(1);
+            }
 
-        if disableMultiGPUs || nGPUs == 1 {
-            // no need to merge
-            return aOut;
-        } else {
-            // merge sorted chunks
-            var merged: [aD] t;
-            mergeSortedKeys(aOut, merged, nGPUs);
             if logSortKernelTime {
                 timer.stop();
-                writef("merge on host %10.3dr\n", timer.elapsed()*1000.0);
+                writef("sort %10.3dr\n", timer.elapsed()*1000.0);
                 timer.clear();
                 timer.start();
             }
-            return merged;
+
+            if disableMultiGPUs || nGPUs == 1 {
+                // no need to merge
+            } else {
+                // merge sorted chunks
+                var merged: [aD] t;
+                mergeSortedKeys(dest, merged, nGPUs);
+                if logSortKernelTime {
+                    timer.stop();
+                    writef("merge on host %10.3dr\n", timer.elapsed()*1000.0);
+                    timer.clear();
+                    timer.start();
+                }
+                dest = merged; // TODO can we eliminate this copy?
+            }
+        }
+
+        if (aD.targetLocales().size > 1) {
+            var dest2: [aD] t = noinit;
+            mergeSortedChunks(dest, dest2);
+            return dest2;
+        } else {
+            return dest;
         }
     }
 
@@ -279,117 +295,170 @@ use IO;
         ref a = e.a;
         var aD = a.domain;
         type t = e.etype;
-        var allDevices = GPUIterator.devices;
 
-        var timer: stopwatch;
+        var timerLoc1: stopwatch;
         if logSortKernelTime {
-            timer.start();
+            timerLoc1.start();
         }
 
-        var aOut: [aD] t;
-        var deviceBuffers: c_ptr(void);
-        if t == int(32) {
-            deviceBuffers = createDeviceBuffers_int32(a.size, allDevices, allDevices.size: int(32));
-        } else if t == int(64) {
-            deviceBuffers = createDeviceBuffers_int64(a.size, allDevices, allDevices.size: int(32));
-        } else if t == real(32) {
-            deviceBuffers = createDeviceBuffers_float(a.size, allDevices, allDevices.size: int(32));
-        } else if t == real(64) {
-            deviceBuffers = createDeviceBuffers_double(a.size, allDevices, allDevices.size: int(32));
-        }
+        var dest: [aD] t = noinit;
 
         if logSortKernelTime {
-            timer.stop();
-            writef("create device buffers %10.3dr\n", timer.elapsed()*1000.0);
-            timer.clear();
-            timer.start();
-        }
-
-        // TODO: proper lambda functions break Chapel compiler
-        record Lambda {
-            proc this(lo: int, hi: int, N: int) {
-                var deviceId: int(32);
-                GetDevice(deviceId);
-                e.prefetchLocalDataToDevice(lo, hi, deviceId);
-                if (cubRadixSortVerbose) {
-                    var count: int(32);
-                    GetDeviceCount(count);
-                    writeln("In cubSortKeysCallback, launching the CUDA kernel on dev ptr ", e.c_ptrToLocalData(lo), " with a range of ", lo, "..", hi, " (Size: ", N, "), GPU", deviceId, " of ", count, " @", here);
-                }
-                cubSortKeysMergeOnGPU(t, e.c_ptrToLocalData(lo), N, deviceBuffers);
-            }
-        }
-        // get local domain's indices
-        var lD = aD.localSubdomain();
-        // calc task's indices from local domain's indices
-        var tD = {lD.low..lD.high};
-        var cubSortKeysCallback = new Lambda();
-        forall i in GPU(tD, cubSortKeysCallback) {
-            writeln("Should not reach this point!");
-            exit(1);
-        }
-
-        if logSortKernelTime {
-            timer.stop();
-            writef("sort %10.3dr\n", timer.elapsed()*1000.0);
-            timer.clear();
-            timer.start();
-        }
-
-        mergePartitions(t, deviceBuffers, allDevices);
-
-        if logSortKernelTime {
-            timer.stop();
-            writef("merge on GPU %10.3dr\n", timer.elapsed()*1000.0);
-	            try! stdout.flush();
-            timer.clear();
-            timer.start();
-        }
-
-        record Lambda2 {
-            proc this(lo: int, hi: int, N: int) {
-                if t == int(32) {
-                    copyDeviceBufferToHost_int32(deviceBuffers, aOut.localSlice(lo .. hi), N);
-                } else if t == int(64) {
-                    copyDeviceBufferToHost_int64(deviceBuffers, aOut.localSlice(lo .. hi), N);
-                } else if t == real(32) {
-                    copyDeviceBufferToHost_float(deviceBuffers, aOut.localSlice(lo .. hi), N);
-                } else if t == real(64) {
-                    copyDeviceBufferToHost_double(deviceBuffers, aOut.localSlice(lo .. hi), N);
-                }
-                //DeviceSynchronize(); // previous operation already synchronizes stream
-            }
-        }
-        var copyBack = new Lambda2();
-        forall i in GPU(tD, copyBack) {
-            writeln("Should not reach this point!");
-            exit(1);
-        }
-
-        if logSortKernelTime {
-            timer.stop();
-            writef("copy back %10.3dr\n", timer.elapsed()*1000.0);
-	            try! stdout.flush();
-            timer.clear();
-            timer.start();
+            timerLoc1.stop();
+            writef("create dest %10.3dr\n", timerLoc1.elapsed()*1000.0);
+            timerLoc1.clear();
+            timerLoc1.start();
         }
         
-        if t == int(32) {
-            destroyDeviceBuffers_int32(deviceBuffers);
-        } else if t == int(64) {
-            destroyDeviceBuffers_int64(deviceBuffers);
-        } else if t == real(32) {
-            destroyDeviceBuffers_float(deviceBuffers);
-        } else if t == real(64) {
-            destroyDeviceBuffers_double(deviceBuffers);
+        coforall loc in a.targetLocales() do on loc {
+        //on Locales[1] {
+            // get local domain's indices
+            var lD = aD.localSubdomain();
+            var timer: stopwatch;
+            if logSortKernelTime {
+                timer.start();
+            }
+
+            var allDevices = GPUIterator.devices;
+            if (cubRadixSortVerbose) {
+                writeln(here, " creating device buffers for elements ", lD, " size ", lD.size, " allDevices stored at ", allDevices.locale, " ptr ", c_ptrTo(allDevices));
+                try! stdout.flush();
+            }
+
+            var deviceBuffers: c_ptr(void);
+            if t == int(32) {
+                deviceBuffers = createDeviceBuffers_int32(lD.size, allDevices, allDevices.size: int(32));
+            } else if t == int(64) {
+                deviceBuffers = createDeviceBuffers_int64(lD.size, allDevices, allDevices.size: int(32));
+            } else if t == real(32) {
+                deviceBuffers = createDeviceBuffers_float(lD.size, allDevices, allDevices.size: int(32));
+            } else if t == real(64) {
+                deviceBuffers = createDeviceBuffers_double(lD.size, allDevices, allDevices.size: int(32));
+            }
+
+            if logSortKernelTime {
+                timer.stop();
+                writef("create device buffers %10.3dr\n", timer.elapsed()*1000.0);
+                try! stdout.flush();
+                timer.clear();
+                timer.start();
+            }
+
+            // TODO: proper lambda functions break Chapel compiler
+            record Lambda {
+                proc this(lo: int, hi: int, N: int) {
+                    var deviceId: int(32);
+                    GetDevice(deviceId);
+                    e.prefetchLocalDataToDevice(lo, hi, deviceId);
+                    if (cubRadixSortVerbose) {
+                        var count: int(32);
+                        GetDeviceCount(count);
+                        writeln("cubSortKeysCallback launching cubSortKeysMergeOnGPU on dev ptr ", e.c_ptrToLocalData(lo), " with a range of ", lD.low+lo, "..", lD.low+hi, " (Size: ", N, "), ", here, " GPU", deviceId, " of ", count, " @", here);
+                        try! stdout.flush();
+                    }
+                    cubSortKeysMergeOnGPU(t, e.c_ptrToLocalData(lo), N, deviceBuffers);
+                }
+            }
+            
+            // calc task's indices from local domain's indices
+            var tD = {lD.low..lD.high};
+            var cubSortKeysCallback = new Lambda();
+            forall i in GPU(tD, cubSortKeysCallback) {
+                writeln("Should not reach this point!");
+                exit(1);
+            }
+
+            if logSortKernelTime {
+                timer.stop();
+                writef("sort %10.3dr\n", timer.elapsed()*1000.0);
+                try! stdout.flush();
+                timer.clear();
+                timer.start();
+            }
+
+            mergePartitions(t, deviceBuffers, allDevices);
+
+            if logSortKernelTime {
+                timer.stop();
+                writef("merge on GPU %10.3dr\n", timer.elapsed()*1000.0);
+                try! stdout.flush();
+                timer.clear();
+                timer.start();
+            }
+
+            record Lambda2 {
+                proc this(lo: int, hi: int, N: int) {
+                    if (cubRadixSortVerbose) {
+                        var deviceId: int(32);
+                        GetDevice(deviceId);
+                        var count: int(32);
+                        GetDeviceCount(count);
+                        writeln("copyBackCallback launching copyDeviceBufferToHost on dest.localSlice with a range of ", lD.low+lo, "..", lD.low+hi, " (Size: ", N, "), ", here, " GPU", deviceId, " of ", count, " @", here);
+                        try! stdout.flush();
+                    }
+                    if t == int(32) {
+                        copyDeviceBufferToHost_int32(deviceBuffers, dest.localSlice(lD.low+lo .. lD.low+hi), N);
+                    } else if t == int(64) {
+                        copyDeviceBufferToHost_int64(deviceBuffers, dest.localSlice(lD.low+lo .. lD.low+hi), N);
+                    } else if t == real(32) {
+                        copyDeviceBufferToHost_float(deviceBuffers, dest.localSlice(lD.low+lo .. lD.low+hi), N);
+                    } else if t == real(64) {
+                        copyDeviceBufferToHost_double(deviceBuffers, dest.localSlice(lD.low+lo .. lD.low+hi), N);
+                    }
+                    //DeviceSynchronize(); // previous operation already synchronizes stream
+                }
+            }
+            var copyBackCallback = new Lambda2();
+            forall i in GPU(tD, copyBackCallback) {
+                writeln("Should not reach this point!");
+                exit(1);
+            }
+
+            if logSortKernelTime {
+                timer.stop();
+                writef("copy back %10.3dr\n", timer.elapsed()*1000.0);
+                try! stdout.flush();
+                timer.clear();
+                timer.start();
+            }
+            
+            if t == int(32) {
+                destroyDeviceBuffers_int32(deviceBuffers);
+            } else if t == int(64) {
+                destroyDeviceBuffers_int64(deviceBuffers);
+            } else if t == real(32) {
+                destroyDeviceBuffers_float(deviceBuffers);
+            } else if t == real(64) {
+                destroyDeviceBuffers_double(deviceBuffers);
+            }
+
+            if logSortKernelTime {
+                timer.stop();
+                writef("destroy %10.3dr\n", timer.elapsed()*1000.0);
+                try! stdout.flush();
+            }
         }
 
         if logSortKernelTime {
-            timer.stop();
-            writef("destroy %10.3dr\n", timer.elapsed()*1000.0);
+            timerLoc1.stop();
+            writef("GPU sort %10.3dr\n", timerLoc1.elapsed()*1000.0);
+            timerLoc1.clear();
+            timerLoc1.start();
         }
 
-        return aOut;
+        if (aD.targetLocales().size > 1) {
+            var dest2: [aD] t = noinit;
+            mergeSortedChunks(dest, dest2);
+            if logSortKernelTime {
+                timerLoc1.stop();
+                writef("dist merge %10.3dr\n", timerLoc1.elapsed()*1000.0);
+                timerLoc1.clear();
+                timerLoc1.start();
+            }
+            return dest2;
+        } else {
+            return dest;
+        }
     }
 
     /* Radix Sort Least Significant Digit
