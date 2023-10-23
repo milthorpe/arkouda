@@ -283,12 +283,9 @@ use IO;
         }
 
         if (aD.targetLocales().size > 1) {
-            var dest2: [aD] t = noinit;
-            mergeSortedChunks(dest, dest2);
-            return dest2;
-        } else {
-            return dest;
+             mergeSortedChunks(dest);
         }
+        return dest;
     }
 
     proc cubRadixSortLSDKeysMergeOnGPU(e: SymEntry(?)) where e.GPU == true {
@@ -442,6 +439,7 @@ use IO;
         if logSortKernelTime {
             timerLoc1.stop();
             writef("GPU_sort               %10.3dr\n", timerLoc1.elapsed()*1000.0);
+            try! stdout.flush();
             timerLoc1.clear();
             timerLoc1.start();
         }
@@ -451,8 +449,7 @@ use IO;
             if logSortKernelTime {
                 timerLoc1.stop();
                 writef("dist_merge             %10.3dr\n", timerLoc1.elapsed()*1000.0);
-                timerLoc1.clear();
-                timerLoc1.start();
+                try! stdout.flush();
             }
         }
         return dest;
