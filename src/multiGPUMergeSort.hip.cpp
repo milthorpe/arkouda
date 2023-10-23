@@ -16,6 +16,7 @@ DeviceBuffers<T>* createDeviceBuffers(const size_t num_elements, const int *gpus
 
   if (num_fillers > 0) {
     int lastDevice = gpus[nGPUs - 1];
+    CheckCudaError(hipSetDevice(lastDevice));
     thrust::fill(thrust::hip::par(*device_buffers->GetDeviceAllocator(lastDevice))
                       .on(*device_buffers->GetPrimaryStream(lastDevice)),
                   device_buffers->AtPrimary(lastDevice)->end() - num_fillers, device_buffers->AtPrimary(lastDevice)->end(),
@@ -49,10 +50,11 @@ template <typename T>
 size_t findPivot(void *device_buffers_ptr, const int *gpus, const int nGPUs) {
   DeviceBuffers<T>* device_buffers = (DeviceBuffers<T>*)device_buffers_ptr;
   std::vector<int> devices(gpus, gpus+nGPUs);
-  int32_t pivot = FindPivot<T>(device_buffers, devices);
   //printf("findPivot for GPUs: ");
   //for (int i=0; i<nGPUs; i++) printf("%d ", devices[i]);
-  //printf(" = %d\n", pivot);
+  //printf("\n");
+  int32_t pivot = FindPivot<T>(device_buffers, devices);
+  //printf("pivot = %d\n", pivot);
   return pivot;
 }
 
