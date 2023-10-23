@@ -15,15 +15,13 @@ module KWayMerge {
     inline proc key(kr) { const (k, _) = kr; return k; }
   }
 
-  proc mergeSortedKeys(ref dst: [?aD] ?keyType, ref src: [aD] keyType, localesToMerge: [0..1] (locale,int), pivot: int) {
-    coforall (loc,cut) in localesToMerge do on loc {
-      var localSub = aD.localSubdomain();
-      var dstLocal = dst.localSlice(localSub);
-      var srcLocal = src.localSlice(localSub);
-      //writeln(dateTime.now(), " at ", here, " merging ", localSub.dim(0).first,"..",(cut-1)," and ", cut, "..", localSub.dim(0).last);
-      var chunks = [localSub.dim(0).first..<cut, cut..localSub.dim(0).last];
-      directMerge(dst, src, chunks, new KeysComparator(max(keyType)));
-    }
+  proc mergeSortedKeysAtCut(ref dst: [?aD] ?keyType, const ref src: [aD] keyType, cut: int) {
+    var localSub = aD.localSubdomain();
+    //writeln(dateTime.now(), " at ", here, " merging ", localSub.dim(0).first..<cut," and ", cut..localSub.dim(0).last);
+    //writeln(dateTime.now(), " at ", here, " src ", src[localSub]);
+    var chunks = (localSub.dim(0).first..<cut, cut..localSub.dim(0).last);
+    mergeTwoChunks(dst[localSub], src[localSub], chunks, new KeysComparator(max(keyType)));
+    //writeln(dateTime.now(), " at ", here, " dst ", dst.localSlice(localSub));
   }
 
   proc mergeSortedKeys(ref dst: [?aD] ?keyType, ref src: [aD] keyType, numChunks: int) {
@@ -51,6 +49,44 @@ module KWayMerge {
       chunks[tid] = computeChunk(aD.dim(0), tid, numChunks);
     }
     directMerge(dst, src, chunks, comparator);
+  }
+
+  private proc mergeTwoChunks(ref dst: [?aD] ?t, const ref src: [aD] t, chunks: (range(int), range(int)), comparator) {
+    var next0 = chunks(0).first;
+    var next1 = chunks(1).first;
+    const last0 = chunks(0).last;
+    const last1 = chunks(1).last;
+    //writeln(dateTime.now(), " at ", here, " merging next0 ", next0, " next1 ", next1, " last0 ", last0, " last1 ", last1);
+    var i = chunks(0).first;
+    if next0 <= last0 && next1 <= last1 {
+      var elem0 = src.localAccess[next0];
+      var elem1 = src.localAccess[next1];
+      while true {
+        if (elem0 < elem1) {
+          //writeln(here, " next0 ", next0);
+          dst.localAccess[i] = elem0;
+          next0 += 1;
+          i += 1;
+          if next0 > last0 then break;
+          elem0 = src.localAccess[next0];
+        } else {
+          //writeln(here, " next1 ", next1);
+          dst.localAccess[i] = elem1;
+          next1 += 1;
+          i += 1;
+          if next1 > last1 then break;
+          elem1 = src.localAccess[next1];
+        }
+      }
+    }
+    if next0 <= last0 {
+      //writeln(dateTime.now(), " at ", here, " copying next0 ", next0..last0, " to dst ", i..last1);
+      [(a, b) in zip(i..last1, next0..last0)] dst.localAccess[a] = src.localAccess[b];
+    }
+    if next1 <= last1 {
+      //writeln(dateTime.now(), " at ", here, " copying next1 ", next1..last1, " to dst ", i..last1);
+      [(a, b) in zip(i..last1, next1..last1)] dst.localAccess[a] = src.localAccess[b];
+    }
   }
 
   private proc directMerge(ref dst: [?aD] ?t, ref src: [aD] t, chunks: [?chunkD] range(int), comparator) {
