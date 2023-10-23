@@ -305,7 +305,7 @@ use IO;
 
         if logSortKernelTime {
             timerLoc1.stop();
-            writef("create dest %10.3dr\n", timerLoc1.elapsed()*1000.0);
+            writef("\ncreate_dest            %10.3dr\n", timerLoc1.elapsed()*1000.0);
             timerLoc1.clear();
             timerLoc1.start();
         }
@@ -338,7 +338,7 @@ use IO;
 
             if logSortKernelTime {
                 timer.stop();
-                writef("create device buffers %10.3dr\n", timer.elapsed()*1000.0);
+                writef("create_dev_buffers  %2n %10.3dr\n", here.id, timer.elapsed()*1000.0);
                 try! stdout.flush();
                 timer.clear();
                 timer.start();
@@ -349,7 +349,7 @@ use IO;
                 proc this(lo: int, hi: int, N: int) {
                     var deviceId: int(32);
                     GetDevice(deviceId);
-                    e.prefetchLocalDataToDevice(lo, hi, deviceId);
+                    //e.prefetchLocalDataToDevice(lo, hi, deviceId); // TODO does this even work on AMD?
                     if (cubRadixSortVerbose) {
                         var count: int(32);
                         GetDeviceCount(count);
@@ -370,7 +370,7 @@ use IO;
 
             if logSortKernelTime {
                 timer.stop();
-                writef("sort %10.3dr\n", timer.elapsed()*1000.0);
+                writef("sort                %2n %10.3dr\n", here.id, timer.elapsed()*1000.0);
                 try! stdout.flush();
                 timer.clear();
                 timer.start();
@@ -380,7 +380,7 @@ use IO;
 
             if logSortKernelTime {
                 timer.stop();
-                writef("merge on GPU %10.3dr\n", timer.elapsed()*1000.0);
+                writef("merge_on_GPU        %2n %10.3dr\n", here.id, timer.elapsed()*1000.0);
                 try! stdout.flush();
                 timer.clear();
                 timer.start();
@@ -416,7 +416,7 @@ use IO;
 
             if logSortKernelTime {
                 timer.stop();
-                writef("copy back %10.3dr\n", timer.elapsed()*1000.0);
+                writef("copy_back           %2n %10.3dr\n", here.id, timer.elapsed()*1000.0);
                 try! stdout.flush();
                 timer.clear();
                 timer.start();
@@ -434,31 +434,28 @@ use IO;
 
             if logSortKernelTime {
                 timer.stop();
-                writef("destroy %10.3dr\n", timer.elapsed()*1000.0);
+                writef("destroy_dev_buffers %2n %10.3dr\n", here.id, timer.elapsed()*1000.0);
                 try! stdout.flush();
             }
         }
 
         if logSortKernelTime {
             timerLoc1.stop();
-            writef("GPU sort %10.3dr\n", timerLoc1.elapsed()*1000.0);
+            writef("GPU_sort               %10.3dr\n", timerLoc1.elapsed()*1000.0);
             timerLoc1.clear();
             timerLoc1.start();
         }
 
         if (aD.targetLocales().size > 1) {
-            var dest2: [aD] t = noinit;
-            mergeSortedChunks(dest, dest2);
+            mergeSortedChunks(dest);
             if logSortKernelTime {
                 timerLoc1.stop();
-                writef("dist merge %10.3dr\n", timerLoc1.elapsed()*1000.0);
+                writef("dist_merge             %10.3dr\n", timerLoc1.elapsed()*1000.0);
                 timerLoc1.clear();
                 timerLoc1.start();
             }
-            return dest2;
-        } else {
-            return dest;
         }
+        return dest;
     }
 
     /* Radix Sort Least Significant Digit
