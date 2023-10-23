@@ -4,125 +4,127 @@ module DistMerge {
    where the data in each locale's local slice are already sorted
   */
     use Time;
+    //use CommPrimitives;
+    //use CTypes;
 
-    proc mergeSortedChunks(src, dst) {
-        var buffer = new DoubleBuffer(src, dst);
-        mergePartitions(buffer, src.domain.targetLocales());
-    }
-
-    class DoubleBuffer {
-        var primary, secondary;
-        proc flip() {
-            primary <=> secondary;
-        }
+    proc mergeSortedChunks(ref src) {
+        var tmp: [src.domain] src.eltType = noinit;
+        mergePartitions(src, tmp, src.domain.targetLocales());
     }
 
     proc selectPivot(A: [], targetLocales: [] locale) {
-        var startLH = A.localSubdomain(targetLocales.first).first;
+        var endLH = A.localSubdomain(targetLocales[targetLocales.size/2 - 1]).last;
         var startRH = A.localSubdomain(targetLocales[targetLocales.size/2]).first;
-        var endLH = A.localSubdomain(targetLocales[targetLocales.size/2 - 1]).last + 1;
-        //writeln("startLH = ", startLH, " startRH = ", startRH, " endLH = ", endLH);
-        var lo = startLH;
-        var hi = endLH;
+        var partitionSize = A.localSubdomain(targetLocales.first).size;
+        //writeln("endLH = ", endLH, " startRH = ", startRH);
+        var lo = 0;
+        var hi = partitionSize * targetLocales.size/2;
         while lo < hi {
             var mid = hi - (hi - lo) / 2;
             //writeln("lo = ", lo, " hi = ", hi, " mid = ", mid);
-            //writeln("A[", (endLH - mid + startLH), "] = ", A[endLH - mid + startLH], " A[", (mid-1),"] = ", A[mid-1]);
-            if A[endLH - mid + startLH] <= A[mid-1] then // TODO fix for padded A
-            hi = mid - 1;
+            //writeln("A[", (startRH + mid-1), "] = ", A[startRH + mid-1], " A[", (endLH-mid+1),"] = ", A[endLH-mid+1]);
+            if A[endLH-mid+1] <= A[startRH + mid-1] then // TODO fix for padded A
+                hi = mid - 1;
             else
-            lo = mid;
+                lo = mid;
         }
-        return lo - startLH;
+        return lo;
     }
 
-    proc mergePartitions(buffer: DoubleBuffer(?), targetLocales: [] locale) {
-        if targetLocales.size > 2 then
-            forall i in 0..1 {
-                //writeln(dateTime.now(), " before need to merge targetLocales ", i * (targetLocales.size / 2), " and ", i * (targetLocales.size / 2) + 1, " of ", targetLocales.size);
-                mergePartitions(buffer, [targetLocales[i * (targetLocales.size / 2)], targetLocales[i * (targetLocales.size / 2) + 1]]);
-            }
+    proc swapPartitions(ref src, ref tmp, const targetLocales: [] locale, in pivot: int) {
+        var partitionSize = src.size / src.domain.targetLocales().size;
+        var localesToSwap = pivot / partitionSize;
+        //writeln(dateTime.now(), " pivot = ", pivot, " partitionSize = ", partitionSize);
 
-        //writeln(dateTime.now(), " merging ", targetLocales);
-        var pivot = selectPivot(buffer.primary, targetLocales);
-        if pivot > 0 {
-            var localesToMerge = swapPartitions(buffer, targetLocales, pivot);
-            //writeln(dateTime.now(), " before merge sorted");
-            mergeSortedKeys(buffer.primary, buffer.secondary, localesToMerge, pivot);
-            buffer.flip();
-        }
-
-        if targetLocales.size > 2 then
-            forall i in 0..1 {
-            //writeln(dateTime.now(), " after need to merge targetLocales ", i * (targetLocales.size / 2), " and ", i * (targetLocales.size / 2) + 1, " of ", targetLocales.size);
-            mergePartitions(buffer, [targetLocales[i * (targetLocales.size / 2)], targetLocales[i * (targetLocales.size / 2) + 1]]);
-        }
-    }
-
-    proc swapPartitions(buffer: DoubleBuffer(?), targetLocales: [] locale, in pivot: int) {
-        var partition_size = buffer.primary.size / buffer.primary.domain.targetLocales().size;
-        var devices_to_swap = pivot / partition_size;
-        //writeln(dateTime.now(), " pivot = ", pivot, " partition_size = ", partition_size);
-
-        if (pivot == partition_size * (targetLocales.size / 2)) {
-            devices_to_swap -= 1;
-            pivot = partition_size;
+        if (pivot == partitionSize * (targetLocales.size / 2)) {
+            localesToSwap -= 1;
+            pivot = partitionSize;
         } else {
-            pivot %= partition_size;
+            pivot %= partitionSize;
         }
-        //writeln("targetLocales = ", targetLocales, " pivot = ", pivot, " devices_to_swap = ", devices_to_swap);
+        //writeln("targetLocales = ", targetLocales, " pivot = ", pivot, " localesToSwap = ", localesToSwap);
 
-        var devices_to_merge: [0..1] (locale, int);
+        var localesToMerge: [0..1] (locale, int);
 
-        forall i in 0..devices_to_swap {
-            const left_device = targetLocales[targetLocales.size / 2 - i - 1];
-            const right_device = targetLocales[targetLocales.size / 2 + i];
-            const num_elements = if (i == devices_to_swap) then pivot else partition_size;
+        coforall i in 0..localesToSwap with (const targetLocales, ref localesToMerge) {
+            const leftLocale = targetLocales[targetLocales.size / 2 - i - 1];
+            const rightLocale = targetLocales[targetLocales.size / 2 + i];
+            const numElements = if (i == localesToSwap) then pivot else partitionSize;
 
-            const left_start = buffer.primary.localSubdomain(left_device).first + partition_size - num_elements;
-            const right_start = buffer.primary.localSubdomain(right_device).first;
-            //writeln(dateTime.now(), " partition_size ", partition_size, " left_device ", left_device, " right_device ", right_device, " num_elements ", num_elements, " left_start ", left_start, " right_start ", right_start);
-            //writeln("left  ", buffer.primary[left_start..#num_elements]);
-            //writeln("right ", buffer.primary[right_start..#num_elements]);
+            const leftStart = src.localSubdomain(leftLocale).first + partitionSize - numElements;
+            const rightStart = src.localSubdomain(rightLocale).first;
+
+            //var ptrToLeftSrc: c_ptr(src.eltType);
+            //on leftLocale do ptrToLeftSrc = c_ptrTo(src[leftStart]);
+            //var ptrToRightSrc: c_ptr(src.eltType);
+            //on rightLocale do ptrToRightSrc = c_ptrTo(src[rightStart]);
+            //const ptrToLeftSrc = getAddr(src[leftStart]);
+            //const ptrToRightSrc = getAddr(src[rightStart]);
+
+            //writeln(dateTime.now(), " partitionSize ", partitionSize, " leftLocale ", leftLocale, " rightLocale ", rightLocale, " numElements ", numElements, " leftStart ", leftStart, " rightStart ", rightStart);
+            //writeln("left  ", src[leftStart..#numElements]);
+            //writeln("right ", src[rightStart..#numElements]);
             cobegin {
-                on right_device do buffer.secondary[right_start..#num_elements] = buffer.primary[left_start..#num_elements];
-                on left_device do buffer.secondary[left_start..#num_elements] = buffer.primary[right_start..#num_elements];
+                on leftLocale do tmp.localSlice(leftStart..#numElements) = src[rightStart..#numElements];  
+                //on leftLocale do GET(c_ptrTo(tmp[leftStart]), ptrToRightSrc, rightLocale.id, numElements*c_sizeof(src.eltType));
+                on rightLocale do tmp.localSlice(rightStart..#numElements) = src[leftStart..#numElements];
+                //on rightLocale do GET(c_ptrTo(tmp[rightStart]), ptrToLeftSrc, leftLocale.id, numElements*c_sizeof(src.eltType));
             }
 
             //writeln(dateTime.now(), " before copy");
 
-            if (i == devices_to_swap) {
-                devices_to_merge[0] = (left_device,left_start);
-                devices_to_merge[1] = (right_device,right_start+num_elements);
-                forall j in 0..1 do on devices_to_merge[j] {
-                    var device_domain = buffer.primary.localSubdomain(devices_to_merge[j][0]);
-                    var slice_to_copy = device_domain.first + j * pivot .. #partition_size - pivot;
-                    buffer.secondary[slice_to_copy] = buffer.primary[slice_to_copy];
+            if (i == localesToSwap) {
+                localesToMerge[0] = (leftLocale,leftStart);
+                localesToMerge[1] = (rightLocale,rightStart+numElements);
+                coforall j in 0..1 do on localesToMerge[j] {
+                    var localSub = src.localSubdomain(localesToMerge[j][0]);
+                    var slice_to_copy = localSub.first + j * pivot .. #partitionSize - pivot;
+                    tmp.localSlice(slice_to_copy) = src.localSlice(slice_to_copy);
+                }
+            } else {
+                // these locales won't be merged, so copy elements back to src
+                cobegin {
+                    on leftLocale do src[src.localSubdomain(leftLocale)] = tmp[src.localSubdomain(leftLocale)];
+                    on rightLocale do src[src.localSubdomain(rightLocale)] = tmp[src.localSubdomain(rightLocale)];
                 }
             }
+            //writeln(dateTime.now(), " after copy");
+            //writeln("after swap tmp = ", tmp);
         }
-        buffer.flip();
 
-        //writeln("now A = ", buffer.primary);
+        return localesToMerge;
+    }
 
-        /*
-        forall j in 0..1 {
-            const device = devices[devices_to_merge[j]];
-            const start = A.localSubdomain(Locales[device]).first;
-            A[start+j*pivot..start+partition_size-pivot] = secondaryA[start+j*pivot..start+partition_size-pivot];
+    proc mergePartitions(ref src, ref tmp, const targetLocales: [] locale) {
+        if targetLocales.size > 2 then
+            coforall i in 0..1 {
+                var localesSubset: [0..#targetLocales.size / 2] locale;
+                localesSubset = targetLocales((i * (targetLocales.size / 2)) .. #(targetLocales.size / 2));
+                //writeln(dateTime.now(), " before pivoting, need to merge ", localesSubset);
+                mergePartitions(src, tmp, localesSubset);
+            }
+
+        //writeln(dateTime.now(), " merging ", targetLocales);
+        //writeln(dateTime.now(), " src ", src);
+        var pivot = selectPivot(src, targetLocales);
+        //writeln(dateTime.now(), " pivot ", targetLocales, " = ", pivot);
+        if pivot > 0 {
+            var localesToMerge = swapPartitions(src, tmp, targetLocales, pivot); // src->tmp
+            //writeln(dateTime.now(), " swapped ", targetLocales);
+            //writeln(dateTime.now(), " ", tmp);
+            coforall (loc, cut) in localesToMerge {
+                on loc do mergeSortedKeysAtCut(src, tmp, cut); // tmp->src
+            }
+            //writeln(dateTime.now(), " merged ", targetLocales);
+            //writeln(dateTime.now(), " ", src);
         }
-        // now flip buffers
-        */
-        /*
-        var end0 = A.localSubdomain(targetLocales[0]).last;
-        var start0 = end0 - pivot + 1;
-        var start1 = A.localSubdomain(targetLocales[1]).first;
-        var end1 = start1 + pivot - 1;
-        writeln("swapping ", start0, "..", end0, " and ", start1, "..", end1);
-        var tmp = A[start1..end1];
-        A[start1..end1] = A[start0..end0];
-        A[start0..end0] = tmp;
-        */
-        return devices_to_merge;
+
+        if targetLocales.size > 2 then
+            coforall i in 0..1 {
+                var localesSubset: [0..#targetLocales.size / 2] locale;
+                localesSubset = targetLocales((i * (targetLocales.size / 2)) .. #(targetLocales.size / 2));
+                //writeln(dateTime.now(), " after pivoting, need to merge ", localesSubset);
+                mergePartitions(src, tmp, localesSubset);
+            }
     }
 }
