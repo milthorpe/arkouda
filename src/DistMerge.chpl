@@ -4,8 +4,8 @@ module DistMerge {
    where the data in each locale's local slice are already sorted
   */
     use Time;
-    //use CommPrimitives;
-    //use CTypes;
+    use CommPrimitives;
+    use CTypes;
 
     proc mergeSortedChunks(ref src) {
         var tmp: [src.domain] src.eltType = noinit;
@@ -54,21 +54,20 @@ module DistMerge {
             const leftStart = src.localSubdomain(leftLocale).first + partitionSize - numElements;
             const rightStart = src.localSubdomain(rightLocale).first;
 
-            //var ptrToLeftSrc: c_ptr(src.eltType);
-            //on leftLocale do ptrToLeftSrc = c_ptrTo(src[leftStart]);
-            //var ptrToRightSrc: c_ptr(src.eltType);
-            //on rightLocale do ptrToRightSrc = c_ptrTo(src[rightStart]);
-            //const ptrToLeftSrc = getAddr(src[leftStart]);
-            //const ptrToRightSrc = getAddr(src[rightStart]);
-
             //writeln(dateTime.now(), " partitionSize ", partitionSize, " leftLocale ", leftLocale, " rightLocale ", rightLocale, " numElements ", numElements, " leftStart ", leftStart, " rightStart ", rightStart);
             //writeln("left  ", src[leftStart..#numElements]);
             //writeln("right ", src[rightStart..#numElements]);
+
+            var rightSrc: c_ptr(src.eltType);
+            on rightLocale do rightSrc = c_ptrTo(src[rightStart]);
+            var leftSrc: c_ptr(src.eltType);
+            on leftLocale do leftSrc = c_ptrTo(src[leftStart]);
             cobegin {
-                on leftLocale do tmp.localSlice(leftStart..#numElements) = src[rightStart..#numElements];  
-                //on leftLocale do GET(c_ptrTo(tmp[leftStart]), ptrToRightSrc, rightLocale.id, numElements*c_sizeof(src.eltType));
-                on rightLocale do tmp.localSlice(rightStart..#numElements) = src[leftStart..#numElements];
-                //on rightLocale do GET(c_ptrTo(tmp[rightStart]), ptrToLeftSrc, leftLocale.id, numElements*c_sizeof(src.eltType));
+                // TODO would like to be able to use slices as follows, but they generate too much extra communication
+                //on leftLocale do tmp.localSlice(leftStart..#numElements) = src[rightStart..#numElements];
+                //on rightLocale do tmp.localSlice(rightStart..#numElements) = src[leftStart..#numElements];
+                on leftLocale do GET(c_ptrTo(tmp[leftStart]), rightSrc, rightLocale.id, numElements*c_sizeof(src.eltType));
+                on rightLocale do GET(c_ptrTo(tmp[rightStart]), leftSrc, leftLocale.id, numElements*c_sizeof(src.eltType));
             }
 
             //writeln(dateTime.now(), " before copy");
@@ -76,20 +75,20 @@ module DistMerge {
             if (i == localesToSwap) {
                 localesToMerge[0] = (leftLocale,leftStart);
                 localesToMerge[1] = (rightLocale,rightStart+numElements);
-                coforall j in 0..1 do on localesToMerge[j] {
-                    var localSub = src.localSubdomain(localesToMerge[j][0]);
-                    var slice_to_copy = localSub.first + j * pivot .. #partitionSize - pivot;
-                    tmp.localSlice(slice_to_copy) = src.localSlice(slice_to_copy);
+
+                coforall j in 0..1 do on localesToMerge[j](0) {
+                    var localSub = src.localSubdomain(here);
+                    var sliceToCopy = (localSub.first + j * pivot) .. #(partitionSize - pivot);
+                    tmp.localSlice(sliceToCopy) = src.localSlice(sliceToCopy);
                 }
             } else {
                 // these locales won't be merged, so copy elements back to src
-                cobegin {
-                    on leftLocale do src[src.localSubdomain(leftLocale)] = tmp[src.localSubdomain(leftLocale)];
-                    on rightLocale do src[src.localSubdomain(rightLocale)] = tmp[src.localSubdomain(rightLocale)];
+                coforall loc in {leftLocale, rightLocale} do on loc {
+                    const localSub = src.localSubdomain();
+                    src.localSlice(localSub) = tmp.localSlice(localSub);
                 }
             }
             //writeln(dateTime.now(), " after copy");
-            //writeln("after swap tmp = ", tmp);
         }
 
         return localesToMerge;
@@ -100,7 +99,6 @@ module DistMerge {
             coforall i in 0..1 {
                 var localesSubset: [0..#targetLocales.size / 2] locale;
                 localesSubset = targetLocales((i * (targetLocales.size / 2)) .. #(targetLocales.size / 2));
-                //writeln(dateTime.now(), " before pivoting, need to merge ", localesSubset);
                 mergePartitions(src, tmp, localesSubset);
             }
 
@@ -112,8 +110,8 @@ module DistMerge {
             var localesToMerge = swapPartitions(src, tmp, targetLocales, pivot); // src->tmp
             //writeln(dateTime.now(), " swapped ", targetLocales);
             //writeln(dateTime.now(), " ", tmp);
-            coforall (loc, cut) in localesToMerge {
-                on loc do mergeSortedKeysAtCut(src, tmp, cut); // tmp->src
+            coforall (loc, cut) in localesToMerge do on loc {
+                mergeSortedKeysAtCut(src, tmp, cut); // tmp->src
             }
             //writeln(dateTime.now(), " merged ", targetLocales);
             //writeln(dateTime.now(), " ", src);
@@ -123,7 +121,6 @@ module DistMerge {
             coforall i in 0..1 {
                 var localesSubset: [0..#targetLocales.size / 2] locale;
                 localesSubset = targetLocales((i * (targetLocales.size / 2)) .. #(targetLocales.size / 2));
-                //writeln(dateTime.now(), " after pivoting, need to merge ", localesSubset);
                 mergePartitions(src, tmp, localesSubset);
             }
     }
