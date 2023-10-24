@@ -52,30 +52,32 @@ module KWayMerge {
   }
 
   private proc mergeTwoChunks(ref dst: [?aD] ?t, const ref src: [aD] t, chunks: (range(int), range(int)), comparator) {
-    var next0 = chunks(0).first;
-    var next1 = chunks(1).first;
+    const chunk0 = src.localSlice(chunks(0).first..chunks(0).last);
+    const chunk1 = src.localSlice(chunks(1).first..chunks(1).last);
     const last0 = chunks(0).last;
     const last1 = chunks(1).last;
+    var next0 = chunks(0).first;
+    var next1 = chunks(1).first;
     //writeln(dateTime.now(), " at ", here, " merging next0 ", next0, " next1 ", next1, " last0 ", last0, " last1 ", last1);
     var i = chunks(0).first;
     if next0 <= last0 && next1 <= last1 {
-      var elem0 = src.localAccess[next0];
-      var elem1 = src.localAccess[next1];
+      var elem0 = chunk0[next0];
+      var elem1 = chunk1[next1];
       while true {
-        if (elem0 < elem1) {
+        if (comparator.key(elem0) < comparator.key(elem1)) {
           //writeln(here, " next0 ", next0);
           dst.localAccess[i] = elem0;
           next0 += 1;
           i += 1;
           if next0 > last0 then break;
-          elem0 = src.localAccess[next0];
+          elem0 = chunk0[next0];
         } else {
           //writeln(here, " next1 ", next1);
           dst.localAccess[i] = elem1;
           next1 += 1;
           i += 1;
           if next1 > last1 then break;
-          elem1 = src.localAccess[next1];
+          elem1 = chunk1[next1];
         }
       }
     }
