@@ -52,6 +52,42 @@ use IO;
     extern proc sortToDeviceBuffer_float(keys_in: c_ptr(void), device_buffers: c_ptr(void), N: c_size_t);
     extern proc sortToDeviceBuffer_double(keys_in: c_ptr(void), device_buffers: c_ptr(void), N: c_size_t);
 
+    private proc createDeviceBuffers(type t, numElements: c_size_t, devices: [] int(32)): c_ptr(void) {
+        if t == int(32) {
+            return createDeviceBuffers_int32(numElements, devices, devices.size: int(32));
+        } else if t == int(64) {
+            return createDeviceBuffers_int64(numElements, devices, devices.size: int(32));
+        } else if t == real(32) {
+            return createDeviceBuffers_float(numElements, devices, devices.size: int(32));
+        } else if t == real(64) {
+            return createDeviceBuffers_double(numElements, devices, devices.size: int(32));
+        }
+    }
+
+    private proc copyDeviceBufferToHost(type t, deviceBuffers: c_ptr(void), hostArray: [] t, N: c_size_t) {
+        if t == int(32) {
+            copyDeviceBufferToHost_int32(deviceBuffers, hostArray, N);
+        } else if t == int(64) {
+            copyDeviceBufferToHost_int64(deviceBuffers, hostArray, N);
+        } else if t == real(32) {
+            copyDeviceBufferToHost_float(deviceBuffers, hostArray, N);
+        } else if t == real(64) {
+            copyDeviceBufferToHost_double(deviceBuffers, hostArray, N);
+        }
+    }
+
+    private proc destroyDeviceBuffers(type t, deviceBuffers: c_ptr(void)) {
+        if t == int(32) {
+            destroyDeviceBuffers_int32(deviceBuffers);
+        } else if t == int(64) {
+            destroyDeviceBuffers_int64(deviceBuffers);
+        } else if t == real(32) {
+            destroyDeviceBuffers_float(deviceBuffers);
+        } else if t == real(64) {
+            destroyDeviceBuffers_double(deviceBuffers);
+        }
+    }
+
     private proc findPivot(type t, device_buffers: c_ptr(void), devices: [] int(32), nGPUs: int(32)): int {
         if t == int(32) {
             return findPivot_int32(device_buffers, devices, nGPUs);
@@ -283,7 +319,7 @@ use IO;
         }
 
         if (aD.targetLocales().size > 1) {
-             mergeSortedChunks(dest);
+            mergeSortedChunks(dest);
         }
         return dest;
     }
@@ -308,7 +344,6 @@ use IO;
         }
         
         coforall loc in a.targetLocales() do on loc {
-        //on Locales[1] {
             // get local domain's indices
             var lD = aD.localSubdomain();
             var timer: stopwatch;
@@ -322,16 +357,7 @@ use IO;
                 try! stdout.flush();
             }
 
-            var deviceBuffers: c_ptr(void);
-            if t == int(32) {
-                deviceBuffers = createDeviceBuffers_int32(lD.size, allDevices, allDevices.size: int(32));
-            } else if t == int(64) {
-                deviceBuffers = createDeviceBuffers_int64(lD.size, allDevices, allDevices.size: int(32));
-            } else if t == real(32) {
-                deviceBuffers = createDeviceBuffers_float(lD.size, allDevices, allDevices.size: int(32));
-            } else if t == real(64) {
-                deviceBuffers = createDeviceBuffers_double(lD.size, allDevices, allDevices.size: int(32));
-            }
+            const deviceBuffers = createDeviceBuffers(t, lD.size, allDevices);
 
             if logSortKernelTime {
                 timer.stop();
@@ -385,6 +411,7 @@ use IO;
 
             record Lambda2 {
                 proc this(lo: int, hi: int, N: int) {
+                    const lD = dest.localSubdomain();
                     if (cubRadixSortVerbose) {
                         var deviceId: int(32);
                         GetDevice(deviceId);
@@ -393,15 +420,7 @@ use IO;
                         writeln("copyBackCallback launching copyDeviceBufferToHost on dest.localSlice with a range of ", lD.low+lo, "..", lD.low+hi, " (Size: ", N, "), ", here, " GPU", deviceId, " of ", count, " @", here);
                         try! stdout.flush();
                     }
-                    if t == int(32) {
-                        copyDeviceBufferToHost_int32(deviceBuffers, dest.localSlice(lD.low+lo .. lD.low+hi), N);
-                    } else if t == int(64) {
-                        copyDeviceBufferToHost_int64(deviceBuffers, dest.localSlice(lD.low+lo .. lD.low+hi), N);
-                    } else if t == real(32) {
-                        copyDeviceBufferToHost_float(deviceBuffers, dest.localSlice(lD.low+lo .. lD.low+hi), N);
-                    } else if t == real(64) {
-                        copyDeviceBufferToHost_double(deviceBuffers, dest.localSlice(lD.low+lo .. lD.low+hi), N);
-                    }
+                    copyDeviceBufferToHost(t, deviceBuffers, dest.localSlice(lD.low+lo .. lD.low+hi), N);
                     //DeviceSynchronize(); // previous operation already synchronizes stream
                 }
             }
@@ -419,15 +438,7 @@ use IO;
                 timer.start();
             }
             
-            if t == int(32) {
-                destroyDeviceBuffers_int32(deviceBuffers);
-            } else if t == int(64) {
-                destroyDeviceBuffers_int64(deviceBuffers);
-            } else if t == real(32) {
-                destroyDeviceBuffers_float(deviceBuffers);
-            } else if t == real(64) {
-                destroyDeviceBuffers_double(deviceBuffers);
-            }
+            destroyDeviceBuffers(t, deviceBuffers);
 
             if logSortKernelTime {
                 timer.stop();
