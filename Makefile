@@ -347,7 +347,7 @@ ifndef CHPL_GPU_HOME
 $(error CHPL_GPU_HOME not defined)
 endif
 
-GPU_FLAGS=-M $(CHPL_GPU_HOME)/modules $(CHPL_GPU_HOME)/include/GPUAPI.h $(CUDA_HEADERS) -I$(ZMQ_DIR)/include -I$(HDF5_DIR)/include -I$(ARROW_DIR)/include -L$(CHPL_GPU_HOME)/lib -L$(HIP_ROOT_DIR)/lib -lGPUAPIHIP_static -lamdhip64 -L$(RCCL_PATH)/lib -lrccl -L$(ROCM_PATH)/llvm/lib -lomp 
+GPU_FLAGS=-M $(CHPL_GPU_HOME)/modules $(CHPL_GPU_HOME)/include/GPUAPI.h $(CUDA_HEADERS) -I$(ZMQ_DIR)/include -I$(HDF5_DIR)/include -I$(ARROW_DIR)/include -L$(CHPL_GPU_HOME)/lib -L$(CHPL_GPU_HOME)/lib64 -L$(HIP_ROOT_DIR)/lib -lGPUAPIHIP_static -lamdhip64 -L$(RCCL_PATH)/lib -lrccl -L$(ROCM_PATH)/llvm/lib -lomp 
 
 MODULE_GENERATION_SCRIPT=$(ARKOUDA_SOURCE_DIR)/serverModuleGen.py
 # This is the main compilation statement section
