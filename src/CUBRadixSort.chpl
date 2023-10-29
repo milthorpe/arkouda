@@ -266,7 +266,7 @@ use IO;
             timerLoc1.start();
         }
 
-        coforall loc in a.targetLocales() do on loc {
+        coforall loc in a.targetLocales() with (ref dest) do on loc {
             var timer: stopwatch;
             if logSortKernelTime {
                 timer.start();
@@ -281,7 +281,7 @@ use IO;
                     if (cubRadixSortVerbose) {
                         var count: int(32);
                         GetDeviceCount(count);
-                        writeln("In cubSortKeysCallback, launching the CUDA kernel with a range of ", lo, "..", hi, " (Size: ", N, "), GPU", deviceId, " of ", count, " @", here);
+                        writeln(here, " GPU", deviceId, " of ", count, " cubSortKeysCallback, launching the CUDA kernel with a range of ", lo, "..", hi, " (Size: ", N, ")");
                     }
                     // these are temporary arrays that do not need to be cached on SymEntry
                     var devDest = new GPUArray(dest.localSlice(lo .. hi));
@@ -379,7 +379,7 @@ use IO;
                     if (cubRadixSortVerbose) {
                         var count: int(32);
                         GetDeviceCount(count);
-                        writeln("cubSortKeysCallback launching cubSortKeysMergeOnGPU on dev ptr ", e.c_ptrToLocalData(lo), " with a range of ", lD.low+lo, "..", lD.low+hi, " (Size: ", N, "), ", here, " GPU", deviceId, " of ", count, " @", here);
+                        writeln(here, " GPU", deviceId, " of ", count, " cubSortKeysCallback launching cubSortKeysMergeOnGPU on dev ptr ", e.c_ptrToLocalData(lo), " with a range of ", lD.low+lo, "..", lD.low+hi, " (Size: ", N, ")");
                         try! stdout.flush();
                     }
                     cubSortKeysMergeOnGPU(t, e.c_ptrToLocalData(lo), N, deviceBuffers);
@@ -420,7 +420,7 @@ use IO;
                         GetDevice(deviceId);
                         var count: int(32);
                         GetDeviceCount(count);
-                        writeln("copyBackCallback launching copyDeviceBufferToHost on dest.localSlice with a range of ", lD.low+lo, "..", lD.low+hi, " (Size: ", N, "), ", here, " GPU", deviceId, " of ", count, " @", here);
+                        writeln(here, " GPU", deviceId, " of ", count, " copyBackCallback launching copyDeviceBufferToHost on dest.localSlice with a range of ", lD.low+lo, "..", lD.low+hi, " (Size: ", N, ")");
                         try! stdout.flush();
                     }
                     copyDeviceBufferToHost(t, deviceBuffers, dest.localSlice(lD.low+lo .. lD.low+hi), N);
