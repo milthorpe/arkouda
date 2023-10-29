@@ -62,7 +62,7 @@ module HistogramMsg
           else {
               hgmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
                                                             "%? > %?".doFormat(bins,mBound));
-              if (nGPUs > 0) {
+              if (e.GPU) {
                   var hist = cubHistogram(e, aMin, aMax, bins, binWidth);
                   st.addEntry(rname, createSymEntry(hist));
               } else {

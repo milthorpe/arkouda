@@ -203,7 +203,7 @@ module MultiTypeSymEntry
         type etype;
 
         /* Whether the array is allocated in GPU unified memory */
-        param GPU: bool;
+        param GPU:bool = false;
 
         /*
         'a' is the distributed array whose value and type are defined by
@@ -222,7 +222,7 @@ module MultiTypeSymEntry
         :arg a: array
         :type a: [] ?etype
         */
-        proc init(in a: [?D] ?etype, max_bits=-1, param GPU:bool) {
+        proc init(in a: [?D] ?etype, max_bits=-1, param GPU:bool=false) {
             super.init(etype, D.size);
             this.entryType = SymbolEntryType.PrimitiveTypedArraySymEntry;
             assignableTypes.add(this.entryType);
@@ -299,9 +299,15 @@ module MultiTypeSymEntry
       return new shared SymEntry(a, GPU=GPU);
     }
 
-    inline proc createSymEntry(in a: [?D] ?etype, max_bits=-1, param GPU:bool = false) throws {
-      var A = makeDistArray(a, GPU);
-      return new shared SymEntry(A, max_bits=max_bits, GPU);
+    inline proc createSymEntry(in a: [?D] ?etype, max_bits=-1, param GPU:bool = false) throws
+      where MyDmap != Dmap.defaultRectangular && a.isDefaultRectangular() {
+        var A = makeDistArray(a, GPU);
+        return new shared SymEntry(A, max_bits=max_bits, GPU);
+    }
+
+    inline proc createSymEntry(in a: [?D] ?etype, max_bits=-1) throws {
+      var A = makeDistArray(a);
+      return new shared SymEntry(A, max_bits=max_bits, false);
     }
 
     /*

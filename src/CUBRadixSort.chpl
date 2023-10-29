@@ -61,7 +61,10 @@ use IO;
             return createDeviceBuffers_float(numElements, devices, devices.size: int(32));
         } else if t == real(64) {
             return createDeviceBuffers_double(numElements, devices, devices.size: int(32));
-        }
+        } else {
+	    // TODO Josh handle other types
+            return nil;
+	}
     }
 
     private proc copyDeviceBufferToHost(type t, deviceBuffers: c_ptr(void), hostArray: [] t, N: c_size_t) {
@@ -469,7 +472,7 @@ use IO;
     /* Radix Sort Least Significant Digit
        radix sort a block distributed array
        returning a permutation vector as a block distributed array */
-    proc cubRadixSortLSD_ranks(e: SymEntry(?)) {
+    /*proc cubRadixSortLSD_ranks(e: SymEntry(?)) {
         ref a = e.a;
         var aD = a.domain;
         type t = e.etype;
@@ -477,7 +480,7 @@ use IO;
         var ranksIn: [aD] int = [rank in aD] rank;
         var aOut: [aD] t;
         var ranksOut: [aD] int;
-        var ranksEntry = new shared SymEntry(ranksOut);
+        var ranksEntry = createSymEntry(ranksOut, false);
         ranksEntry.createDeviceCache();
 
         // TODO: proper lambda functions break Chapel compiler
@@ -520,5 +523,5 @@ use IO;
             ranks = [(_, rank) in krOut] rank;
             return new shared SymEntry(ranks);
         }
-    }
+    }*/
 }
