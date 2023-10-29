@@ -19,7 +19,7 @@ module CUBHistogram {
     extern proc nextafterf(from: real(32), to: real(32)): real(32);
     extern proc nextafter(from: real(64), to: real(64)): real(64);
 
-    private proc cubHistogram(type t, devSamples: c_ptr(void), histogram: [] int, lower_bound: t, upper_bound: t, N: int, deviceId: int(32)) {
+    private proc cubHistogram(type t, devSamples: c_ptr(void), ref histogram: [] int, lower_bound: t, upper_bound: t, N: int, deviceId: int(32)) {
         var num_levels = histogram.size + 1;
         var devHistogram = new GPUArray(histogram);
 
@@ -48,9 +48,40 @@ module CUBHistogram {
     }
 
     // TODO update HistogramMsg to call the SymEntry version of this proc
-    proc cubHistogram(samples: [?aD] ?t, sampleMin: t, sampleMax: t, bins: int, binWidth: real) {
-        var samplesEntry = new SymEntry(samples);
-        return cubHistogram(samplesEntry, sampleMin, sampleMax, bins, binWidth);
+    proc cubHistogramGPUArray(ref samples: [?aD] ?t, sampleMin: t, sampleMax: t, bins: int, binWidth: real) {
+        var hist: [0..#bins] int;
+        coforall loc in samples.targetLocales() with (+ reduce hist) do on loc {
+            // each device computes its histogram in a separate array
+            var deviceHistograms: [0..#nGPUs][0..#bins] int;
+
+            // TODO: proper lambda functions break Chapel compiler
+            record Lambda {
+                proc this(lo: int, hi: int, N: int) {
+                    var devSamples = new GPUArray(samples.localSlice(lo..hi));
+                    devSamples.toDevice();
+                    var deviceId: int(32);
+                    GetDevice(deviceId);
+                    cubHistogram(t, devSamples.dPtr(), deviceHistograms[deviceId], sampleMin, sampleMax, N, deviceId);
+                }
+            }
+            // get local domain's indices
+            var lD = samples.localSubdomain();
+            // calc task's indices from local domain's indices
+            var tD = {lD.low..lD.high};
+            var cubHistogramCallback = new Lambda();
+            forall i in GPU(tD, cubHistogramCallback) {
+                writeln("Should not reach this point!");
+                exit(1);
+            }
+
+            if histogramReduceOnGPU || disableMultiGPUs || nGPUs == 1 {
+                // no need to merge devices
+                hist += deviceHistograms[0];
+            } else {
+                hist += (+ reduce deviceHistograms);
+            }
+        }
+        return hist;
     }
 
     proc cubHistogram(ref samples: SymEntry(?), sampleMin: ?etype, sampleMax: etype, bins: int, binWidth: real) where samples.GPU == true {

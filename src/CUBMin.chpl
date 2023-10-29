@@ -77,6 +77,38 @@ module CUBMin {
         return min;
     }
 
+    proc cubMinGPUArray(a: [?D] ?etype){
+        var min: etype = 0;
+        coforall loc in a.targetLocales() with (+ reduce min) do on loc {
+            var deviceMin: [0..#nGPUs] etype;
+
+            // TODO: proper lambda functions break Chapel compiler
+            record Lambda {
+                proc this(lo: int, hi: int, N: int) {
+                    var devA = new GPUArray(a.localSlice(lo..hi));
+                    devA.toDevice();
+                    var deviceId: int(32);
+                    GetDevice(deviceId);
+                    deviceMin[deviceId] = cubMinDevice(etype, devA.dPtr(), N, deviceId);
+                }
+            }
+
+            var cubMinCallback = new Lambda();
+            forall i in GPU(a.localSubdomain(), cubMinCallback) {
+                writeln("Should not reach this point!");
+                exit(1);
+            }
+
+            if minReduceOnGPU || disableMultiGPUs || nGPUs == 1 {
+                // no need to merge
+                min += deviceMin[0];
+            } else {
+                min += (+ reduce deviceMin);
+            }
+        }
+        return min;
+    }
+
     proc cubMinUnified(arr: GPUUnifiedArray(?)) {
         var deviceMin: [0..#nGPUs] arr.etype;
 

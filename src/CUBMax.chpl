@@ -77,6 +77,38 @@ module CUBMax {
         return max;
     }
 
+    proc cubMaxGPUArray(a: [?D] ?etype){
+        var max: etype = 0;
+        coforall loc in a.targetLocales() with (+ reduce max) do on loc {
+            var deviceMax: [0..#nGPUs] etype;
+
+            // TODO: proper lambda functions break Chapel compiler
+            record Lambda {
+                proc this(lo: int, hi: int, N: int) {
+                    var devA = new GPUArray(a.localSlice(lo..hi));
+                    devA.toDevice();
+                    var deviceId: int(32);
+                    GetDevice(deviceId);
+                    deviceMax[deviceId] = cubMaxDevice(etype, devA.dPtr(), N, deviceId);
+                }
+            }
+
+            var cubMaxCallback = new Lambda();
+            forall i in GPU(a.localSubdomain(), cubMaxCallback) {
+                writeln("Should not reach this point!");
+                exit(1);
+            }
+
+            if maxReduceOnGPU || disableMultiGPUs || nGPUs == 1 {
+                // no need to merge
+                max += deviceMax[0];
+            } else {
+                max += (+ reduce deviceMax);
+            }
+        }
+        return max;
+    }
+
     proc cubMaxUnified(arr: GPUUnifiedArray(?)) {
         var deviceMax: [0..#nGPUs] arr.etype;
 
