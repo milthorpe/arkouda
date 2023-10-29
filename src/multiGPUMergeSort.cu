@@ -1,6 +1,9 @@
 #include "tanasic_sort.cuh"
+#include <thrust/system/hip/execution_policy.h>
 #include <hipcub/hipcub.hpp>
 #include <stdio.h>
+
+#define DebugExit(x) if (HipcubDebug(x)) exit(1);
 
 /** Create temporary devices buffers to be used in merge and swap steps */
 template <typename T>
@@ -13,11 +16,12 @@ DeviceBuffers<T>* createDeviceBuffers(const size_t num_elements, const int *gpus
 
   if (num_fillers > 0) {
     int lastDevice = gpus[nGPUs - 1];
-    thrust::fill(thrust::cuda::par(*device_buffers->GetDeviceAllocator(lastDevice))
+    CheckCudaError(hipSetDevice(lastDevice));
+    thrust::fill(thrust::hip::par(*device_buffers->GetDeviceAllocator(lastDevice))
                       .on(*device_buffers->GetPrimaryStream(lastDevice)),
                   device_buffers->AtPrimary(lastDevice)->end() - num_fillers, device_buffers->AtPrimary(lastDevice)->end(),
                   std::numeric_limits<T>::max());
-    CheckCudaError(cudaStreamSynchronize(*device_buffers->GetPrimaryStream(lastDevice)));
+    CheckCudaError(hipStreamSynchronize(*device_buffers->GetPrimaryStream(lastDevice)));
   }
   return device_buffers;
 }
@@ -31,23 +35,26 @@ void destroyDeviceBuffers(void *device_buffers_ptr) {
 template <typename T>
 void copyDeviceBufferToHost(void *device_buffers_ptr, T *hostArray, const size_t N) {
   int deviceId;
-  CheckCudaError(cudaGetDevice(&deviceId));
+  CheckCudaError(hipGetDevice(&deviceId));
   DeviceBuffers<T>* device_buffers = (DeviceBuffers<T>*)device_buffers_ptr;
-  //CheckCudaError(cudaStreamSynchronize(*device_buffers->GetPrimaryStream(deviceId)));
-  CheckCudaError(cudaMemcpy(hostArray,
+  //CheckCudaError(hipStreamSynchronize(*device_buffers->GetPrimaryStream(deviceId)));
+  CheckCudaError(hipMemcpyAsync(hostArray,
                             thrust::raw_pointer_cast(device_buffers->AtPrimary(deviceId)->data()),
                             sizeof(T) * N,
-                            cudaMemcpyDeviceToHost));
+                            hipMemcpyDeviceToHost,
+			    *device_buffers->GetPrimaryStream(deviceId)));
+  CheckCudaError(hipStreamSynchronize(*device_buffers->GetPrimaryStream(deviceId)));
 }
 
 template <typename T>
 size_t findPivot(void *device_buffers_ptr, const int *gpus, const int nGPUs) {
   DeviceBuffers<T>* device_buffers = (DeviceBuffers<T>*)device_buffers_ptr;
   std::vector<int> devices(gpus, gpus+nGPUs);
-  int32_t pivot = FindPivot<T>(device_buffers, devices);
   //printf("findPivot for GPUs: ");
   //for (int i=0; i<nGPUs; i++) printf("%d ", devices[i]);
-  //printf(" = %d\n", pivot);
+  //printf("\n");
+  int32_t pivot = FindPivot<T>(device_buffers, devices);
+  //printf("pivot = %d\n", pivot);
   return pivot;
 }
 
@@ -80,47 +87,47 @@ void mergeLocalPartitions(void *device_buffers_ptr, size_t pivot,
     const int device = devices[i];
     if (device == deviceToMerge) {
       const size_t offset = i >= devices.size() / 2 ? pivot : partition_size - pivot;
-      CheckCudaError(cudaSetDevice(device));
+      CheckCudaError(hipSetDevice(device));
       //printf("merging local partitions on %d partition_size %ld pivot %ld offset %ld\n", device, partition_size, pivot, offset);
 
       thrust::merge(
-          thrust::cuda::par(*device_buffers->GetDeviceAllocator(device)).on(*device_buffers->GetPrimaryStream(device)),
+          thrust::system::hip::par(*device_buffers->GetDeviceAllocator(device)).on(*device_buffers->GetPrimaryStream(device)),
           device_buffers->AtPrimary(device)->begin(), device_buffers->AtPrimary(device)->begin() + offset,
           device_buffers->AtPrimary(device)->begin() + offset, device_buffers->AtPrimary(device)->end(),
           device_buffers->AtSecondary(device)->begin());
 
       device_buffers->Flip(device);
 
-      CheckCudaError(cudaStreamSynchronize(*device_buffers->GetPrimaryStream(device)));
+      CheckCudaError(hipStreamSynchronize(*device_buffers->GetPrimaryStream(device)));
     }
   }
 }
 
-using namespace cub;
+using namespace hipcub;
 
 template <typename T>
-void cubSortKeysOnStream(const T *d_keys_in, T *d_keys_out, size_t N, cudaStream_t stream) {
+void cubSortKeysOnStream(const T *d_keys_in, T *d_keys_out, size_t N, hipStream_t stream) {
   size_t temp_storage_bytes = 0;
   void *d_temp_storage = NULL;
   hipcub::CachingDeviceAllocator g_allocator;  // Caching allocator for device memory
 
   // run SortKeys once to determine the necessary size of d_temp_storage
-  CubDebugExit(hipcub::DeviceRadixSort::SortKeys(d_temp_storage, temp_storage_bytes, d_keys_in, d_keys_out, N, 0, sizeof(T)*8, stream));
-  CubDebugExit(g_allocator.DeviceAllocate(&d_temp_storage, temp_storage_bytes, stream));
+  DebugExit(hipcub::DeviceRadixSort::SortKeys(d_temp_storage, temp_storage_bytes, d_keys_in, d_keys_out, N, 0, sizeof(T)*8, stream));
+  DebugExit(g_allocator.DeviceAllocate(&d_temp_storage, temp_storage_bytes, stream));
 
-  CubDebugExit(hipcub::DeviceRadixSort::SortKeys(d_temp_storage, temp_storage_bytes, d_keys_in, d_keys_out, N, 0, sizeof(T)*8, stream));
-  if (d_temp_storage) CubDebugExit(g_allocator.DeviceFree(d_temp_storage));
+  DebugExit(hipcub::DeviceRadixSort::SortKeys(d_temp_storage, temp_storage_bytes, d_keys_in, d_keys_out, N, 0, sizeof(T)*8, stream));
+  if (d_temp_storage) DebugExit(g_allocator.DeviceFree(d_temp_storage));
 }
 
 template <typename T>
 void sortToDeviceBuffer(const T *d_keys_in, void *device_buffers_ptr, size_t N) {
   int deviceId;
-  CheckCudaError(cudaGetDevice(&deviceId));
+  CheckCudaError(hipGetDevice(&deviceId));
   DeviceBuffers<T>* device_buffers = (DeviceBuffers<T>*)device_buffers_ptr;
-  cudaStream_t primaryStream = *device_buffers->GetPrimaryStream(deviceId);
+  hipStream_t primaryStream = *device_buffers->GetPrimaryStream(deviceId);
   T *d_keys_out = (T*)(device_buffers->AtPrimary(deviceId)->data().get());
   cubSortKeysOnStream(d_keys_in, d_keys_out, N, primaryStream);
-  CheckCudaError(cudaStreamSynchronize(primaryStream));
+  CheckCudaError(hipStreamSynchronize(primaryStream));
   device_buffers->GetDeviceAllocator(deviceId)->SetOffset(N * sizeof(T));
 }
 
@@ -128,11 +135,11 @@ extern "C" {
 /** Enable peer access to the memory of all other devices */
 void enablePeerAccess(const int *devices, const int nGPUs) {
   int deviceId;
-  CheckCudaError(cudaGetDevice(&deviceId));
+  CheckCudaError(hipGetDevice(&deviceId));
 
   for (size_t i = 0; i < nGPUs; ++i) {
     if (devices[i] != deviceId) {
-      CheckCudaError(cudaDeviceEnablePeerAccess(devices[i], 0));
+      CheckCudaError(hipDeviceEnablePeerAccess(devices[i], 0));
     }
   }
 }
@@ -247,4 +254,9 @@ void sortToDeviceBuffer_float(const float *d_keys_in, void *device_buffers_ptr, 
 void sortToDeviceBuffer_double(const double *d_keys_in, void *device_buffers_ptr, size_t N) {
   sortToDeviceBuffer<double>(d_keys_in, device_buffers_ptr, N);
 }
+
+void merge_double(const double *first1, const double *last1, const double *first2, const double *last2, double *result) {
+    thrust::merge(first1, last1, first2, last2, result);
+}
+
 }
