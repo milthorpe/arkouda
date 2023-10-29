@@ -333,34 +333,27 @@ ifeq ($(shell expr $(CHPL_MINOR) \= 30),1)
 	ARKOUDA_COMPAT_MODULES += -M $(ARKOUDA_SOURCE_DIR)/compat/e-130
 endif
 
-MULTIGPUSORT_DIR=/noback/35e/multi-gpu-sorting
+MULTIGPUSORT_DIR?=$(HOME)/multi-gpu-sorting # this can be overridden on the command line
 CUDACXX_FLAGS+=-fopenmp -I$(MULTIGPUSORT_DIR)/hipsrc
 
-
-CUDA_OBJECTS=src/cubMin.cu.o src/cubMax.cu.o src/cubSum.cu.o src/cubSort.cu.o src/cubHistogram.cu.o src/ncclCollectives.cu.o
-HIP_OBJECTS+=src/multiGPUMergeSort.hip.o
+CUDA_OBJECTS=src/cubMin.cu.o src/cubMax.cu.o src/cubSum.cu.o src/cubSort.cu.o src/cubHistogram.cu.o src/ncclCollectives.cu.o src/multiGPUMergeSort.cu.o
 CUDA_SOURCES=$(CUDA_OBJECTS:.cu.o=.cu)
 CUDA_HEADERS=$(CUDA_SOURCES:.cu=.h)
-HIP_SOURCES=$(HIP_OBJECTS:.hip.o=.hip.cpp)
-HIP_HEADERS+=$(HIP_SOURCES:.hip.cpp=.h)
 
 %.cu.o:	%.cu
-	hipcc -g -std=c++14 -fopenmp -I$(MULTIGPUSORT_DIR)/hipsrc -I$(HIP_ROOT_DIR)/include -c $< -o $@
-
-%.hip.o: %.hip.cpp
 	hipcc -g -std=c++14 -fopenmp -I$(MULTIGPUSORT_DIR)/hipsrc -I$(HIP_ROOT_DIR)/include -c $< -o $@
 
 ifndef CHPL_GPU_HOME
 $(error CHPL_GPU_HOME not defined)
 endif
 
-GPU_FLAGS=-M $(CHPL_GPU_HOME)/modules $(CHPL_GPU_HOME)/include/GPUAPI.h $(CUDA_HEADERS) $(HIP_HEADERS) -I$(ZMQ_DIR)/include -I$(HDF5_DIR)/include -I$(ARROW_DIR)/include -L$(CHPL_GPU_HOME)/lib -L$(HIP_ROOT_DIR)/lib -lGPUAPIHIP_static -lamdhip64 -L$(RCCL_PATH)/lib -lrccl -L$(ROCM_PATH)/llvm/lib -lomp 
+GPU_FLAGS=-M $(CHPL_GPU_HOME)/modules $(CHPL_GPU_HOME)/include/GPUAPI.h $(CUDA_HEADERS) -I$(ZMQ_DIR)/include -I$(HDF5_DIR)/include -I$(ARROW_DIR)/include -L$(CHPL_GPU_HOME)/lib -L$(HIP_ROOT_DIR)/lib -lGPUAPIHIP_static -lamdhip64 -L$(RCCL_PATH)/lib -lrccl -L$(ROCM_PATH)/llvm/lib -lomp 
 
 MODULE_GENERATION_SCRIPT=$(ARKOUDA_SOURCE_DIR)/serverModuleGen.py
 # This is the main compilation statement section
-$(ARKOUDA_MAIN_MODULE): check-deps $(ARROW_O) $(ARKOUDA_SOURCES) $(CUDA_HEADERS) $(CUDA_OBJECTS) $(HIP_HEADERS) $(HIP_OBJECTS) $(ARKOUDA_MAKEFILES)
+$(ARKOUDA_MAIN_MODULE): check-deps $(ARROW_O) $(ARKOUDA_SOURCES) $(CUDA_HEADERS) $(CUDA_OBJECTS) $(ARKOUDA_MAKEFILES)
 	$(eval MOD_GEN_OUT=$(shell python3 $(MODULE_GENERATION_SCRIPT) $(ARKOUDA_CONFIG_FILE) $(ARKOUDA_SOURCE_DIR)))
-	$(CHPL) $(CHPL_DEBUG_FLAGS) -g --detailed-errors --ldflags -no-pie  $(PRINT_PASSES_FLAGS) $(REGEX_MAX_CAPTURES_FLAG) $(OPTIONAL_SERVER_FLAGS) $(CHPL_FLAGS_WITH_VERSION) $(CHPL_COMPAT_FLAGS) $(ARKOUDA_MAIN_SOURCE) $(CUDA_HEADERS) $(CUDA_OBJECTS) $(HIP_HEADERS) $(HIP_OBJECTS) $(ARKOUDA_COMPAT_MODULES) $(ARKOUDA_SERVER_USER_MODULES) $(GPU_FLAGS) $(MOD_GEN_OUT) -o $@
+	$(CHPL) $(CHPL_DEBUG_FLAGS) -g --detailed-errors --ldflags -no-pie  $(PRINT_PASSES_FLAGS) $(REGEX_MAX_CAPTURES_FLAG) $(OPTIONAL_SERVER_FLAGS) $(CHPL_FLAGS_WITH_VERSION) $(CHPL_COMPAT_FLAGS) $(ARKOUDA_MAIN_SOURCE) $(CUDA_HEADERS) $(CUDA_OBJECTS) $(ARKOUDA_COMPAT_MODULES) $(ARKOUDA_SERVER_USER_MODULES) $(GPU_FLAGS) $(MOD_GEN_OUT) -o $@
 
 CLEAN_TARGETS += arkouda-clean
 .PHONY: arkouda-clean
