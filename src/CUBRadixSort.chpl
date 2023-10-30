@@ -229,7 +229,7 @@ use IO;
 
     // TODO update SortMsg to call the SymEntry version of this proc
     proc cubRadixSortLSD_keys(a: [?aD] ?t, mergeOnGPU: bool = false) {
-        var aEntry = new SymEntry(a, GPU=true);
+        var aEntry = new SymEntry(a);
         if mergeOnGPU then
             return cubRadixSortLSDKeysMergeOnGPU(aEntry);
         else
@@ -238,7 +238,7 @@ use IO;
 
     // TODO update ArgSortMsg to call the SymEntry version of this proc
     proc cubRadixSortLSD_ranks(a: [?aD] ?t) throws {
-        var aEntry = new SymEntry(a, GPU=true);
+        var aEntry = new SymEntry(a);
         var ranksEntry = cubRadixSortLSD_ranks(aEntry);
         var ranks = ranksEntry.a;
         return ranks;
@@ -249,7 +249,6 @@ use IO;
        returning a sorted array, without updating the input
      */
     proc cubRadixSortLSDKeysMergeOnHost(e: SymEntry(?)) {
-        if !e.GPU then throw new owned Error("cubRadixSortLSDKeysMergeOnHost called on non-GPU SymEntry");
         ref a = e.a;
         var aD = a.domain;
         type t = e.etype;
@@ -326,7 +325,7 @@ use IO;
         return dest;
     }
 
-    proc cubRadixSortLSDKeysMergeOnGPU(e: SymEntry(?)) where e.GPU == true {
+    proc cubRadixSortLSDKeysMergeOnGPU(e: SymEntry(?)) {
         ref a = e.a;
         var aD = a.domain;
         type t = e.etype;
@@ -471,7 +470,7 @@ use IO;
     /* Radix Sort Least Significant Digit
        radix sort a block distributed array
        returning a permutation vector as a block distributed array */
-    proc cubRadixSortLSD_ranks(e: SymEntry(?)) throws where e.GPU == true {
+    proc cubRadixSortLSD_ranks(e: SymEntry(?)) throws {
         ref a = e.a;
         var aD = a.domain;
         type t = e.etype;

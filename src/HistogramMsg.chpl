@@ -26,6 +26,8 @@ module HistogramMsg
 
     /* histogram takes a pdarray and returns a pdarray with the histogram in it */
     proc histogramMsg(cmd: string, msgArgs: borrowed MessageArgs, st: borrowed SymTab): MsgTuple throws {
+        writeln("in histogramMsg");
+        try! stdout.flush();
         param pn = Reflection.getRoutineName();
         var repMsg: string; // response message
         const bins = msgArgs.get("bins").getIntValue();
@@ -47,42 +49,10 @@ module HistogramMsg
           hgmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
                                                            "binWidth %r".doFormat(binWidth));
 
-          if (bins <= sBound) {
-              hgmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
-                                                           "%? <= %?".doFormat(bins,sBound));
-              if (e.GPU) {
-                  hgmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(), "running small histogram on GPU");
-                  var hist = cubHistogram(e, aMin, aMax, bins, binWidth);
-                  st.addEntry(rname, createSymEntry(hist));
-              } else {
-                var hist = histogramReduceIntent(e.a, aMin, aMax, bins, binWidth);
-                st.addEntry(rname, createSymEntry(hist));
-              }
-          }
-          else if (bins <= mBound) {
-              hgmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
-                                                           "%? <= %?".doFormat(bins,mBound));
-              if (e.GPU) {
-                  hgmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(), "running medium histogram on GPU");
-                  var hist = cubHistogram(e, aMin, aMax, bins, binWidth);
-                  st.addEntry(rname, createSymEntry(hist));
-              } else {
-                var hist = histogramLocalAtomic(e.a, aMin, aMax, bins, binWidth);
-                st.addEntry(rname, createSymEntry(hist));
-              }
-          }
-          else {
-              hgmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
-                                                            "%? > %?".doFormat(bins,mBound));
-              if (e.GPU) {
-                  hgmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(), "running large histogram on GPU");
-                  var hist = cubHistogram(e, aMin, aMax, bins, binWidth);
-                  st.addEntry(rname, createSymEntry(hist));
-              } else {
-                var hist = histogramGlobalAtomic(e.a, aMin, aMax, bins, binWidth);
-                  st.addEntry(rname, createSymEntry(hist));
-              }
-          }
+
+          hgmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(), "running histogram on GPU");
+          var hist = cubHistogram(e, aMin, aMax, bins, binWidth);
+          st.addEntry(rname, createSymEntry(hist));
         }
 
         select (gEnt.dtype) {

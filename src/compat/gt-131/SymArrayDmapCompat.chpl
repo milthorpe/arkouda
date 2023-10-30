@@ -16,8 +16,7 @@ module SymArrayDmapCompat
     */
     config param MyDmap:Dmap = defaultDmap;
 
-    public use BlockDist;
-    use GPUUnifiedDist;
+    public use GPUUnifiedDist;
 
     /* 
     Makes a domain distributed according to :param:`MyDmap`.
@@ -25,7 +24,7 @@ module SymArrayDmapCompat
     :arg size: size of domain
     :type size: int
     */
-    proc makeDistDom(size:int, param GPU:bool = false) where GPU == true {
+    proc makeDistDom(size:int) {
         select MyDmap
         {
             when Dmap.defaultRectangular {
@@ -37,25 +36,6 @@ module SymArrayDmapCompat
                 }
                 // fix the annoyance about boundingBox being enpty
                 else {return {0..#0} dmapped gpuUnifiedDist(boundingBox={0..0});}
-            }
-            otherwise {
-                halt("Unsupported distribution " + MyDmap:string);
-            }
-        }
-    }
-
-    proc makeDistDom(size:int, param GPU:bool = false) {
-        select MyDmap
-        {
-            when Dmap.defaultRectangular {
-                return {0..#size};
-            }
-            when Dmap.blockDist {
-                if size > 0 {
-                    return {0..#size} dmapped blockDist(boundingBox={0..#size});
-                }
-                // fix the annoyance about boundingBox being enpty
-                else {return {0..#0} dmapped blockDist(boundingBox={0..0});}
             }
             otherwise {
                 halt("Unsupported distribution " + MyDmap:string);
@@ -74,14 +54,14 @@ module SymArrayDmapCompat
 
     :returns: [] ?etype
     */
-    proc makeDistArray(size:int, type etype, param GPU:bool = false) throws {
-      var dom = makeDistDom(size, GPU);
+    proc makeDistArray(size:int, type etype) throws {
+      var dom = makeDistDom(size);
       return dom.tryCreateArray(etype);
     }
 
-    proc makeDistArray(in a: [?D] ?etype, param GPU:bool = false) throws
+    proc makeDistArray(in a: [?D] ?etype) throws
       where MyDmap != Dmap.defaultRectangular && a.isDefaultRectangular() {
-        var res = makeDistArray(D.size, etype, GPU);
+        var res = makeDistArray(D.size, etype);
         res = a;
         return res;
     }
@@ -109,8 +89,8 @@ module SymArrayDmapCompat
 
     :returns: type
     */
-    proc makeDistDomType(size: int, GPU:bool = false) type {
-        return makeDistDom(size, GPU).type;
+    proc makeDistDomType(size: int) type {
+        return makeDistDom(size).type;
     }
 
 }
