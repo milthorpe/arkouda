@@ -198,23 +198,22 @@ use IO;
         }
     }
 
-    private proc cubSortPairs(type t, devInPtr: c_ptr(void), devAOut: GPUArray, devRanksIn: GPUArray, devRanksOut: GPUArray, N: int) {
+    private proc cubSortPairs(type t, devInPtr: c_ptr(void), devAOut: GPUArray, devRanksIn: GPUArray, devRanksOutPtr: c_ptr(void), N: int) {
         devRanksIn.toDevice();
         if t == int(32) {
-            cubSortPairs_int32(devInPtr, devAOut.dPtr(), devRanksIn.dPtr(), devRanksOut.dPtr(), N: c_size_t);
+            cubSortPairs_int32(devInPtr, devAOut.dPtr(), devRanksIn.dPtr(), devRanksOutPtr, N: c_size_t);
         } else if t == int(64) {
-            cubSortPairs_int64(devInPtr, devAOut.dPtr(), devRanksIn.dPtr(), devRanksOut.dPtr(), N: c_size_t);
+            cubSortPairs_int64(devInPtr, devAOut.dPtr(), devRanksIn.dPtr(), devRanksOutPtr, N: c_size_t);
         } else if t == real(32) {
-            cubSortPairs_float(devInPtr, devAOut.dPtr(), devRanksIn.dPtr(), devRanksOut.dPtr(), N: c_size_t);
+            cubSortPairs_float(devInPtr, devAOut.dPtr(), devRanksIn.dPtr(), devRanksOutPtr, N: c_size_t);
         } else if t == real(64) {
-            cubSortPairs_double(devInPtr, devAOut.dPtr(), devRanksIn.dPtr(), devRanksOut.dPtr(), N: c_size_t);
+            cubSortPairs_double(devInPtr, devAOut.dPtr(), devRanksIn.dPtr(), devRanksOutPtr, N: c_size_t);
         }
         DeviceSynchronize();
         
         if !disableMultiGPUs || nGPUs > 1 {
             devAOut.fromDevice();
         }
-        devRanksOut.fromDevice();
     }
 
     /** On each locale, setup GPU peer access between all devices */
@@ -238,7 +237,7 @@ use IO;
     }
 
     // TODO update ArgSortMsg to call the SymEntry version of this proc
-    proc cubRadixSortLSD_ranks(a: [?aD] ?t) {
+    proc cubRadixSortLSD_ranks(a: [?aD] ?t) throws {
         var aEntry = new SymEntry(a, GPU=true);
         var ranksEntry = cubRadixSortLSD_ranks(aEntry);
         var ranks = ranksEntry.a;
@@ -472,16 +471,15 @@ use IO;
     /* Radix Sort Least Significant Digit
        radix sort a block distributed array
        returning a permutation vector as a block distributed array */
-    /*proc cubRadixSortLSD_ranks(e: SymEntry(?)) {
+    proc cubRadixSortLSD_ranks(e: SymEntry(?)) throws where e.GPU == true {
         ref a = e.a;
         var aD = a.domain;
         type t = e.etype;
 
         var ranksIn: [aD] int = [rank in aD] rank;
         var aOut: [aD] t;
-        var ranksOut: [aD] int;
-        var ranksEntry = createSymEntry(ranksOut, false);
-        ranksEntry.createDeviceCache();
+        var ranksOut: [aD] int = noinit;
+        var ranksEntry = createSymEntry(ranksOut, true);
 
         // TODO: proper lambda functions break Chapel compiler
         record Lambda {
@@ -494,11 +492,10 @@ use IO;
                     GetDeviceCount(count);
                     writeln("In cubSortPairsCallback, launching the CUDA kernel with a range of ", lo, "..", hi, " (Size: ", N, "), GPU", deviceId, " of ", count, " @", here);
                 }
-                var devRanksOut = ranksEntry.getDeviceArray(deviceId);
                 // these are temporary arrays that do not need to be cached on SymEntry
                 var devAOut = new GPUArray(aOut.localSlice(lo .. hi));
                 var devRanksIn = new GPUArray(ranksIn.localSlice(lo .. hi));
-                cubSortPairs(t, e.c_ptrToLocalData(lo), devAOut, devRanksIn, devRanksOut, N);
+                cubSortPairs(t, e.c_ptrToLocalData(lo), devAOut, devRanksIn, ranksEntry.c_ptrToLocalData(lo), N);
             }
         }
         // get local domain's indices
@@ -520,8 +517,8 @@ use IO;
             var kr: [aD] (t,int) = [(key,rank) in zip(aOut,ranksOut)] (key,rank);
             var krOut: [aD] (t,int);
             mergeSortedRanks(krOut, kr, nGPUs);
-            ranks = [(_, rank) in krOut] rank;
-            return new shared SymEntry(ranks);
+            ranksEntry.a = [(_, rank) in krOut] rank;
+            return ranksEntry;
         }
-    }*/
+    }
 }
