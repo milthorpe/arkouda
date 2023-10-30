@@ -50,19 +50,32 @@ module HistogramMsg
           if (bins <= sBound) {
               hgmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
                                                            "%? <= %?".doFormat(bins,sBound));
-              var hist = histogramReduceIntent(e.a, aMin, aMax, bins, binWidth);
-              st.addEntry(rname, createSymEntry(hist));
+              if (e.GPU) {
+                  hgmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(), "running small histogram on GPU");
+                  var hist = cubHistogram(e, aMin, aMax, bins, binWidth);
+                  st.addEntry(rname, createSymEntry(hist));
+              } else {
+                var hist = histogramReduceIntent(e.a, aMin, aMax, bins, binWidth);
+                st.addEntry(rname, createSymEntry(hist));
+              }
           }
           else if (bins <= mBound) {
               hgmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
                                                            "%? <= %?".doFormat(bins,mBound));
-              var hist = histogramLocalAtomic(e.a, aMin, aMax, bins, binWidth);
-              st.addEntry(rname, createSymEntry(hist));
+              if (e.GPU) {
+                  hgmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(), "running medium histogram on GPU");
+                  var hist = cubHistogram(e, aMin, aMax, bins, binWidth);
+                  st.addEntry(rname, createSymEntry(hist));
+              } else {
+                var hist = histogramLocalAtomic(e.a, aMin, aMax, bins, binWidth);
+                st.addEntry(rname, createSymEntry(hist));
+              }
           }
           else {
               hgmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(),
                                                             "%? > %?".doFormat(bins,mBound));
               if (e.GPU) {
+                  hgmLogger.debug(getModuleName(),getRoutineName(),getLineNumber(), "running large histogram on GPU");
                   var hist = cubHistogram(e, aMin, aMax, bins, binWidth);
                   st.addEntry(rname, createSymEntry(hist));
               } else {
