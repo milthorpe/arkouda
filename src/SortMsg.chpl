@@ -70,6 +70,7 @@ module SortMsg
           }
           when SortingAlgorithm.RadixSortLSD {
             if (nGPUs > 0) {
+              sortLogger.debug(getModuleName(),getRoutineName(),getLineNumber(), "sort on GPU");
               return cubRadixSortLSD_keys(a);
             } else {
               return radixSortLSD_keys(a);
