@@ -322,8 +322,12 @@ module ArgSortMsg
           iv = [(a, i) in AI] i;
         }
         when SortingAlgorithm.RadixSortLSD {
-          asLogger.debug(getModuleName(),getRoutineName(),getLineNumber(), "argsort on GPU");
-          iv = cubRadixSortLSD_ranks(A);
+          if (nGPUs > 0) {
+            asLogger.debug(getModuleName(),getRoutineName(),getLineNumber(), "argsort on GPU");
+            iv = cubRadixSortLSD_ranks(A);
+          } else {
+            iv = radixSortLSD_ranks(A);
+          }
         }
         otherwise {
           throw getErrorWithContext(

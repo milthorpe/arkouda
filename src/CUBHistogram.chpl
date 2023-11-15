@@ -84,7 +84,7 @@ module CUBHistogram {
         return hist;
     }
 
-    proc cubHistogram(ref samples: SymEntry(?), sampleMin: ?etype, sampleMax: etype, bins: int, binWidth: real) {
+    proc cubHistogram(ref samples: SymEntry(?), sampleMin: ?etype, sampleMax: etype, bins: int, binWidth: real) where samples.GPU == true {
         var hist: [0..#bins] int;
         ref a = samples.a;
         coforall loc in a.targetLocales() with (+ reduce hist) do on loc {

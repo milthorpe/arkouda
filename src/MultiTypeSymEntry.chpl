@@ -8,6 +8,7 @@ module MultiTypeSymEntry
     use Logging;
     use AryUtil;
 
+    use GPUAPI;
     use CTypes;
 
     public use NumPyDType;
@@ -138,11 +139,10 @@ module MultiTypeSymEntry
         var size: int = 0; // answer to numpy size == num elts
         var ndim: int = 1; // answer to numpy ndim == 1-axis for now
         var shape: 1*int = (0,); // answer to numpy shape == 1*int tuple
-
         
         // not sure yet how to implement numpy data() function
 
-        proc init(type etype, len: int = 0) {
+        proc init(type etype, len: int = 0, param GPU:bool = false) {
             this.entryType = SymbolEntryType.TypedArraySymEntry;
             assignableTypes.add(this.entryType);
             this.dtype = whichDtype(etype);
@@ -202,11 +202,14 @@ module MultiTypeSymEntry
         */
         type etype;
 
+        /* Whether the array is allocated in GPU unified memory */
+        param GPU:bool = false;
+
         /*
         'a' is the distributed array whose value and type are defined by
         makeDist{Dom,Array}() to support varying distributions
         */
-        var a = makeDistArray(size, etype);
+        var a = makeDistArray(size, etype, GPU);
         /* Removed domain accessor, use `a.domain` instead */
         proc aD { compilerError("SymEntry.aD has been removed, use SymEntry.a.domain instead"); }
         
@@ -219,18 +222,21 @@ module MultiTypeSymEntry
         :arg a: array
         :type a: [] ?etype
         */
-        proc init(in a: [?D] ?etype, max_bits=-1) {
+        proc init(in a: [?D] ?etype, max_bits=-1, param GPU:bool=false) {
             super.init(etype, D.size);
             this.entryType = SymbolEntryType.PrimitiveTypedArraySymEntry;
             assignableTypes.add(this.entryType);
 
             this.etype = etype;
+            this.GPU = GPU;
             this.a = a;
             this.max_bits=max_bits;
         }
 
         proc prefetchLocalDataToDevice(lo: int, hi: int, deviceId: int(32)) {
-            PrefetchToDevice(c_ptrTo(a.localSlice(a.localSubdomain())), lo*c_sizeof(etype), (hi+1)*c_sizeof(etype), deviceId);
+            if GPU {
+                PrefetchToDevice(c_ptrTo(a.localSlice(a.localSubdomain())), lo*c_sizeof(etype), (hi+1)*c_sizeof(etype), deviceId);
+            }
         }
 
         proc c_ptrToLocalData(lo: int) {
@@ -288,20 +294,20 @@ module MultiTypeSymEntry
         }
     }
     
-    inline proc createSymEntry(len: int, type etype) throws {
-      var a = makeDistArray(len, etype);
-      return new shared SymEntry(a);
+    inline proc createSymEntry(len: int, type etype, param GPU:bool = false) throws {
+      var a = makeDistArray(len, etype, GPU);
+      return new shared SymEntry(a, GPU=GPU);
     }
 
-    inline proc createSymEntry(in a: [?D] ?etype, max_bits=-1) throws
+    inline proc createSymEntry(in a: [?D] ?etype, max_bits=-1, param GPU:bool = false) throws
       where MyDmap != Dmap.defaultRectangular && a.isDefaultRectangular() {
-        var A = makeDistArray(a);
-        return new shared SymEntry(A, max_bits=max_bits);
+        var A = makeDistArray(a, GPU);
+        return new shared SymEntry(A, max_bits=max_bits, GPU);
     }
 
     inline proc createSymEntry(in a: [?D] ?etype, max_bits=-1) throws {
       var A = makeDistArray(a);
-      return new shared SymEntry(A, max_bits=max_bits);
+      return new shared SymEntry(A, max_bits=max_bits, false);
     }
 
     /*
